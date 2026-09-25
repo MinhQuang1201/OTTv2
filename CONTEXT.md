@@ -1,6 +1,6 @@
 # OTTv2
 
-Cờ chiến thuật hai người trên bàn 9x9. Mỗi quân là Đấm, Lá hoặc Kéo; ăn theo oẳn tù tì, thắng bằng ô thắng hoặc tuyệt chủng một loại quân.
+Cờ chiến thuật hai người trên bàn 9x9. Mỗi quân là Đấm, Lá hoặc Kéo; ăn theo oẳn tù tì, thắng bằng ô thắng hoặc ăn hết quân đối phương.
 
 ## Language
 
@@ -17,7 +17,7 @@ Một ô trên bàn 9x9, tọa độ file a–i và rank 1–9.
 _Avoid_: tile, cell như khái niệm riêng
 
 **Ô thắng**:
-Ô ghi bàn của một người chơi. Người A thắng khi có quân trên a1. Người B thắng khi có quân trên i9.
+Ô ghi bàn của một người chơi. Người A (Đỏ) thắng khi có quân trên a9. Người B (Xanh) thắng khi có quân trên i1. Rank 1 ở phía trên bàn, rank 9 ở phía dưới.
 _Avoid_: king square, nhà, đích đối phương
 
 **Xếp chồng**:
@@ -41,7 +41,7 @@ Một trận từ thế trận ban đầu đến khi có người thắng hoặc
 _Avoid_: match như tennis set, session
 
 **Tuyệt chủng**:
-Một người chơi không còn quân nào của đúng một loại. Đối phương thắng ngay.
+Một người chơi không còn bất kỳ quân nào trên bàn. Đối phương thắng ngay.
 _Avoid_: checkmate, wipe như slang
 
 **Ghế**:

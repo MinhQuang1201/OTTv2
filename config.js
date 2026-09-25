@@ -8,21 +8,20 @@
   const TYPES = ["dam", "la", "keo"];
   const BEATS = { dam: "keo", keo: "la", la: "dam" };
   const TYPE_LABEL = { dam: "Đấm", la: "Lá", keo: "Kéo" };
-  const SEAT_LABEL = { A: "Người A", B: "Người B" };
-  const GOAL = { A: { x: 0, y: 0 }, B: { x: 8, y: 8 } };
+  const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
+  const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
 
-  // Wall at Chebyshev distance 2 from a1 so A cannot step into a1 on move 1.
-  // B is the 180-degree rotate around e5.
+  // A starts in the upper-right. B is the 180-degree rotate around e5.
   const A_SETUP = [
-    { type: "la", x: 0, y: 2 },
-    { type: "dam", x: 1, y: 2 },
-    { type: "keo", x: 2, y: 2 },
-    { type: "dam", x: 0, y: 3 },
-    { type: "keo", x: 1, y: 3 },
-    { type: "la", x: 2, y: 3 },
-    { type: "keo", x: 0, y: 4 },
-    { type: "la", x: 1, y: 4 },
-    { type: "dam", x: 2, y: 4 }
+    { type: "la", x: 8, y: 2 },
+    { type: "dam", x: 7, y: 2 },
+    { type: "keo", x: 6, y: 2 },
+    { type: "dam", x: 8, y: 3 },
+    { type: "keo", x: 7, y: 3 },
+    { type: "la", x: 6, y: 3 },
+    { type: "keo", x: 8, y: 4 },
+    { type: "la", x: 7, y: 4 },
+    { type: "dam", x: 6, y: 4 }
   ];
 
   const DELTAS = [

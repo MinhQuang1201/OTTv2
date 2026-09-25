@@ -79,7 +79,7 @@ class Room {
     if (!result.ok) return result;
     this.state = result.state;
     this.lastEvents = result.events;
-    if (this.state.winner || this.state.reason === "draw") this.status = "done";
+    if (this.state.winner) this.status = "done";
     return result;
   }
 

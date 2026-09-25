@@ -254,12 +254,12 @@ wss.on("connection", (ws) => {
         return;
       }
       room.emitState();
-      if (room.state.winner || room.state.reason === "draw") {
+      if (room.state.winner) {
         room.broadcast({
           type: "gameover",
           winner: room.state.winner,
           reason: room.state.reason,
-          wipeType: room.state.wipeType
+          eliminatedPlayer: room.state.eliminatedPlayer
         });
       }
       return;

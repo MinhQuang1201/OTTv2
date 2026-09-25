@@ -49,7 +49,7 @@ Token `--duration-*` / `--ease-smooth-out` trong `tokens.css`.
 
 - Sảnh: grid 2 cột, gãy 1 cột dưới 768px.
 - Bàn: HUD B trên, lưới 9×9, HUD A dưới.
-- Ô là `<button>`; rank 9→1 từ trên xuống, file a→i trái sang phải.
+- Ô là `<button>`; rank 1→9 từ trên xuống, file a→i trái sang phải.
 - Nút CTA pill, icon ↗ nằm trong vòng tròn `.btn-icon`.
 
 ## Do not

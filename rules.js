@@ -7,10 +7,17 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   global.OTT_RULES = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (config) {
-  const { SIZE, FILES, TYPES, BEATS, GOAL, A_SETUP, DELTAS } = config;
+  const { SIZE, FILES, BEATS, GOAL, A_SETUP, DELTAS } = config;
 
   function inside(x, y) {
-    return x >= 0 && y >= 0 && x < SIZE && y < SIZE;
+    return (
+      Number.isInteger(x) &&
+      Number.isInteger(y) &&
+      x >= 0 &&
+      y >= 0 &&
+      x < SIZE &&
+      y < SIZE
+    );
   }
 
   function parseSquare(name) {
@@ -37,8 +44,7 @@
       turn: state.turn,
       winner: state.winner,
       reason: state.reason,
-      wipeType: state.wipeType || null,
-      wipeVictim: state.wipeVictim || null,
+      eliminatedPlayer: state.eliminatedPlayer || null,
       pieces: state.pieces.map((p) => ({
         id: p.id,
         player: p.player,
@@ -54,8 +60,7 @@
       turn: "A",
       winner: null,
       reason: null,
-      wipeType: null,
-      wipeVictim: null,
+      eliminatedPlayer: null,
       pieces: []
     };
   }
@@ -130,21 +135,17 @@
         (p) => p.player === seat && p.x === goal.x && p.y === goal.y
       );
       if (onGoal) {
-        return { winner: seat, reason: "goal", wipeType: null, wipeVictim: null };
+        return { winner: seat, reason: "goal", eliminatedPlayer: null };
       }
     }
     for (const seat of ["A", "B"]) {
-      const counts = countByType(state, seat);
-      for (const type of TYPES) {
-        if (counts[type] === 0) {
-          const other = seat === "A" ? "B" : "A";
-          return {
-            winner: other,
-            reason: "wipe",
-            wipeType: type,
-            wipeVictim: seat
-          };
-        }
+      if (!state.pieces.some((p) => p.player === seat)) {
+        const other = seat === "A" ? "B" : "A";
+        return {
+          winner: other,
+          reason: "elimination",
+          eliminatedPlayer: seat
+        };
       }
     }
     return null;
@@ -233,25 +234,15 @@
     if (win) {
       next.winner = win.winner;
       next.reason = win.reason;
-      next.wipeType = win.wipeType;
-      next.wipeVictim = win.wipeVictim;
+      next.eliminatedPlayer = win.eliminatedPlayer;
       events.push({
         type: "win",
         winner: win.winner,
         reason: win.reason,
-        wipeType: win.wipeType
+        eliminatedPlayer: win.eliminatedPlayer
       });
     } else {
       next.turn = player === "A" ? "B" : "A";
-      if (allMoves(next, next.turn).length === 0) {
-        const other = next.turn === "A" ? "B" : "A";
-        if (allMoves(next, other).length === 0) {
-          next.winner = null;
-          next.reason = "draw";
-        } else {
-          next.turn = other;
-        }
-      }
     }
 
     return { ok: true, error: null, state: next, events };
