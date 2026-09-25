@@ -22,8 +22,8 @@ describe("room", () => {
     assert.equal(room.addPlayer(a, "An").seat, "A");
     assert.equal(room.addPlayer(b, "Bình").seat, "B");
     assert.equal(room.status, "playing");
-    const from = rules.parseSquare("a3");
-    const to = rules.parseSquare("a2");
+    const from = rules.parseSquare("i3");
+    const to = rules.parseSquare("i2");
     const res = room.handleMove(a, from, to);
     assert.equal(res.ok, true);
     assert.equal(room.state.turn, "B");
@@ -37,6 +37,27 @@ describe("room", () => {
     room.addPlayer(b, "Bình");
     const res = room.handleMove(b, { x: 8, y: 6 }, { x: 8, y: 7 });
     assert.equal(res.ok, false);
+  });
+
+  it("ends the room when a move captures the opponent's final piece", () => {
+    const room = new Room("TEST");
+    const a = fakeWs();
+    const b = fakeWs();
+    room.addPlayer(a, "An");
+    room.addPlayer(b, "Bình");
+    room.state = rules.createEmptyState();
+    room.state.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 4 }
+    ];
+    room.status = "playing";
+
+    const res = room.handleMove(a, { x: 4, y: 4 }, { x: 5, y: 4 });
+
+    assert.equal(res.ok, true);
+    assert.equal(room.state.winner, "A");
+    assert.equal(room.state.reason, "elimination");
+    assert.equal(room.status, "done");
   });
 
   it("awards the remaining player when the opponent disconnects mid-game", () => {

@@ -10,7 +10,7 @@
     you: null,
     state: null,
     status: "idle",
-    names: { A: "Người A", B: "Người B" },
+    names: { A: config.SEAT_LABEL.A, B: config.SEAT_LABEL.B },
     selected: null,
     legal: [],
     lastEvents: [],
@@ -79,7 +79,7 @@
       f.textContent = config.FILES[x];
       els.files.appendChild(f);
     }
-    for (let y = config.SIZE - 1; y >= 0; y -= 1) {
+    for (let y = 0; y < config.SIZE; y += 1) {
       const r = document.createElement("span");
       r.textContent = String(y + 1);
       els.ranks.appendChild(r);
@@ -103,16 +103,11 @@
   function reasonText(state) {
     if (!state) return "";
     if (state.reason === "goal") {
-      return state.winner === "A"
-        ? "Đưa quân vào ô thắng a1."
-        : "Đưa quân vào ô thắng i9.";
+      const goal = config.GOAL[state.winner];
+      return "Đưa quân vào ô thắng " + rules.formatSquare(goal).toUpperCase() + ".";
     }
-    if (state.reason === "wipe") {
-      const type = config.TYPE_LABEL[state.wipeType] || state.wipeType;
-      return "Đối phương hết quân " + type + ".";
-    }
+    if (state.reason === "elimination") return "Đối phương không còn quân nào.";
     if (state.reason === "disconnect") return "Đối thủ đã rời phòng.";
-    if (state.reason === "draw") return "Hai bên đều hết nước đi.";
     return "";
   }
 
@@ -150,7 +145,7 @@
         burstAt[ev.to.x + "," + ev.to.y] = true;
       }
     }
-    for (let y = config.SIZE - 1; y >= 0; y -= 1) {
+    for (let y = 0; y < config.SIZE; y += 1) {
       for (let x = 0; x < config.SIZE; x += 1) {
         const btn = document.createElement("button");
         const odd = (x + y) % 2 === 1;
@@ -160,8 +155,12 @@
         btn.dataset.x = String(x);
         btn.dataset.y = String(y);
         btn.setAttribute("aria-label", rules.formatSquare({ x: x, y: y }));
-        if (x === 0 && y === 0) btn.classList.add("goal-a");
-        if (x === 8 && y === 8) btn.classList.add("goal-b");
+        if (x === config.GOAL.A.x && y === config.GOAL.A.y) {
+          btn.classList.add("goal-a");
+        }
+        if (x === config.GOAL.B.x && y === config.GOAL.B.y) {
+          btn.classList.add("goal-b");
+        }
         const occ = state ? rules.piecesAt(state, x, y) : [];
         if (occ.length) {
           btn.classList.add("has-piece");
@@ -202,10 +201,8 @@
   }
 
   function openWin(state) {
-    if (!state || (!state.winner && state.reason !== "draw")) return;
-    if (state.reason === "draw") {
-      els.winTitle.textContent = "Hòa";
-    } else if (app.mode === "local") {
+    if (!state || !state.winner) return;
+    if (app.mode === "local") {
       els.winTitle.textContent = app.names[state.winner] + " thắng";
     } else if (app.you === state.winner) {
       els.winTitle.textContent = "Bạn thắng";
@@ -245,7 +242,7 @@
     app.selected = null;
     app.legal = [];
     render();
-    if (app.state.winner || app.state.reason === "draw") {
+    if (app.state.winner) {
       openWin(app.state);
       return;
     }
@@ -328,7 +325,7 @@
       if (app.status === "playing") setNet("on", "Đang chơi");
       if (app.status === "waiting") setNet("wait", "Chờ đối thủ");
       render();
-      if (app.state && (app.state.winner || app.state.reason === "draw")) {
+      if (app.state && app.state.winner) {
         openWin(app.state);
       }
     });
@@ -336,7 +333,7 @@
       if (app.state) {
         app.state.winner = msg.winner;
         app.state.reason = msg.reason;
-        app.state.wipeType = msg.wipeType;
+        app.state.eliminatedPlayer = msg.eliminatedPlayer || null;
       }
       openWin(app.state || msg);
     });
@@ -372,8 +369,8 @@
     app.status = "playing";
     app.roomId = null;
     app.state = rules.createInitialState();
-    app.names.A = playerName() || "Người A";
-    app.names.B = kind === "ai" ? "Máy" : "Người B";
+    app.names.A = playerName() || config.SEAT_LABEL.A;
+    app.names.B = kind === "ai" ? "Máy" : config.SEAT_LABEL.B;
     app.selected = null;
     app.legal = [];
     setNet("off", kind === "ai" ? "Đấu máy" : "Cùng máy");

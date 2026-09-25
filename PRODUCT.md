@@ -16,13 +16,13 @@ Hai người chơi muốn một ván cờ chiến thuật ngắn trên trình du
 
 ## Product Purpose
 
-OTTv2 là oẳn tù tì đưa lên bàn 9x9. Mỗi bên 9 quân (3 Đấm, 3 Lá, 3 Kéo), đi như vua, ăn theo vòng Đấm > Kéo > Lá > Đấm. Thắng khi đưa quân vào ô thắng của mình (A: a1, B: i9) hoặc khi đối phương tuyệt chủng một loại quân.
+OTTv2 là oẳn tù tì đưa lên bàn 9x9. Mỗi bên 9 quân (3 Đấm, 3 Lá, 3 Kéo), đi như vua, ăn theo vòng Đấm > Kéo > Lá > Đấm. Thắng khi đưa quân vào ô thắng của mình (A: a9, B: i1) hoặc khi ăn hết toàn bộ quân đối phương.
 
 Success: hai người vào cùng một phòng, đi luân phiên, server là trọng tài, ván kết thúc đúng luật.
 
 ## Positioning
 
-Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ chế riêng: cùng loại thì xếp chồng chứ không ăn; ô thắng nằm ở góc nhà mình; tuyệt chủng một loại là thắng, không cần ăn hết bàn.
+Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ chế riêng: cùng loại thì xếp chồng chứ không ăn; ô thắng nằm ở góc đối diện; ăn hết toàn bộ quân đối phương là thắng.
 
 ## Capabilities
 
@@ -35,7 +35,8 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 ## Constraints
 
 - Bàn 9x9, 9 quân mỗi bên, đối xứng 180 độ qua tâm.
-- Không đặt quân lên a1/i9 lúc xếp.
+- A khởi tạo phía trên bên phải, B khởi tạo phía dưới bên trái và hai đội đối xứng 180°.
+- Không đặt quân lên a9/i1 lúc xếp.
 - Quân không đứng kề ô thắng của mình lúc xếp (tránh thắng nước 1).
 - Luật do server quyết khi chơi online.
 - Tiếng Việt trên giao diện, hỗ trợ dấu thanh.

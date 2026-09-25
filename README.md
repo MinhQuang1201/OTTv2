@@ -1,8 +1,8 @@
 # OTTv2 – Oẳn Tù Tì
 
-Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá hoặc Kéo. Ăn theo oẳn tù tì. Thắng khi đưa quân vào ô thắng của mình, hoặc khi đối phương tuyệt chủng một loại quân.
+Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá hoặc Kéo. Ăn theo oẳn tù tì. Thắng khi đưa quân vào ô thắng của mình, hoặc khi ăn hết toàn bộ quân đối phương.
 
-- Người A thắng trên **a1**. Người B thắng trên **i9**.
+- Người A (Đỏ) thắng trên **a9**. Người B (Xanh) thắng trên **i1**.
 - Đi như vua cờ vua: 8 hướng, 1 ô.
 - Cùng loại: xếp chồng, không ăn.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
@@ -47,9 +47,9 @@ Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http:
 | Vòng ăn | Đấm > Kéo > Lá > Đấm |
 | Di chuyển | 1 ô, 8 hướng; không ra ngoài bàn; không vào ô có quân cùng phe |
 | Xếp chồng | Hai quân đối địch cùng loại đứng chung ô |
-| Ô thắng | A: a1 · B: i9 — chỉ quân của chính mình |
-| Tuyệt chủng | Hết sạch một loại quân → đối phương thắng ngay |
-| Thế trận | Đối xứng 180° qua tâm; không đặt quân lên a1/i9; không kề ô thắng lúc xếp |
+| Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
+| Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
+| Thế trận | A phía trên bên phải, B phía dưới bên trái, đối xứng 180°; không đặt quân lên a9/i1 lúc xếp |
 
 Chi tiết thuật ngữ: [CONTEXT.md](CONTEXT.md).
 
@@ -80,7 +80,7 @@ Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.a
 npm test
 ```
 
-`tests/rules.test.js` — xếp quân, đối xứng, nước đi, ăn, đòn thua, xếp chồng, ô thắng, tuyệt chủng.
+`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, xếp chồng, ô thắng, ăn hết quân.
 
 `tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
 
@@ -96,7 +96,7 @@ await pf.connect();
 pf.on("state", (msg) => render(msg.state));
 pf.create("An");
 pf.join("K7P2", "Bình");
-pf.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
 ```
 
 Sự kiện: `open`, `close`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.

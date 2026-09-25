@@ -15,7 +15,7 @@ Node ≥ 18. Cổng mặc định 3000 (`PORT`).
 
 ## Ranh giới module
 
-- `config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, PORT. B_SETUP = xoay 180° `(x,y) → (8-x, 8-y)`.
+- `config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, PORT. A (Đỏ) khởi tạo phía trên bên phải; B (Xanh) là đối xứng 180° phía dưới bên trái.
 - `rules.js` — `createInitialState`, `getLegalMoves`, `applyMove`, `detectWinner`, `publicState`. Không I/O.
 - `room.js` — ghế A/B, `handleMove`, ngắt kết nối = đối phương thắng.
 - `server.js` — file tĩnh + WS. Không chứa luật.
@@ -35,8 +35,9 @@ Không gọi ô thắng là “nhà vua”. Không gọi xếp chồng là merge
 - Không vào ô có quân cùng phe.
 - Cùng loại → xếp chồng, không ăn.
 - Thua oẳn tù tì → quân đi bị loại, quân đứng yên.
-- A thắng trên a1, B thắng trên i9. Đứng ô thắng của đối phương không thắng.
-- Tuyệt chủng một loại quân → thua ngay.
+- A thắng trên a9, B thắng trên i1. Đứng ô thắng của đối phương không thắng.
+- Tuyệt chủng toàn bộ quân của một ghế → ghế kia thắng ngay.
+- Sau nước không thắng, lượt luôn chuyển sang ghế kia.
 - Thế trận không cho bước 1 vào ô thắng của mình.
 
 ## Kiểm thử

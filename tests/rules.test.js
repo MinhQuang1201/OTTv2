@@ -77,6 +77,27 @@ describe("setup", () => {
 });
 
 describe("movement", () => {
+  it("allows all eight adjacent directions from the center", () => {
+    const s = rules.createEmptyState();
+    s.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 }
+    ];
+    const legal = rules.getLegalMoves(s, "A-dam-0");
+    assert.deepEqual(
+      legal.sort((a, b) => a.y - b.y || a.x - b.x),
+      [
+        { x: 3, y: 3 },
+        { x: 4, y: 3 },
+        { x: 5, y: 3 },
+        { x: 3, y: 4 },
+        { x: 5, y: 4 },
+        { x: 3, y: 5 },
+        { x: 4, y: 5 },
+        { x: 5, y: 5 }
+      ]
+    );
+  });
+
   it("allows a king-step onto an empty square and rejects longer steps", () => {
     const s = rules.createInitialState();
     const ok = move(s, "A", "i3", "i2");
@@ -103,6 +124,17 @@ describe("movement", () => {
   it("rejects off-board destinations", () => {
     const s = rules.createInitialState();
     const res = rules.applyMove(s, "A", sq("a3"), { x: -1, y: 2 });
+    assert.equal(res.ok, false);
+  });
+
+  it("rejects fractional coordinates that are not board squares", () => {
+    const s = rules.createInitialState();
+    const res = rules.applyMove(
+      s,
+      "A",
+      { x: 8, y: 2 },
+      { x: 8, y: 1.5 }
+    );
     assert.equal(res.ok, false);
   });
 });
@@ -271,6 +303,19 @@ describe("victory", () => {
     assert.equal(res.state.winner, "A");
     assert.equal(res.state.reason, "elimination");
     assert.equal(res.state.eliminatedPlayer, "B");
+  });
+
+  it("awards B when A loses its final attacking piece", () => {
+    const s = rules.createEmptyState();
+    s.turn = "A";
+    s.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-la-0", player: "B", type: "la", x: 5, y: 4 }
+    ];
+    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(res.state.winner, "B");
+    assert.equal(res.state.reason, "elimination");
+    assert.equal(res.state.eliminatedPlayer, "A");
   });
 });
 
