@@ -1,0 +1,440 @@
+---
+title: "Capabilities"
+description: "Every built-in can-* attribute in playhtml, with a live demo and the vanilla + React forms side by side."
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem, Card } from '@astrojs/starlight/components';
+import { GrowBalloonDemo } from '@/components/react/capability-demos/GrowBalloonDemo';
+import { SpinWheelDemo } from '@/components/react/capability-demos/SpinWheelDemo';
+import { DuplicateRabbitDemo } from '@/components/react/capability-demos/DuplicateRabbitDemo';
+import { RecipeExample } from '@/components/playground/RecipeExample';
+import {
+  canHoverRecipe,
+  canMoveRecipe,
+  canToggleRecipe,
+} from '@/components/playground/recipes/built-in-capabilities';
+
+Every capability in playhtml is a single HTML attribute. Slap it on an element, give the element an `id`, and the library handles sync, persistence, and event wiring. This page catalogs the eight built-ins plus `can-play`, in order from most-commonly used to most-specialized.
+
+This page has live demos and both framework forms. For attribute names, data shapes, and options, see the [capabilities reference](/docs/reference/capabilities/).
+
+:::tip[Every playhtml element needs a stable id]
+The `id` is the key an element's synced data is stored under, so it must be **stable across reloads and browsers**. That's how two visitors agree on which element is which. A hand-written `id="my-lamp"` is ideal. If you omit it, playhtml falls back to hashing the element's HTML, which can differ across browsers and break sync.
+
+For **many elements that share a selector** (a row of magnets, a list of reactions), give each the same markup and add a single `selector-id` attribute instead of inventing unique ids. playhtml indexes the matches by position, so the N-th `.magnet` always gets the N-th slot of state. See [Dynamic elements](/docs/advanced/dynamic-elements/#many-of-a-kind-elements-with-selector-id).
+:::
+
+:::tip[Shift-click to reset]
+The built-in interactive capabilities (`can-move`, `can-spin`, `can-toggle`, and `can-grow`) support **shift-clicking** an element to reset it to its default state. Because the state is shared, this resets it for everyone in the room (a moved element snaps back to its origin, a spun one to 0°, a toggle to off, a grown one to scale 1). Custom `can-play` elements can opt into this with the [`resetShortcut`](/docs/custom-elements/#reset-shortcut) option.
+:::
+
+Every section below has the same shape:
+
+- A short description of what the capability does and the kind of state it owns.
+- A live demo you can interact with. Open the page in a second tab and watch both update.
+- The **vanilla HTML** form, and the **React** form. Pick the framework you're shipping in; the reader's choice syncs across every snippet on the page.
+
+## can-move
+
+**What it does.** Drag anywhere. Position persists and syncs.
+
+**Use it for:** drag-and-drop affordances such as fridge magnets, game pieces, arrangeable stickers, a puzzle.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-move">
+  <RecipeExample
+    recipe={canMoveRecipe}
+    compact
+    frameHeight="18rem"
+    client:load
+  />
+</div>
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<div id="arena" style="position: relative; height: 320px;">
+  <img can-move can-move-bounds="arena" id="hat" src="/yankees-hat.png" alt="" />
+  <img can-move can-move-bounds="arena" id="cat" src="/long-cat.png" alt="" />
+</div>
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanMoveElement } from "@playhtml/react";
+
+<div id="arena" style={{ position: "relative", height: 320 }}>
+  <CanMoveElement bounds="arena">
+    <img id="hat" src="/yankees-hat.png" alt="" />
+  </CanMoveElement>
+  <CanMoveElement bounds="arena">
+    <img id="cat" src="/long-cat.png" alt="" />
+  </CanMoveElement>
+</div>
+```
+  </TabItem>
+</Tabs>
+
+### Constraining the drag area
+
+Use `can-move-bounds` (vanilla) or the `bounds` prop (React) to constrain an element while it is dragged.
+The value is an element id (with or without the leading `#`) or any valid CSS selector.
+Bounds apply only during dragging. They do not rewrite the element's initial CSS layout or persisted position during setup.
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<div id="fridge" style="position: relative; height: 400px;">
+  <div can-move can-move-bounds="fridge" id="magnet-a">🍎</div>
+  <div can-move can-move-bounds="#fridge" id="magnet-b">🥐</div>
+</div>
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanMoveElement } from "@playhtml/react";
+
+<div id="fridge" style={{ position: "relative", height: 400 }}>
+  <CanMoveElement bounds="fridge">
+    <div id="magnet-a">🍎</div>
+  </CanMoveElement>
+  <CanMoveElement bounds="#fridge">
+    <div id="magnet-b">🥐</div>
+  </CanMoveElement>
+</div>
+```
+  </TabItem>
+</Tabs>
+
+The **cursor** can go past the container edge.
+During a drag, only the element's position is clamped. By default, the whole element stays inside the container.
+Two knobs let you opt into partial overhang while keeping a visible slice inside:
+
+- `can-move-bounds-min-visible` / `boundsMinVisible`: fraction `(0–1)` of the element to keep inside. Default `1` pins fully inside; lower values allow part of the element to hang over the edge. `0` drops the fraction constraint entirely.
+- `can-move-bounds-min-visible-px` / `boundsMinVisiblePx`: absolute pixel floor. Default `60`; it applies when `min-visible` allows partial overhang.
+
+The effective slice on each axis is `max(fraction × size, pxFloor)`. Set both to `0` to opt fully out of the keep-visible guarantee and let the element slip entirely out of view.
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<!-- Keep 50% of the magnet inside the fridge, ignoring the px floor -->
+<div can-move can-move-bounds="fridge"
+     can-move-bounds-min-visible="0.5"
+     can-move-bounds-min-visible-px="0"
+     id="magnet">
+  🧲
+</div>
+
+<!-- Default bounds keep the whole magnet visible while dragging. -->
+<div can-move can-move-bounds="fridge" id="tiny-magnet" style="width: 40px;">
+  🌶️
+</div>
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanMoveElement } from "@playhtml/react";
+
+{/* Keep 50% of the magnet inside the fridge, ignoring the px floor */}
+<CanMoveElement bounds="fridge" boundsMinVisible={0.5} boundsMinVisiblePx={0}>
+  <div id="magnet">🧲</div>
+</CanMoveElement>
+
+{/* Small magnet: the 60px default floor keeps the whole magnet visible. */}
+<CanMoveElement bounds="fridge">
+  <div id="tiny-magnet" style={{ width: 40 }}>🌶️</div>
+</CanMoveElement>
+```
+  </TabItem>
+</Tabs>
+
+## can-toggle
+
+**What it does.** Click to flip an on/off boolean. Persists and syncs.
+
+**Use it for:** shared switches, lamps, "is-this-thing-open" signs, per-element read/unread state. The [playhtml homepage](https://playhtml.fun) uses this on the wordmark letters and the hanging lamp; click either to flip it for everyone.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-toggle">
+  <RecipeExample
+    recipe={canToggleRecipe}
+    compact
+    frameHeight="10rem"
+    client:load
+  />
+</div>
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<button id="my-switch" class="switch" can-toggle>off</button>
+
+<style>
+  .switch.toggled { background: #6cd97e; }
+  .switch.toggled::after { content: "on"; }
+</style>
+```
+
+`can-toggle` adds the `toggled` class when the element is on.
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanToggleElement } from "@playhtml/react";
+
+<CanToggleElement>
+  {({ data, setData }) => {
+    const on = data.on;
+    return (
+      <button
+        id="my-switch"
+        type="button"
+        className={on ? "is-on" : "is-off"}
+        aria-pressed={on}
+      >
+        {on ? "on" : "off"}
+      </button>
+    );
+  }}
+</CanToggleElement>
+```
+
+`CanToggleElement` already wires up the click handler. Don't add your own `onClick`, or you'll toggle twice per click. Render declaratively from `data`.
+
+  </TabItem>
+</Tabs>
+
+## can-grow
+
+**What it does.** Click to scale up. Alt-click (or equivalent modifier) to scale down. Persists and syncs.
+
+**Use it for:** zoomable images, inflating a balloon or sticker, growing a banner over time.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-grow">
+  <GrowBalloonDemo client:only="react" />
+</div>
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<img can-grow id="balloon" src="/water-balloon.png" alt="" />
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanPlayElement } from "@playhtml/react";
+import { TagType } from "playhtml";
+
+<CanPlayElement tagInfo={[TagType.CanGrow]} id="balloon" defaultData={{ scale: 1 }}>
+  {() => <img src="/water-balloon.png" alt="" />}
+</CanPlayElement>
+```
+  </TabItem>
+</Tabs>
+
+## can-spin
+
+**What it does.** Drag to rotate. Persists and syncs.
+
+**Use it for:** wheels, dials, gauges, spinnable stickers or album covers, "what's your answer" wheels.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-spin">
+  <SpinWheelDemo client:only="react" />
+</div>
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<img can-spin id="wheel" src="/bike-wheel.webp" alt="" />
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanPlayElement } from "@playhtml/react";
+import { TagType } from "playhtml";
+
+<CanPlayElement tagInfo={[TagType.CanSpin]} id="wheel" defaultData={{ rotation: 0 }}>
+  {() => <img src="/bike-wheel.webp" alt="" />}
+</CanPlayElement>
+```
+  </TabItem>
+</Tabs>
+
+## can-hover
+
+**What it does.** Shares hover state across everyone on the page. Presence-based, *not* persistent: when a user leaves, their hover clears.
+
+**Use it for:** "who's looking at this right now" affordances, social read-receipts, zero-latency shared hover effects.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-hover">
+  <RecipeExample
+    recipe={canHoverRecipe}
+    compact
+    frameHeight="12rem"
+    client:load
+  />
+</div>
+
+**How it works.** While *anyone* (you or another reader) is hovering the element, playhtml sets a `data-playhtml-hover` attribute on it; when nobody is hovering, the attribute is removed. Style the effect by targeting `[data-playhtml-hover]` instead of the `:hover` pseudo-class. That's the only change from a normal hover style, and it's the same attribute whether you use the vanilla capability or the React component.
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<div can-hover id="hover-pad">hover me</div>
+
+<style>
+  /* Use [data-playhtml-hover], NOT :hover, so the effect fires
+     for everyone when anyone on the page hovers the element. */
+  #hover-pad[data-playhtml-hover] {
+    background: #fde047;
+    transform: scale(1.05);
+  }
+</style>
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { CanHoverElement } from "@playhtml/react";
+
+<CanHoverElement>
+  <div id="hover-pad">hover me</div>
+</CanHoverElement>
+```
+
+```css
+/* Same attribute as the vanilla capability */
+#hover-pad[data-playhtml-hover] {
+  background: #fde047;
+  transform: scale(1.05);
+}
+```
+  </TabItem>
+</Tabs>
+
+If you want the hover effect to reflect *who* is hovering (e.g. tint the element with each viewer's cursor color) rather than a plain on/off, read the hover roster off element awareness. Awareness is presence scoped to one element, so it clears when readers leave and does not persist:
+
+```tsx
+import { CanPlayElement } from "@playhtml/react";
+import { TagType } from "playhtml";
+
+<CanPlayElement
+  tagInfo={[TagType.CanHover]}
+  id="hover-pad"
+  defaultData={{}}
+  myDefaultAwareness={"#3b82f6"}
+>
+  {({ awareness }) => (
+    <div
+      style={{
+        background: `linear-gradient(45deg, ${awareness.join(", ")})`,
+      }}
+    >
+      hover me
+    </div>
+  )}
+</CanPlayElement>
+```
+
+## can-duplicate
+
+**What it does.** Click a trigger to clone an existing element into a new one. Every clone is independent shared state.
+
+**Use it for:** user-generated galleries, seed-from-template UIs, stamps, "leave your mark" patterns.
+
+<div class="ph-demo-slot" data-label="LIVE DEMO — can-duplicate">
+  <DuplicateRabbitDemo client:only="react" />
+</div>
+
+<Tabs syncKey="framework">
+  <TabItem label="Vanilla HTML">
+```html
+<img id="bunny-template" src="/pixel-bunny.png" alt="" />
+<button can-duplicate="bunny-template" id="clone-btn">clone a bunny</button>
+
+<script>
+  // The "reset" button sweeps every spawned rabbit from shared state.
+  // Clones get an id of the form "bunny-template-<random>", so match on that prefix.
+  document.getElementById("reset-btn").addEventListener("click", () => {
+    document.querySelectorAll("[id^='bunny-template-']").forEach((el) => {
+      playhtml.deleteElementData("can-duplicate", el.id);
+      el.remove();
+    });
+  });
+</script>
+<button id="reset-btn">reset</button>
+```
+
+By default, clones are inserted right after the template (or the previous clone). Add **`can-duplicate-to`** (an element id or CSS selector) to drop every clone into a specific container instead:
+
+```html
+<button
+  can-duplicate="bunny-template"
+  can-duplicate-to="#bunny-pen"
+  id="clone-btn"
+>clone a bunny</button>
+<div id="bunny-pen"></div>
+```
+  </TabItem>
+  <TabItem label="React">
+```tsx
+import { useRef } from "react";
+import { CanDuplicateElement } from "@playhtml/react";
+
+// CanDuplicateElement takes refs, not selectors. `elementToDuplicate` is the
+// template that gets cloned; `canDuplicateTo` is the React equivalent of the
+// can-duplicate-to attribute. Both elements need a stable `id`.
+function BunnyField() {
+  const template = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLDivElement>(null);
+
+  return (
+    <div>
+      <div id="bunny-template" ref={template}>🐰</div>
+      <div id="bunny-field" ref={field} />
+      <CanDuplicateElement elementToDuplicate={template} canDuplicateTo={field}>
+        <button>clone a bunny</button>
+      </CanDuplicateElement>
+    </div>
+  );
+}
+```
+  </TabItem>
+</Tabs>
+
+## can-mirror
+
+`can-mirror` syncs changes on the element you put it on: its attributes, its direct child list, and form or contenteditable state that surfaces through input/change events. It does not watch arbitrary descendant DOM mutations. If you want to sync nested children changes, put `can-mirror` on that nested element too and give it a stable `id`.
+
+Full treatment with live demos lives on **[Custom elements → can-mirror](/docs/custom-elements/#can-mirror)**, and the [mirror playground](/docs/advanced/mirror-playground/) shows examples of all the common native HTML element interactions with it.
+
+## can-play
+
+Build your own capability: you define a shared `data` shape and how the element renders from it (an imperative `updateElement`, or the newer reactive `view`). You control how the data drives the element and which parts persist. Use it for custom counters, guestbooks, chat, games, reactions, per-user state, and event broadcasts — anything the built-ins don't cover.
+
+Full guide with live demos: **[Custom elements](/docs/custom-elements/)**. Property reference: **[Element API](/docs/reference/element-api/)**.
+
+---
+
+## Composed examples
+
+These capabilities are the building blocks. The best way to see them in concert is to visit the live experiments room, where readers leave permanent marks in a shared space.
+
+<div class="ph-composed-grid">
+  <a class="ph-composed-card" href="https://playhtml.fun/experiments/4/" target="_blank" rel="noopener">
+    <span class="ph-composed-card__kicker">EXPERIMENT · 04</span>
+    <span class="ph-composed-card__title">Every color</span>
+    <span class="ph-composed-card__body">A page where every visitor adds one color. can-play + element awareness + an ever-growing shared palette.</span>
+  </a>
+  <a class="ph-composed-card" href="https://playhtml.fun/fridge" target="_blank" rel="noopener">
+    <span class="ph-composed-card__kicker">COMMUNITY · FRIDGE</span>
+    <span class="ph-composed-card__title">Fridge poetry</span>
+    <span class="ph-composed-card__body">can-move + can-play + selector-id. Arrange magnets with strangers. Saves forever.</span>
+  </a>
+  <a class="ph-composed-card" href="https://playhtml.fun/experiments/5/" target="_blank" rel="noopener">
+    <span class="ph-composed-card__kicker">EXPERIMENT · 05</span>
+    <span class="ph-composed-card__title">Minute faces (together)</span>
+    <span class="ph-composed-card__body">1,440 minutes in a day, one color per minute. Paint the clock with everyone who shows up that minute.</span>
+  </a>
+</div>
+
+These three are highlighted in the homepage experiments index, the fastest way to see playhtml at room-scale.

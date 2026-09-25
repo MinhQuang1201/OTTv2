@@ -1,0 +1,98 @@
+---
+title: "playhtml docs"
+template: splash
+hero:
+  title: "make the web feel alive"
+  tagline: "Turn any element into a live, shared one with a single attribute, no backend required."
+  actions:
+    - text: "Get started"
+      link: /docs/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: "GitHub"
+      link: https://github.com/spencerc99/playhtml
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+import { LampToggleDemo } from "../../components/react/LampToggleDemo";
+
+<figure class="ph-splash-lamp ph-splash-lamp--furniture" aria-label="live demo">
+  <LampToggleDemo client:only="react" id="ph-splash-lamp" />
+  <figcaption class="ph-splash-lamp__tag">
+    <span class="ph-splash-lamp__pip" aria-hidden="true"></span>
+    toggles for everyone live!
+  </figcaption>
+</figure>
+
+<div class="ph-splash-pitch">
+  <ul class="ph-splash-pitch__list">
+      <li>
+      <strong>Make the web feel alive.</strong> Turn static web pages into
+      dynamic, living spaces.
+    </li>
+    <li>
+      <strong>Fully customizable.</strong> Use built-in capabilities to get started or build your own social experiences.
+    </li>
+    <li>
+      <strong>Library-agnostic, fast, expressive.</strong> Works with plain
+      HTML, React, or any framework.
+    </li>
+    <li>
+      <strong>No backend to run.</strong> Real-time sync and persistence taken
+      care of. Self-host for full control.
+    </li>
+
+  </ul>
+</div>
+
+<div class="ph-splash-quickstart">
+  <div class="ph-splash-quickstart__label">FIG. 01 &nbsp;·&nbsp; 30-second install</div>
+
+  <Tabs syncKey="framework">
+    <TabItem label="Vanilla HTML">
+```html
+<img can-toggle id="lamp" src="https://playhtml.fun/noguchi-hanging-lamp.png" />
+<div style="width: 100px; height: 100px;" can-move>🛋️</div>
+<script type="module">
+  import { playhtml } from "https://unpkg.com/playhtml";
+  playhtml.init();
+</script>
+```
+    </TabItem>
+    <TabItem label="React">
+```tsx
+// npm install playhtml @playhtml/react
+import { PlayProvider, CanToggleElement, CanMoveElement } from "@playhtml/react";
+
+<PlayProvider>
+  <CanMoveElement style={{ width: "100px", height: "100px" }}>
+    <div>🛋️</div>
+  </CanMoveElement>
+  <CanToggleElement>
+    <img id="lamp" src="https://playhtml.fun/noguchi-hanging-lamp.png" />
+  </CanToggleElement>
+</PlayProvider>
+```
+    </TabItem>
+  </Tabs>
+</div>
+
+<div class="ph-splash-section">
+  <div class="ph-splash-section__label">FIG. 02 &nbsp;·&nbsp; start here</div>
+  <CardGrid>
+    <Card title="Getting started" icon="rocket">
+      Install playhtml and ship your first live element. [Read
+      &rarr;](/docs/getting-started/)
+    </Card>
+    <Card title="Core concepts" icon="open-book">
+      Element data, page data, presence, events: when to use each. [Read
+      &rarr;](/docs/concepts/)
+    </Card>
+    <Card title="Capabilities" icon="puzzle">
+      Every built-in `can-*` attribute with live demos. [Read
+      &rarr;](/docs/capabilities/)
+    </Card>
+  </CardGrid>
+</div>
