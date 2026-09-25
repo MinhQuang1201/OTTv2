@@ -17,6 +17,7 @@ Mục tiêu của ván là đạt một trong các điều kiện sau:
 1. Đưa một quân của mình vào ô thắng của mình.
 2. Làm cho đối phương không còn quân nào trên bàn.
 3. Khi tới lượt, đối phương không còn nước đi hợp lệ.
+4. Làm đồng hồ của đối phương về 0.
 
 Ván kết thúc ngay khi một điều kiện thắng được xác định.
 
@@ -154,6 +155,10 @@ Hai quân cùng loại không khắc chế nhau.
 
 Quân di chuyển như quân Vua trong cờ vua:
 
+- Một nước đi chỉ hợp lệ khi ván đang diễn ra và do người đang tới lượt thực hiện.
+- Ô nguồn phải là tọa độ hợp lệ và đang có đúng một quân của người thực hiện nước đi.
+- Ô đích phải là tọa độ hợp lệ, nằm trong bàn cờ và cách ô nguồn đúng một ô theo một trong tám hướng.
+- Ô đích còn phải thỏa mãn luật ô đích ở mục 8. Một nước giao chiến mà quân đi bị loại vẫn là nước đi hợp lệ.
 - Mỗi lượt, một quân chỉ được đi đúng một ô.
 - Có thể đi theo một trong tám hướng: ngang, dọc hoặc chéo.
 - Không được đi ra ngoài bàn cờ.
@@ -249,7 +254,7 @@ Một lượt gồm các bước:
 5. Hệ thống kiểm tra điều kiện thắng.
 6. Nếu chưa có người thắng, chuyển lượt.
 
-Nước đi không hợp lệ không làm thay đổi trạng thái bàn cờ và không làm chuyển lượt.
+Nước đi không hợp lệ không làm thay đổi trạng thái bàn cờ, không làm chuyển lượt và không dừng hoặc đặt lại đồng hồ của người đang tới lượt.
 
 ### Không còn nước đi hợp lệ
 
@@ -289,20 +294,24 @@ Ví dụ, nếu Xanh còn 2 quân Kéo nhưng không còn quân Đấm và Lá, 
 
 Nếu tới lượt đối phương mà đối phương không thể thực hiện bất kỳ nước đi hợp lệ nào, người chơi còn lại thắng.
 
+### 10.4. Hết giờ
+
+Nếu đồng hồ của một người chơi về 0, người đó thua ngay và người còn lại thắng. Cách vận hành đồng hồ được quy định tại mục 14.1.
+
 ---
 
 ## 11. Thứ tự kiểm tra kết thúc ván
 
-Sau khi một nước hợp lệ hoàn tất, hệ thống kiểm tra theo thứ tự:
+Sau khi một nước hợp lệ hoàn tất, hệ thống kiểm tra theo thứ tự sau. Trong mục này, **người vừa đi** là người thực hiện nước đi, còn **người sắp đi** là đối phương của họ.
 
-1. Người vừa đi có quân trên ô thắng của mình không.
-2. Đối phương còn quân nào trên bàn không.
-3. Đối phương còn ít nhất một nước đi hợp lệ không.
-4. Nếu chưa có điều kiện nào, chuyển lượt.
+1. Nếu người vừa đi có quân trên ô thắng của chính mình, người vừa đi thắng với lý do `đến ô thắng`.
+2. Đếm quân còn lại của **cả hai phe**:
+   - Nếu đối phương không còn quân, người vừa đi thắng với lý do `đối phương không còn quân`.
+   - Nếu người vừa đi không còn quân, đối phương thắng với lý do `đối phương không còn quân`.
+3. Nếu cả hai phe vẫn còn quân, kiểm tra người sắp đi có ít nhất một nước đi hợp lệ không. Nếu không có, người vừa đi thắng với lý do `không còn nước đi`.
+4. Nếu chưa có điều kiện nào ở trên, chuyển lượt cho người sắp đi.
 
-Nếu một nước vừa đưa quân vào ô thắng vừa loại quân cuối cùng của đối phương, người vừa đi thắng. Lý do ưu tiên là đến ô thắng.
-
-Nếu quân đi bị loại trong giao chiến và đó là quân cuối cùng của người đi, người còn lại thắng do đối phương không còn quân.
+Nếu một nước vừa đưa quân vào ô thắng vừa loại quân cuối cùng của đối phương, người vừa đi thắng; lý do ưu tiên là `đến ô thắng`. Theo luật giao chiến, sau một nước hợp lệ không thể có cả hai phe cùng hết quân.
 
 Ván đã kết thúc thì mọi nước đi tiếp theo đều không hợp lệ.
 
@@ -310,17 +319,17 @@ Ván đã kết thúc thì mọi nước đi tiếp theo đều không hợp l�
 
 ## 12. Bảng tương tác
 
-| Quân đi | Quân ở ô đích | Kết quả |
+| Trạng thái ô đích | Quân đi (nếu có giao chiến) | Kết quả |
 |---|---|---|
-| Đấm | Kéo đối phương | Đấm thắng, Kéo bị loại, Đấm chiếm ô |
-| Kéo | Lá đối phương | Kéo thắng, Lá bị loại, Kéo chiếm ô |
-| Lá | Đấm đối phương | Lá thắng, Đấm bị loại, Lá chiếm ô |
-| Đấm | Lá đối phương | Đấm thua, Đấm bị loại, Lá giữ ô |
-| Lá | Kéo đối phương | Lá thua, Lá bị loại, Kéo giữ ô |
-| Kéo | Đấm đối phương | Kéo thua, Kéo bị loại, Đấm giữ ô |
-| Cùng loại, khác phe | Bất kỳ | Nước đi không hợp lệ, không quân nào bị loại |
-| Cùng phe | Bất kỳ | Nước đi không hợp lệ |
 | Ô trống | - | Di chuyển bình thường |
+| Có quân cùng phe | Bất kỳ | Nước đi không hợp lệ |
+| Có quân đối phương cùng loại | Bất kỳ | Nước đi không hợp lệ, không quân nào bị loại |
+| Có Kéo đối phương | Đấm | Đấm thắng, Kéo bị loại, Đấm chiếm ô |
+| Có Lá đối phương | Kéo | Kéo thắng, Lá bị loại, Kéo chiếm ô |
+| Có Đấm đối phương | Lá | Lá thắng, Đấm bị loại, Lá chiếm ô |
+| Có Lá đối phương | Đấm | Đấm thua, Đấm bị loại, Lá giữ ô |
+| Có Kéo đối phương | Lá | Lá thua, Lá bị loại, Kéo giữ ô |
+| Có Đấm đối phương | Kéo | Kéo thua, Kéo bị loại, Đấm giữ ô |
 
 ---
 
@@ -350,24 +359,44 @@ Nếu Đỏ ăn quân cuối cùng của Xanh, Xanh không còn quân trên bàn
 
 Nếu đến lượt Xanh nhưng mọi quân Xanh đều bị chặn bởi quân cùng phe hoặc các quân cùng loại của Đỏ, Xanh không có nước đi hợp lệ và Đỏ thắng.
 
+### Hết giờ
+
+Nếu đồng hồ của Đỏ/A về 0 trong khi ván chưa kết thúc, Xanh/B thắng ngay, bất kể trạng thái các quân trên bàn.
+
 ---
 
 ## 14. Luật phòng chơi
 
 Một ván có tối đa hai người, tương ứng với ghế A và B.
 
-Nếu một người rời phòng hoặc mất kết nối trong khi ván đang diễn ra:
+### 14.1. Đồng hồ ván đấu
+
+- Mỗi ghế có 10 phút tổng thời gian cho cả ván. Không có thời gian cộng thêm sau nước đi.
+- Khi ván bắt đầu, đồng hồ của Đỏ/A chạy trước. Sau mỗi nước đi hợp lệ chưa kết thúc ván, đồng hồ của người vừa đi dừng và đồng hồ của người tới lượt tiếp theo chạy ngay.
+- Đồng hồ dừng khi ván kết thúc. Nước đi không hợp lệ không làm dừng, đặt lại hoặc chuyển đồng hồ.
+- Khi đồng hồ của một người về 0, người đó thua ngay; người còn lại thắng với lý do `hết giờ`.
+
+### 14.2. Rời phòng và mất kết nối
+
+Nếu một người chủ động rời phòng khi ván đang diễn ra:
 
 - Người còn lại thắng ngay.
 - Lý do kết thúc là `đối thủ rời phòng`.
 
-Đây là luật của phòng chơi và không thay đổi luật di chuyển, giao chiến hoặc ô thắng.
+Nếu một người mất kết nối khi ván đang diễn ra:
+
+- Ghế của người đó được giữ trong tối đa 60 giây để họ kết nối lại đúng ghế.
+- Trong thời gian chờ kết nối lại, đồng hồ của người mất kết nối dừng. Đồng hồ của đối phương vẫn tuân theo lượt hiện tại.
+- Nếu người mất kết nối quay lại trong 60 giây, ván tiếp tục; đồng hồ của người đang tới lượt chạy theo luật 14.1.
+- Nếu quá 60 giây vẫn chưa kết nối lại, người còn lại thắng với lý do `đối thủ mất kết nối`.
+
+Luật này chỉ áp dụng khi ván chưa kết thúc và không thay đổi luật di chuyển, giao chiến hoặc ô thắng.
 
 ---
 
 ## 15. Đặc tả ngắn gọn
 
-> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng A9; ghế B màu Xanh đi sau và có ô thắng I1. Mỗi người có 9 quân gồm 3 Đấm, 3 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi di chuyển một quân đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe. Nếu ô đích có quân đối phương cùng loại, nước đi không hợp lệ. Nếu ô đích có quân đối phương khác loại, Đấm thắng Kéo, Kéo thắng Lá và Lá thắng Đấm; quân thắng chiếm ô còn quân thua bị loại. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, hoặc khi đối phương tới lượt nhưng không còn nước đi hợp lệ. Nước đi không hợp lệ không chuyển lượt. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
+> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng A9; ghế B màu Xanh đi sau và có ô thắng I1. Mỗi người có 9 quân gồm 3 Đấm, 3 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi chỉ được di chuyển một quân của mình đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại. Nếu ô đích có quân đối phương khác loại, Đấm thắng Kéo, Kéo thắng Lá và Lá thắng Đấm; quân thắng chiếm ô còn quân thua bị loại. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, khi đối phương tới lượt nhưng không còn nước đi hợp lệ, hoặc khi đồng hồ đối phương hết. Mỗi ghế có 10 phút cho cả ván; nước đi không hợp lệ không chuyển lượt hay dừng đồng hồ. Mất kết nối được giữ ghế trong 60 giây để quay lại, quá hạn thì đối thủ thắng. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
 
 ---
 
@@ -387,6 +416,9 @@ KHÁC LOẠI:       Quân thắng chiếm ô, quân thua bị loại
 THẮNG 1:         Vào ô thắng của mình
 THẮNG 2:         Đối phương hết toàn bộ quân
 THẮNG 3:         Đối phương không còn nước đi hợp lệ
+THẮNG 4:         Đồng hồ đối phương hết giờ
 NƯỚC SAI:        Không đổi trạng thái, không đổi lượt
+ĐỒNG HỒ:         10 phút mỗi ghế, chỉ chạy ở lượt của ghế đó
+MẤT KẾT NỐI:     Có 60 giây để quay lại, quá hạn thì người mất kết nối thua
 KẾT THÚC:        Ngay khi có điều kiện thắng
 ```
