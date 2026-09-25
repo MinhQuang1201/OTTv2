@@ -4,7 +4,7 @@ Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá h
 
 - Người A (Đỏ) thắng trên **a9**. Người B (Xanh) thắng trên **i1**.
 - Đi như vua cờ vua: 8 hướng, 1 ô.
-- Cùng loại: xếp chồng, không ăn.
+- Cùng loại khác phe: nước đi bị từ chối; mỗi ô chỉ có một quân.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
 
 ## Chạy
@@ -46,10 +46,12 @@ Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http:
 | Quân | Mỗi bên 9 quân: 3 Đấm, 3 Lá, 3 Kéo |
 | Vòng ăn | Đấm > Kéo > Lá > Đấm |
 | Di chuyển | 1 ô, 8 hướng; không ra ngoài bàn; không vào ô có quân cùng phe |
-| Xếp chồng | Hai quân đối địch cùng loại đứng chung ô |
+| Cùng loại | Không được đi vào ô có quân đối phương cùng loại |
 | Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
 | Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
-| Thế trận | A phía trên bên phải, B phía dưới bên trái, đối xứng 180°; không đặt quân lên a9/i1 lúc xếp |
+| Thế trận | A ở A3:C5, B ở G5:I7, đối xứng 180°; không đặt quân lên a9/i1 lúc xếp |
+| Đồng hồ | 10 phút mỗi ghế; server quyết định timeout |
+| Kết nối lại | Grace 60 giây; `leave` xử thua ngay, `close` giữ ghế |
 
 Chi tiết thuật ngữ: [CONTEXT.md](CONTEXT.md).
 
@@ -80,7 +82,7 @@ Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.a
 npm test
 ```
 
-`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, xếp chồng, ô thắng, ăn hết quân.
+`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
 
 `tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
 
@@ -99,4 +101,4 @@ pf.join("K7P2", "Bình");
 pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
 ```
 
-Sự kiện: `open`, `close`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.
+Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.

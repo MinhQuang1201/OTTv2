@@ -26,7 +26,6 @@
     for (const ev of trial.events) {
       if (ev.type === "capture") score += 40;
       if (ev.type === "strike_loss") score -= 35;
-      if (ev.type === "stack") score += 4;
     }
     const goal = GOAL[player];
     score += (8 - chebyshev(move.to, goal)) * 2;
@@ -38,7 +37,12 @@
 
   function chooseMove(state, player) {
     const moves = rules.allMoves(state, player);
-    if (!moves.length) return null;
+    if (!moves.length) {
+      if (!state.winner && typeof console !== "undefined" && console.error) {
+        console.error("AI không có nước đi trong thế chưa kết thúc");
+      }
+      return null;
+    }
     let best = moves[0];
     let bestScore = -Infinity;
     for (const move of moves) {
