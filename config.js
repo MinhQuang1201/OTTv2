@@ -11,17 +11,20 @@
   const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
   const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
 
-  // A starts in the upper-right. B is the 180-degree rotate around e5.
+  // A uses three interlocking RPS triangles in the upper-right. Each triangle
+  // can answer the counter that threatens either of its other two pieces,
+  // while the gaps keep opening moves from being locked into a 3x3 block.
+  // B is the 180-degree rotation around e5, so both sides remain balanced.
   const A_SETUP = [
-    { type: "la", x: 8, y: 2 },
-    { type: "dam", x: 7, y: 2 },
-    { type: "keo", x: 6, y: 2 },
-    { type: "dam", x: 8, y: 3 },
-    { type: "keo", x: 7, y: 3 },
-    { type: "la", x: 6, y: 3 },
-    { type: "keo", x: 8, y: 4 },
-    { type: "la", x: 7, y: 4 },
-    { type: "dam", x: 6, y: 4 }
+    { type: "dam", x: 6, y: 0 }, // g1
+    { type: "keo", x: 7, y: 0 }, // h1
+    { type: "la", x: 6, y: 1 }, // g2
+    { type: "dam", x: 7, y: 2 }, // h3
+    { type: "keo", x: 8, y: 2 }, // i3
+    { type: "la", x: 8, y: 3 }, // i4
+    { type: "dam", x: 6, y: 3 }, // g4
+    { type: "keo", x: 7, y: 4 }, // h5
+    { type: "la", x: 6, y: 4 } // g5
   ];
 
   const DELTAS = [

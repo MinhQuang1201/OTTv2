@@ -41,6 +41,27 @@ describe("setup", () => {
     }
   });
 
+  it("uses three staggered RPS triangles instead of a solid 3x3 block", () => {
+    const s = rules.createInitialState();
+    const actual = s.pieces
+      .filter((p) => p.player === "A")
+      .map((p) => `${rules.formatSquare(p)}:${p.type}`)
+      .sort();
+    const expected = [
+      "g1:dam",
+      "h1:keo",
+      "g2:la",
+      "h3:dam",
+      "i3:keo",
+      "i4:la",
+      "g4:dam",
+      "h5:keo",
+      "g5:la"
+    ].sort();
+
+    assert.deepEqual(actual, expected);
+  });
+
   it("starts A in the upper-right and B in the lower-left", () => {
     const s = rules.createInitialState();
     assert.ok(
@@ -102,7 +123,7 @@ describe("movement", () => {
     const s = rules.createInitialState();
     const ok = move(s, "A", "i3", "i2");
     assert.equal(ok.ok, true);
-    assert.equal(pieceAt(ok.state, "i2", "A").type, "la");
+    assert.equal(pieceAt(ok.state, "i2", "A").type, "keo");
     const far = move(s, "A", "i3", "i1");
     assert.equal(far.ok, false);
   });

@@ -6,6 +6,7 @@ Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá h
 - Đi như vua cờ vua: 8 hướng, 1 ô.
 - Cùng loại: xếp chồng, không ăn.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
+- Đội hình mở dùng ba tam giác Đấm–Lá–Kéo đan xen, có khe triển khai và khả năng hỗ trợ phản công.
 
 ## Chạy
 
