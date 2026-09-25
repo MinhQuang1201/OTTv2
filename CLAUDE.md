@@ -60,3 +60,15 @@ npm test
 ## Giao diện
 
 Hallmark: Workbench, night zinc print shop, accent hue 35. Token trong `tokens.css`. Không nhét luật vào CSS.
+
+## PlayHTML
+
+Đọc [docs/PLAYHTML_AI_GUIDE.md](docs/PLAYHTML_AI_GUIDE.md) trước khi thêm hoặc sửa PlayHTML. Guardrail bắt buộc:
+
+- Mỗi phần tử chia sẻ có `id` duy nhất, ổn định; chỉ dùng `selector-id` cho danh sách cố định, không reorder.
+- Phân loại state đúng: persistent element/page data, ephemeral presence/awareness, event một lần, hoặc local-only. Không tự dựng kênh WebSocket thứ hai cho cùng state.
+- Dùng `setData` mutator cho update phụ thuộc state hiện tại; trong array mutator chỉ dùng `push` và `splice`; luôn giới hạn collection tăng dần.
+- Không ghi shared state trong render, `updateElement`, hoặc effect/subscription theo dõi chính state đó. Không đồng bộ input tần suất cao ở từng event.
+- Vanilla code mới dùng `register()`/`define()`, không dùng property API deprecated. React dùng một `PlayProvider` cho mỗi root.
+- Không gắn `can-move`, `can-spin`, `can-grow` cùng element. Chỉ dùng `can-mirror` trong phạm vi nó hỗ trợ; state cần schema/validation dùng `can-play`.
+- Với event payload, cursor options và React wrapper props có docs không nhất quán, kiểm tra declaration/runtime của package đang cài trước khi dùng.
