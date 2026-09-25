@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playfull – thư viện multiplayer OTTv2</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="playfull.js"></script>
+  </head>
+  <body class="docs">
+    <main class="docs-main">
+      <p class="docs-kicker">OTTv2</p>
+      <h1>Playfull</h1>
+      <p>
+        Thư viện khách quản lý WebSocket, phòng chơi và đồng bộ nước đi. Game
+        nạp file này qua <code>playfull.js</code>.
+      </p>
+      <pre class="docs-code">const pf = new Playfull();
+await pf.connect();
+pf.on("state", (msg) => render(msg.state));
+pf.create("An");
+pf.join("K7P2", "Bình");
+pf.move({ x: 0, y: 2 }, { x: 0, y: 1 });</pre>
+      <h2>Sự kiện</h2>
+      <ul>
+        <li><code>open</code> / <code>close</code> / <code>error</code></li>
+        <li><code>hello</code> <code>rooms</code> danh sách phòng chờ</li>
+        <li><code>joined</code> ghế A hoặc B</li>
+        <li><code>state</code> bàn cờ do server gửi</li>
+        <li><code>gameover</code> lý do thắng</li>
+        <li><code>left</code> đã rời phòng</li>
+      </ul>
+      <p><a href="index.html">Vào bàn cờ</a></p>
+    </main>
+  </body>
+</html>

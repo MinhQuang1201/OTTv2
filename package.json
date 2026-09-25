@@ -1,0 +1,17 @@
+{
+  "name": "ottv2",
+  "version": "1.0.0",
+  "description": "Oẳn Tù Tì v2 – cờ chiến thuật realtime 9x9",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "assets": "node scripts/gen-assets.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

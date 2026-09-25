@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="OTTv2 – oẳn tù tì chiến thuật realtime trên bàn 9x9" />
+    <title>OTTv2 – Oẳn Tù Tì</title>
+    <link rel="preconnect" href="https://fonts.bunny.net" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.bunny.net/css?family=azeret-mono:500,600|be-vietnam-pro:400,500,600,700"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div id="app" data-screen="lobby">
+      <section id="lobby" class="lobby" aria-label="Sảnh">
+        <div class="lobby-brand">
+          <p class="mark">OTTv2</p>
+          <h1>Oẳn tù tì trên bàn chín ô</h1>
+          <p class="lede">
+            Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Đưa quân vào góc nhà hoặc tuyệt
+            chủng một loại quân của đối phương.
+          </p>
+        </div>
+        <div class="lobby-shell">
+          <div class="lobby-core">
+            <form id="start-form" class="start-form" autocomplete="on">
+              <label class="field">
+                <span>Tên</span>
+                <input
+                  id="player-name"
+                  name="name"
+                  maxlength="20"
+                  required
+                  placeholder="Tên của bạn"
+                />
+              </label>
+              <div class="form-row">
+                <button class="btn btn-primary" type="submit" name="intent" value="create">
+                  Tạo phòng
+                  <span class="btn-icon" aria-hidden="true">↗</span>
+                </button>
+              </div>
+              <label class="field">
+                <span>Mã phòng</span>
+                <input
+                  id="room-code"
+                  name="room"
+                  maxlength="6"
+                  placeholder="K7P2"
+                  spellcheck="false"
+                  autocapitalize="characters"
+                />
+              </label>
+              <button class="btn btn-ghost" type="submit" name="intent" value="join">
+                Vào phòng
+              </button>
+              <div class="local-row">
+                <button class="btn btn-ghost" type="submit" name="intent" value="local">
+                  Hai người một máy
+                </button>
+                <button class="btn btn-ghost" type="submit" name="intent" value="ai">
+                  Đấu với máy
+                </button>
+              </div>
+            </form>
+            <div class="waiting-list">
+              <h2>Phòng đang chờ</h2>
+              <ul id="room-list" class="room-list">
+                <li class="empty-line">Chưa có phòng mở.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="table" class="table" hidden aria-label="Bàn cờ">
+        <div class="table-bar">
+          <button class="btn btn-quiet" id="btn-leave" type="button">Rời bàn</button>
+          <p class="room-chip" id="room-chip">Phòng</p>
+          <p class="net-chip" id="net-chip" data-state="off">Ngoại tuyến</p>
+        </div>
+
+        <article class="hud hud-b" data-seat="B">
+          <header>
+            <p class="seat-tag">Người B · i9</p>
+            <h2 id="name-b">Người B</h2>
+          </header>
+          <ul class="counts" id="counts-b" aria-label="Quân còn lại người B"></ul>
+        </article>
+
+        <div class="board-shell">
+          <div class="crop tl" aria-hidden="true"></div>
+          <div class="crop tr" aria-hidden="true"></div>
+          <div class="crop bl" aria-hidden="true"></div>
+          <div class="crop br" aria-hidden="true"></div>
+          <div class="board-frame">
+            <div class="ranks" id="ranks" aria-hidden="true"></div>
+            <div
+              id="board"
+              class="board"
+              role="grid"
+              aria-label="Bàn cờ 9 x 9"
+            ></div>
+            <div class="files" id="files" aria-hidden="true"></div>
+          </div>
+          <p class="turn-line t-swap" id="turn-line" aria-live="polite">Lượt người A</p>
+          <p class="wait-line" id="wait-line" hidden>Đang chờ đối thủ vào phòng.</p>
+        </div>
+
+        <article class="hud hud-a" data-seat="A">
+          <header>
+            <p class="seat-tag">Người A · a1</p>
+            <h2 id="name-a">Người A</h2>
+          </header>
+          <ul class="counts" id="counts-a" aria-label="Quân còn lại người A"></ul>
+        </article>
+      </section>
+    </div>
+
+    <div id="toast" class="t-toast" role="status" aria-live="polite" hidden></div>
+
+    <dialog id="win-dialog" class="t-modal">
+      <div class="win-card">
+        <svg class="t-success-check" viewBox="0 0 48 48" aria-hidden="true">
+          <circle cx="24" cy="24" r="20" fill="none" />
+          <path d="M14 25 l7 7 13-15" fill="none" />
+        </svg>
+        <h2 id="win-title">Kết quả</h2>
+        <p id="win-reason"></p>
+        <form method="dialog">
+          <button class="btn btn-primary" id="btn-again" value="again">
+            Về sảnh
+            <span class="btn-icon" aria-hidden="true">↗</span>
+          </button>
+        </form>
+      </div>
+    </dialog>
+
+    <script src="config.js"></script>
+    <script src="rules.js"></script>
+    <script src="ai.js"></script>
+    <script src="playfull.js"></script>
+    <script src="game.js"></script>
+  </body>
+</html>

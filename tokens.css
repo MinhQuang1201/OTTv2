@@ -1,0 +1,99 @@
+/* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: 35
+ * theme: custom · vibe: night zinc print shop
+ * paper oklch(22% 0.028 192) · accent oklch(64% 0.18 35)
+ * display: Be Vietnam Pro · mono: Azeret Mono
+ * paper-band: dark / display-style: grotesk-sans / accent-hue: warm
+ */
+:root {
+  --color-paper: oklch(22% 0.028 192);
+  --color-paper-2: oklch(26% 0.03 192);
+  --color-paper-3: oklch(30% 0.032 192);
+  --color-ink: oklch(93% 0.02 95);
+  --color-ink-dim: oklch(78% 0.025 192);
+  --color-line: oklch(40% 0.03 192);
+  --color-accent: oklch(64% 0.18 35);
+  --color-accent-ink: oklch(18% 0.05 35);
+  --color-a: oklch(68% 0.15 350);
+  --color-a-deep: oklch(48% 0.14 350);
+  --color-b: oklch(70% 0.11 210);
+  --color-b-deep: oklch(46% 0.1 210);
+  --color-good: oklch(72% 0.14 150);
+  --color-warn: oklch(72% 0.14 85);
+  --color-focus: oklch(78% 0.14 35);
+  --color-board-a: oklch(28% 0.022 192);
+  --color-board-b: oklch(24% 0.03 192);
+  --color-legal: oklch(70% 0.12 150);
+  --color-goal-a: oklch(34% 0.06 350);
+  --color-goal-b: oklch(34% 0.055 210);
+
+  --font-display: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  --font-mono: "Azeret Mono", "Cascadia Mono", ui-monospace, monospace;
+
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.75rem;
+  --text-display: 4.5rem;
+
+  --radius-cell: 4px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+  --dur-quick: 150ms;
+  --dur-fast: 250ms;
+  --dur-slow: 400ms;
+
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --blur-small: 2px;
+  --modal-open-dur: 250ms;
+  --modal-close-dur: 150ms;
+  --modal-scale: 0.96;
+  --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --text-swap-dur: 150ms;
+  --digit-dur: 500ms;
+  --toast-dur: 350ms;
+
+  --color-glow-cyan: oklch(28% 0.04 192);
+  --color-glow-amber: oklch(26% 0.05 35);
+  --color-shell: oklch(18% 0.03 192 / 0.35);
+  --color-shell-line: oklch(40% 0.03 192 / 0.45);
+  --color-panel-shine: oklch(95% 0.02 95 / 0.08);
+  --color-hover: oklch(34% 0.03 192);
+  --color-accent-hover: oklch(70% 0.18 35);
+  --color-placeholder: oklch(62% 0.03 192);
+  --color-icon-well: oklch(18% 0.04 35 / 0.18);
+  --color-piece-ring: oklch(95% 0.02 95 / 0.28);
+  --color-piece-shadow: oklch(10% 0.02 192 / 0.35);
+  --color-backdrop: oklch(10% 0.03 192 / 0.62);
+
+  --z-grain: 0;
+  --z-table: 1;
+  --z-hud: 2;
+  --z-toast: 5;
+  --z-modal: 6;
+}
