@@ -323,6 +323,14 @@ input::placeholder {
   font-style: normal;
 }
 
+.clock {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
 .seat-tag {
   margin: 0;
   font-family: var(--font-mono);
@@ -473,16 +481,6 @@ input::placeholder {
 
 .cell.is-burst .piece {
   animation: burst var(--dur-slow) var(--ease-out);
-}
-
-.stack {
-  display: grid;
-  place-items: center;
-}
-
-.stack .piece:nth-child(2) {
-  margin-top: -18%;
-  margin-left: 18%;
 }
 
 .piece {

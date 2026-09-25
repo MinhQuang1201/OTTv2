@@ -119,30 +119,37 @@ function broadcastLobby() {
   }
 }
 
-function leaveRoom(ws) {
+function broadcastTerminal(room) {
+  if (!room || !room.state.winner || room._terminalBroadcasted) return;
+  room._terminalBroadcasted = true;
+  room.broadcast({
+    type: "gameover",
+    winner: room.state.winner,
+    reason: room.state.reason,
+    eliminatedPlayer: room.state.eliminatedPlayer
+  });
+}
+
+function publishRoom(room) {
+  room.emitState();
+  broadcastTerminal(room);
+}
+
+function leaveRoom(ws, intent) {
   const meta = sockets.get(ws);
   if (!meta || !meta.roomId) return;
   const room = rooms.get(meta.roomId);
   meta.roomId = null;
   if (!room) return;
-  const removed = room.removePlayer(ws);
+  const result = intent === "leave" ? room.leavePlayer(ws) : room.disconnectPlayer(ws);
   if (room.isEmpty()) rooms.delete(room.id);
-  else {
-    room.emitState();
-    if (removed && room.state.reason === "disconnect") {
-      room.broadcast({
-        type: "gameover",
-        winner: room.state.winner,
-        reason: "disconnect",
-        message: (removed.name || "Đối thủ") + " đã rời phòng"
-      });
-    }
-  }
+  else if (result && room.status !== "done") room.emitState();
+  else publishRoom(room);
   broadcastLobby();
 }
 
 function joinRoom(ws, room, name) {
-  leaveRoom(ws);
+  leaveRoom(ws, "leave");
   const added = room.addPlayer(ws, name);
   if (!added.ok) return added;
   const meta = sockets.get(ws) || {};
@@ -154,6 +161,7 @@ function joinRoom(ws, room, name) {
     roomId: room.id,
     you: added.seat,
     name: added.name,
+    resumeToken: added.resumeToken,
     players: room.payload().players,
     status: room.status
   });
@@ -203,6 +211,7 @@ wss.on("connection", (ws) => {
         return;
       }
       const room = new Room(uniqueRoomId());
+      room.onUpdate = () => publishRoom(room);
       rooms.set(room.id, room);
       const added = joinRoom(ws, room, sanitizeName(msg.name));
       if (!added.ok) send(ws, { type: "error", message: added.error });
@@ -223,8 +232,38 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (msg.type === "resume") {
+      const id = String(msg.roomId || "").trim().toUpperCase();
+      const room = rooms.get(id);
+      if (!room) {
+        send(ws, { type: "error", message: "Không tìm thấy phòng " + id });
+        return;
+      }
+      const resumed = room.resumePlayer(ws, String(msg.resumeToken || ""));
+      if (!resumed.ok) {
+        send(ws, { type: "error", message: resumed.error });
+        return;
+      }
+      const nextMeta = sockets.get(ws) || {};
+      nextMeta.roomId = room.id;
+      nextMeta.name = resumed.name;
+      sockets.set(ws, nextMeta);
+      send(ws, {
+        type: "joined",
+        roomId: room.id,
+        you: resumed.seat,
+        name: resumed.name,
+        resumeToken: room.players[resumed.seat].resumeToken,
+        players: room.payload().players,
+        status: room.status,
+        resumed: true
+      });
+      publishRoom(room);
+      return;
+    }
+
     if (msg.type === "leave") {
-      leaveRoom(ws);
+      leaveRoom(ws, "leave");
       send(ws, { type: "left" });
       return;
     }
@@ -250,18 +289,11 @@ wss.on("connection", (ws) => {
       }
       const result = room.handleMove(ws, from, to);
       if (!result.ok) {
+        if (room.state.winner) publishRoom(room);
         send(ws, { type: "error", message: result.error });
         return;
       }
-      room.emitState();
-      if (room.state.winner) {
-        room.broadcast({
-          type: "gameover",
-          winner: room.state.winner,
-          reason: room.state.reason,
-          eliminatedPlayer: room.state.eliminatedPlayer
-        });
-      }
+      publishRoom(room);
       return;
     }
 
@@ -269,7 +301,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    leaveRoom(ws);
+    leaveRoom(ws, "disconnect");
     sockets.delete(ws);
   });
 });

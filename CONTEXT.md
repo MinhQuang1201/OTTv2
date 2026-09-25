@@ -20,9 +20,9 @@ _Avoid_: tile, cell như khái niệm riêng
 Ô ghi bàn của một người chơi. Người A (Đỏ) thắng khi có quân trên a9. Người B (Xanh) thắng khi có quân trên i1. Rank 1 ở phía trên bàn, rank 9 ở phía dưới.
 _Avoid_: king square, nhà, đích đối phương
 
-**Xếp chồng**:
-Hai quân đối địch cùng loại đứng chung một ô. Không quân nào bị ăn. Ô bị chiếm; quân cùng phe không được đi vào.
-_Avoid_: stack như kho, merge, đè
+**Chiếm ô**:
+Mỗi ô chỉ có một quân. Quân không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại.
+_Avoid_: stack, merge, đè
 
 **Ăn**:
 Quân đi vào ô có quân đối phương khác loại và thắng theo oẳn tù tì, quân đối phương rời bàn.

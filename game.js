@@ -15,7 +15,11 @@
     legal: [],
     lastEvents: [],
     roomId: null,
-    leaving: false
+    leaving: false,
+    reconnecting: false,
+    clockStamp: 0,
+    clockTimer: null,
+    onlineStateAt: 0
   };
 
   const els = {
@@ -35,6 +39,8 @@
     nameB: document.getElementById("name-b"),
     countsA: document.getElementById("counts-a"),
     countsB: document.getElementById("counts-b"),
+    clockA: document.getElementById("clock-a"),
+    clockB: document.getElementById("clock-b"),
     hudA: document.querySelector(".hud-a"),
     hudB: document.querySelector(".hud-b"),
     roomChip: document.getElementById("room-chip"),
@@ -107,16 +113,67 @@
       return "Đưa quân vào ô thắng " + rules.formatSquare(goal).toUpperCase() + ".";
     }
     if (state.reason === "elimination") return "Đối phương không còn quân nào.";
-    if (state.reason === "disconnect") return "Đối thủ đã rời phòng.";
+    if (state.reason === "no_moves") return "Đối phương không còn nước đi hợp lệ.";
+    if (state.reason === "timeout") return "Hết giờ.";
+    if (state.reason === "leave") return "Đối thủ đã rời bàn.";
+    if (state.reason === "disconnect_timeout") return "Đối thủ không kết nối lại trong thời gian cho phép.";
     return "";
   }
 
   function canControl(seat) {
-    if (!app.state || app.state.winner) return false;
+    if (!app.state || app.state.winner || app.reconnecting) return false;
     if (app.status === "waiting") return false;
     if (app.mode === "local") return app.state.turn === seat;
     if (app.mode === "ai") return app.you === seat && app.state.turn === seat;
     return app.you === seat && app.state.turn === seat;
+  }
+
+  function formatClock(ms) {
+    const seconds = Math.max(0, Math.ceil(ms / 1000));
+    return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
+  }
+
+  function currentClockMs(seat) {
+    if (!app.state || !app.state.clock) return 0;
+    let remaining = app.state.clock.remainingMs[seat];
+    if (app.mode === "online" && !app.reconnecting && app.state.clock.runningSeat === seat && app.onlineStateAt) {
+      remaining -= performance.now() - app.onlineStateAt;
+    }
+    return Math.max(0, remaining);
+  }
+
+  function renderClock() {
+    if (!app.state || !app.state.clock) return;
+    els.clockA.textContent = formatClock(currentClockMs("A"));
+    els.clockB.textContent = formatClock(currentClockMs("B"));
+  }
+
+  function tickLocalClock() {
+    if (!app.state || app.mode === "online" || app.state.winner || !app.state.clock.runningSeat) return;
+    const now = performance.now();
+    const elapsed = Math.max(0, Math.floor(now - app.clockStamp));
+    if (elapsed > 0) {
+      const result = rules.elapseClock(app.state, elapsed);
+      app.state = result.state;
+      app.lastEvents = result.events;
+      app.clockStamp = now;
+      render();
+      if (app.state.winner) openWin(app.state);
+    }
+  }
+
+  function startClock() {
+    stopClock();
+    app.clockStamp = performance.now();
+    app.clockTimer = setInterval(function () {
+      tickLocalClock();
+      renderClock();
+    }, 250);
+  }
+
+  function stopClock() {
+    if (app.clockTimer) clearInterval(app.clockTimer);
+    app.clockTimer = null;
   }
 
   function renderHud() {
@@ -134,6 +191,7 @@
       : "Lượt " + turnName;
     els.wait.hidden = app.status !== "waiting";
     els.roomChip.textContent = app.roomId ? "Phòng " + app.roomId : app.mode === "ai" ? "Đấu máy" : "Cùng máy";
+    renderClock();
   }
 
   function renderBoard() {
@@ -141,7 +199,7 @@
     els.board.innerHTML = "";
     const burstAt = {};
     for (const ev of app.lastEvents) {
-      if (ev.type === "capture" || ev.type === "strike_loss" || ev.type === "stack") {
+      if (ev.type === "capture" || ev.type === "strike_loss") {
         burstAt[ev.to.x + "," + ev.to.y] = true;
       }
     }
@@ -164,23 +222,19 @@
         const occ = state ? rules.piecesAt(state, x, y) : [];
         if (occ.length) {
           btn.classList.add("has-piece");
-          const wrap = document.createElement("div");
-          wrap.className = "stack";
-          occ.forEach(function (piece) {
-            const token = document.createElement("span");
-            token.className = "piece seat-" + piece.player;
-            if (canControl(piece.player)) token.classList.add("is-mine");
-            token.innerHTML =
-              '<img src="' +
-              config.ASSET[piece.type] +
-              '" alt="' +
-              config.TYPE_LABEL[piece.type] +
-              " " +
-              piece.player +
-              '">';
-            wrap.appendChild(token);
-          });
-          btn.appendChild(wrap);
+          const piece = occ[0];
+          const token = document.createElement("span");
+          token.className = "piece seat-" + piece.player;
+          if (canControl(piece.player)) token.classList.add("is-mine");
+          token.innerHTML =
+            '<img src="' +
+            config.ASSET[piece.type] +
+            '" alt="' +
+            config.TYPE_LABEL[piece.type] +
+            " " +
+            piece.player +
+            '">';
+          btn.appendChild(token);
         }
         if (app.selected && app.selected.x === x && app.selected.y === y) {
           btn.classList.add("is-selected");
@@ -254,7 +308,10 @@
   function playAi() {
     if (app.mode !== "ai" || !app.state || app.state.winner) return;
     const choice = ai.chooseMove(app.state, app.state.turn);
-    if (!choice) return;
+    if (!choice) {
+      toast("Máy không có nước đi hợp lệ.", "error");
+      return;
+    }
     applyLocal(choice.from, choice.to);
   }
 
@@ -291,10 +348,25 @@
     const pf = new window.Playfull();
     app.pf = pf;
     pf.on("open", function () {
-      setNet("on", "Đã nối");
+      if (app.reconnecting) setNet("wait", "Đang khôi phục");
+      else setNet("on", "Đã nối");
     });
     pf.on("close", function () {
-      setNet("off", "Mất nối");
+      if (app.roomId && app.mode === "online" && !app.leaving) {
+        app.reconnecting = true;
+        setNet("wait", "Đang kết nối lại");
+        render();
+      } else setNet("off", "Mất nối");
+    });
+    pf.on("reconnecting", function () {
+      app.reconnecting = true;
+      setNet("wait", "Đang kết nối lại");
+      render();
+    });
+    pf.on("resumed", function () {
+      app.reconnecting = false;
+      setNet("on", "Đã nối lại");
+      render();
     });
     pf.on("error", function (msg) {
       toast((msg && msg.message) || "Lỗi mạng", "error");
@@ -309,6 +381,7 @@
       app.you = msg.you;
       app.roomId = msg.roomId;
       app.status = msg.status;
+      app.reconnecting = false;
       if (msg.players && msg.players.A) app.names.A = msg.players.A.name;
       if (msg.players && msg.players.B) app.names.B = msg.players.B.name;
       showScreen("table");
@@ -316,10 +389,12 @@
     });
     pf.on("state", function (msg) {
       app.state = msg.state;
+      app.onlineStateAt = performance.now();
       app.lastEvents = msg.events || [];
       app.status = msg.status;
       app.roomId = msg.roomId;
       app.you = msg.you || app.you;
+      app.reconnecting = false;
       if (msg.players && msg.players.A) app.names.A = msg.players.A.name;
       if (msg.players && msg.players.B) app.names.B = msg.players.B.name;
       if (app.status === "playing") setNet("on", "Đang chơi");
@@ -365,6 +440,7 @@
 
   function startLocal(kind) {
     app.mode = kind;
+    app.reconnecting = false;
     app.you = "A";
     app.status = "playing";
     app.roomId = null;
@@ -376,6 +452,7 @@
     setNet("off", kind === "ai" ? "Đấu máy" : "Cùng máy");
     showScreen("table");
     render();
+    startClock();
   }
 
   async function startOnline(intent) {
@@ -391,6 +468,8 @@
       return;
     }
     app.mode = "online";
+    app.reconnecting = false;
+    stopClock();
     app.state = rules.createInitialState();
     if (intent === "create") pf.create(playerName());
     else pf.join((els.room.value || "").trim().toUpperCase(), playerName());
@@ -400,6 +479,7 @@
     if (app.leaving) return;
     app.leaving = true;
     if (app.pf && app.mode === "online") app.pf.leave();
+    stopClock();
     app.mode = null;
     app.state = null;
     app.selected = null;

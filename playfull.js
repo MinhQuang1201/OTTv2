@@ -14,7 +14,13 @@
       this.roomId = null;
       this.state = null;
       this.connected = false;
+      this.resumeContext = null;
       this._ping = null;
+      this._reconnectTimer = null;
+      this._reconnectAttempt = 0;
+      this._intentionalClose = false;
+      this._resuming = false;
+      this._connectPromise = null;
     }
 
     on(event, fn) {
@@ -26,11 +32,8 @@
     }
 
     emit(event, payload) {
-      const list = this.handlers[event] || [];
-      for (const fn of list) fn(payload);
-      if (this.handlers["*"]) {
-        for (const fn of this.handlers["*"]) fn(event, payload);
-      }
+      for (const fn of this.handlers[event] || []) fn(payload);
+      for (const fn of this.handlers["*"] || []) fn(event, payload);
     }
 
     send(msg) {
@@ -43,74 +46,103 @@
     }
 
     connect() {
-      const self = this;
-      return new Promise(function (resolve, reject) {
-        if (self.ws && self.ws.readyState === 1) {
-          resolve();
-          return;
-        }
+      if (this.ws && this.ws.readyState === 1) return Promise.resolve();
+      if (this._connectPromise) return this._connectPromise;
+      this._intentionalClose = false;
+      this._connectPromise = new Promise((resolve, reject) => {
         let settled = false;
-        const ws = new WebSocket(self.url);
-        self.ws = ws;
-        ws.onopen = function () {
-          self.connected = true;
-          self.emit("open");
-          self._ping = setInterval(function () {
-            self.send({ type: "ping" });
-          }, 20000);
+        const ws = new WebSocket(this.url);
+        this.ws = ws;
+        ws.onopen = () => {
+          this.connected = true;
+          this._reconnectAttempt = 0;
+          this.emit("open");
+          this._ping = setInterval(() => this.send({ type: "ping" }), 20000);
+          if (this.resumeContext) {
+            this._resuming = true;
+            this.send({ type: "resume", roomId: this.resumeContext.roomId, resumeToken: this.resumeContext.resumeToken });
+          }
           if (!settled) {
             settled = true;
             resolve();
           }
+          this._connectPromise = null;
         };
-        ws.onerror = function () {
-          self.emit("error", { message: "Lỗi kết nối Playfull" });
+        ws.onerror = () => {
+          this.emit("error", { message: "Lỗi kết nối Playfull" });
           if (!settled) {
             settled = true;
             reject(new Error("Lỗi kết nối Playfull"));
+            this._connectPromise = null;
           }
         };
-        ws.onclose = function () {
-          self.connected = false;
-          if (self._ping) {
-            clearInterval(self._ping);
-            self._ping = null;
-          }
-          self.emit("close");
+        ws.onclose = () => {
+          this.connected = false;
+          if (this._ping) clearInterval(this._ping);
+          this._ping = null;
+          this.ws = null;
+          this.emit("close");
+          if (!this._intentionalClose && this.resumeContext) this.scheduleReconnect();
         };
-        ws.onmessage = function (ev) {
+        ws.onmessage = (ev) => {
           let msg;
           try {
             msg = JSON.parse(ev.data);
           } catch (err) {
-            self.emit("error", { message: "Máy chủ gửi gói lạ" });
+            this.emit("error", { message: "Máy chủ gửi gói lạ" });
             return;
           }
           if (msg.type === "joined") {
-            self.you = msg.you;
-            self.roomId = msg.roomId;
+            this.you = msg.you;
+            this.roomId = msg.roomId;
+            if (msg.resumeToken) {
+              this.resumeContext = { roomId: msg.roomId, resumeToken: msg.resumeToken, name: msg.name };
+            }
+            if (msg.resumed) this.emit("resumed", msg);
+            this._resuming = false;
           }
           if (msg.type === "state") {
-            self.you = msg.you || self.you;
-            self.roomId = msg.roomId || self.roomId;
-            self.state = msg.state;
+            this.you = msg.you || this.you;
+            this.roomId = msg.roomId || this.roomId;
+            this.state = msg.state;
           }
           if (msg.type === "left") {
-            self.you = null;
-            self.roomId = null;
-            self.state = null;
+            this.you = null;
+            this.roomId = null;
+            this.state = null;
+            this.resumeContext = null;
           }
-          self.emit(msg.type, msg);
+          if (msg.type === "error" && this._resuming) {
+            this.resumeContext = null;
+            this._resuming = false;
+          }
+          this.emit(msg.type, msg);
         };
       });
+      return this._connectPromise;
+    }
+
+    scheduleReconnect() {
+      if (this._reconnectTimer || !this.resumeContext) return;
+      const delay = Math.min(2000, 200 * Math.pow(2, this._reconnectAttempt++));
+      this.emit("reconnecting", { delay });
+      this._reconnectTimer = setTimeout(() => {
+        this._reconnectTimer = null;
+        this.connect().catch(() => this.scheduleReconnect());
+      }, delay);
     }
 
     create(name) {
-      return this.send({ type: "create", name: name });
+      return this.send({ type: "create", name });
     }
 
     join(roomId, name) {
-      return this.send({ type: "join", roomId: roomId, name: name });
+      return this.send({ type: "join", roomId, name });
+    }
+
+    resume(roomId, resumeToken) {
+      this.resumeContext = { roomId, resumeToken };
+      return this.send({ type: "resume", roomId, resumeToken });
     }
 
     list() {
@@ -118,18 +150,24 @@
     }
 
     move(from, to) {
-      return this.send({ type: "move", from: from, to: to });
+      return this.send({ type: "move", from, to });
     }
 
     leave() {
+      this._intentionalClose = true;
+      this.resumeContext = null;
+      if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
       return this.send({ type: "leave" });
     }
 
     close() {
-      if (this._ping) {
-        clearInterval(this._ping);
-        this._ping = null;
-      }
+      this._intentionalClose = true;
+      this.resumeContext = null;
+      if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+      if (this._ping) clearInterval(this._ping);
+      this._ping = null;
       if (this.ws) this.ws.close();
     }
   }

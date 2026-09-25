@@ -15,9 +15,9 @@ Node ≥ 18. Cổng mặc định 3000 (`PORT`).
 
 ## Ranh giới module
 
-- `config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, PORT. A (Đỏ) khởi tạo phía trên bên phải; B (Xanh) là đối xứng 180° phía dưới bên trái.
+- `config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, TIME_CONTROL, PORT. A (Đỏ) khởi tạo ở A3:C5; B (Xanh) là đối xứng 180° ở G5:I7.
 - `rules.js` — `createInitialState`, `getLegalMoves`, `applyMove`, `detectWinner`, `publicState`. Không I/O.
-- `room.js` — ghế A/B, `handleMove`, ngắt kết nối = đối phương thắng.
+- `room.js` — ghế A/B, `handleMove`, clock server-authoritative và grace reconnect.
 - `server.js` — file tĩnh + WS. Không chứa luật.
 - `playfull.js` — khách WS. Không chứa luật.
 - `game.js` — sảnh / bàn / local / AI. Online: chỉ gửi `pf.move`, vẽ `state` từ server.
@@ -25,20 +25,22 @@ Node ≥ 18. Cổng mặc định 3000 (`PORT`).
 
 ## Thuật ngữ
 
-Dùng [CONTEXT.md](CONTEXT.md): Quân, Loại quân, Ô, Ô thắng, Xếp chồng, Ăn, Đòn thua, Lượt, Ván, Tuyệt chủng, Ghế, Phòng, Playfull.
+Dùng [CONTEXT.md](CONTEXT.md): Quân, Loại quân, Ô, Ô thắng, Ăn, Đòn thua, Lượt, Ván, Tuyệt chủng, Ghế, Phòng, Playfull.
 
-Không gọi ô thắng là “nhà vua”. Không gọi xếp chồng là merge.
+Không gọi ô thắng là “nhà vua”. Mỗi ô chỉ có một quân; không dùng khái niệm xếp chồng.
 
 ## Luật bất biến
 
 - Đi 1 ô, 8 hướng.
 - Không vào ô có quân cùng phe.
-- Cùng loại → xếp chồng, không ăn.
+- Không vào ô có quân đối phương cùng loại.
 - Thua oẳn tù tì → quân đi bị loại, quân đứng yên.
 - A thắng trên a9, B thắng trên i1. Đứng ô thắng của đối phương không thắng.
 - Tuyệt chủng toàn bộ quân của một ghế → ghế kia thắng ngay.
-- Sau nước không thắng, lượt luôn chuyển sang ghế kia.
+- Sau nước không thắng, nếu ghế kia không có nước hợp lệ thì người vừa đi thắng với `no_moves`; nếu có, lượt chuyển sang ghế kia.
 - Thế trận không cho bước 1 vào ô thắng của mình.
+- Mỗi ghế có 10 phút; đồng hồ chỉ chạy ở ghế đang tới lượt và dừng khi ván kết thúc.
+- `close` mạng bắt đầu grace reconnect 60 giây; `leave` chủ động xử thua ngay.
 
 ## Kiểm thử
 
