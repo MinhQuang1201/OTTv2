@@ -22,7 +22,7 @@ Success: hai người vào cùng một phòng, đi luân phiên, server là tr�
 
 ## Positioning
 
-Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ chế riêng: cùng loại thì xếp chồng chứ không ăn; ô thắng nằm ở góc đối diện; ăn hết toàn bộ quân đối phương là thắng.
+Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ chế riêng: cùng loại khác phe không được đi vào cùng ô; ô thắng nằm ở góc đối diện; ăn hết toàn bộ quân đối phương là thắng.
 
 ## Capabilities
 
@@ -30,7 +30,8 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 - Chơi hai người một máy và đấu với máy (AI thay thế được).
 - Highlight quân đang chọn và ô đi được.
 - Hiệu ứng ăn quân, đổi lượt, thắng/thua.
-- Server kiểm tra nước đi và điều kiện thắng.
+- Server kiểm tra nước đi, điều kiện thắng và đồng hồ 10 phút mỗi ghế.
+- Mất kết nối giữ ghế 60 giây để kết nối lại; rời bàn chủ động xử thua ngay.
 
 ## Constraints
 
@@ -44,7 +45,7 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 
 ## Terminology
 
-Xem CONTEXT.md. Ghế A/B, ô thắng, xếp chồng, tuyệt chủng, Playfull.
+Xem CONTEXT.md. Ghế A/B, ô thắng, tuyệt chủng, Playfull.
 
 ## Voice
 

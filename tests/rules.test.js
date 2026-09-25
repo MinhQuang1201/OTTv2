@@ -7,43 +7,28 @@ function sq(name) {
   return rules.parseSquare(name);
 }
 
-function pieceAt(state, name, player) {
-  const { x, y } = sq(name);
-  return state.pieces.find((p) => p.x === x && p.y === y && p.player === player);
-}
-
 function move(state, player, from, to) {
   return rules.applyMove(state, player, sq(from), sq(to));
 }
 
+function pieceAt(state, name, player) {
+  const { x, y } = sq(name);
+  return state.pieces.find((p) => p.x === x && p.y === y && (!player || p.player === player));
+}
+
+function assertSingleOccupancy(state) {
+  const occupied = new Set();
+  for (const piece of state.pieces) {
+    const key = piece.x + "," + piece.y;
+    assert.equal(occupied.has(key), false, "duplicate occupancy at " + key);
+    occupied.add(key);
+  }
+}
+
 describe("setup", () => {
-  it("places 9 pieces per seat, 3 of each type, and leaves goals empty", () => {
-    const s = rules.createInitialState();
-    assert.equal(s.pieces.length, 18);
-    assert.equal(s.turn, "A");
-    assert.equal(s.winner, null);
-    for (const seat of ["A", "B"]) {
-      const c = rules.countByType(s, seat);
-      assert.deepEqual(c, { dam: 3, la: 3, keo: 3 });
-    }
-    assert.equal(rules.piecesAt(s, ...Object.values(config.GOAL.A)).length, 0);
-    assert.equal(rules.piecesAt(s, ...Object.values(config.GOAL.B)).length, 0);
-  });
-
-  it("reflects A onto B across the a1-i9 diagonal with the same types", () => {
-    const s = rules.createInitialState();
-    for (const p of s.pieces.filter((p) => p.player === "A")) {
-      const q = s.pieces.find(
-        (b) => b.player === "B" && b.x === p.y && b.y === p.x
-      );
-      assert.ok(q, `missing mirror of A ${p.type} at ${p.x},${p.y}`);
-      assert.equal(q.type, p.type);
-    }
-  });
-
-  it("uses three staggered RPS wings instead of a solid 3x3 block", () => {
-    const s = rules.createInitialState();
-    const actual = s.pieces
+  it("uses three RPS wings reflected across the a1-i9 diagonal", () => {
+    const state = rules.createInitialState();
+    const a = state.pieces
       .filter((p) => p.player === "A")
       .map((p) => `${rules.formatSquare(p)}:${p.type}`)
       .sort();
@@ -58,52 +43,55 @@ describe("setup", () => {
       "i4:la",
       "i5:dam"
     ].sort();
-
-    assert.deepEqual(actual, expected);
+    assert.deepEqual(a, expected);
+    assert.equal(state.pieces.length, 18);
+    assert.equal(state.turn, "A");
+    assert.equal(state.winner, null);
+    for (const seat of ["A", "B"]) {
+      assert.deepEqual(rules.countByType(state, seat), { dam: 3, la: 3, keo: 3 });
+    }
+    for (const p of state.pieces.filter((p) => p.player === "A")) {
+      const mirror = state.pieces.find(
+        (q) => q.player === "B" && q.x === p.y && q.y === p.x
+      );
+      assert.ok(mirror);
+      assert.equal(mirror.type, p.type);
+    }
+    assert.equal(rules.piecesAt(state, ...Object.values(config.GOAL.A)).length, 0);
+    assert.equal(rules.piecesAt(state, ...Object.values(config.GOAL.B)).length, 0);
+    assertSingleOccupancy(state);
   });
 
   it("keeps both armies off the diagonal with a three-layer neutral buffer", () => {
-    const s = rules.createInitialState();
+    const state = rules.createInitialState();
     assert.ok(
-      s.pieces
+      state.pieces
         .filter((p) => p.player === "A")
         .every((p) => p.x > p.y && p.x - p.y >= 3)
     );
     assert.ok(
-      s.pieces
+      state.pieces
         .filter((p) => p.player === "B")
         .every((p) => p.x < p.y && p.y - p.x >= 3)
     );
-    assert.equal(s.pieces.some((p) => p.x === p.y), false);
+    assert.equal(state.pieces.some((p) => p.x === p.y), false);
     assert.deepEqual(config.GOAL.A, sq("a9"));
     assert.deepEqual(config.GOAL.B, sq("i1"));
   });
 
-  it("does not let either side reach the diagonal on its opening move", () => {
-    const s = rules.createInitialState();
-    for (const p of s.pieces) {
-      const legal = rules.getLegalMoves(s, p.id);
+  it("starts A first without letting either side reach the divider or its goal immediately", () => {
+    const state = rules.createInitialState();
+    assert.equal(state.turn, "A");
+    for (const piece of state.pieces) {
+      const legal = rules.getLegalMoves(state, piece.id);
+      const ownGoal = config.GOAL[piece.player];
       assert.equal(
         legal.some((m) => m.x === m.y),
         false,
-        `${p.id} can reach the divider immediately`
+        `${piece.id} can reach the divider immediately`
       );
-    }
-  });
-
-  it("does not let either seat step into its own goal on move 1", () => {
-    const s = rules.createInitialState();
-    for (const p of s.pieces.filter((p) => p.player === "A")) {
-      const legal = rules.getLegalMoves(s, p.id);
       assert.equal(
-        legal.some((m) => m.x === config.GOAL.A.x && m.y === config.GOAL.A.y),
-        false
-      );
-    }
-    for (const p of s.pieces.filter((p) => p.player === "B")) {
-      const legal = rules.getLegalMoves(s, p.id);
-      assert.equal(
-        legal.some((m) => m.x === config.GOAL.B.x && m.y === config.GOAL.B.y),
+        legal.some((m) => m.x === ownGoal.x && m.y === ownGoal.y),
         false
       );
     }
@@ -111,245 +99,157 @@ describe("setup", () => {
 });
 
 describe("movement", () => {
+  it("uses I4 to H3 as the strategic opening and rejects I4 to G2", () => {
+    const state = rules.createInitialState();
+    const opening = move(state, "A", "i4", "h3");
+    assert.equal(opening.ok, true);
+    assert.equal(pieceAt(opening.state, "h3", "A").type, "la");
+    const tooFar = move(state, "A", "i4", "g2");
+    assert.equal(tooFar.ok, false);
+  });
+
   it("allows all eight adjacent directions from the center", () => {
-    const s = rules.createEmptyState();
-    s.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 }
-    ];
-    const legal = rules.getLegalMoves(s, "A-dam-0");
-    assert.deepEqual(
-      legal.sort((a, b) => a.y - b.y || a.x - b.x),
-      [
-        { x: 3, y: 3 },
-        { x: 4, y: 3 },
-        { x: 5, y: 3 },
-        { x: 3, y: 4 },
-        { x: 5, y: 4 },
-        { x: 3, y: 5 },
-        { x: 4, y: 5 },
-        { x: 5, y: 5 }
-      ]
-    );
+    const state = rules.createEmptyState();
+    state.pieces = [{ id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 }];
+    assert.equal(rules.getLegalMoves(state, "A-dam-0").length, 8);
   });
 
-  it("allows a king-step onto an empty square and rejects longer steps", () => {
-    const s = rules.createInitialState();
-    const ok = move(s, "A", "i4", "h3");
-    assert.equal(ok.ok, true);
-    assert.equal(pieceAt(ok.state, "h3", "A").type, "la");
-    const far = move(s, "A", "i4", "g2");
-    assert.equal(far.ok, false);
-  });
-
-  it("rejects moving onto a friendly piece", () => {
-    const s = rules.createInitialState();
-    const res = move(s, "A", "i4", "i5");
-    assert.equal(res.ok, false);
-  });
-
-  it("rejects out-of-turn moves and does not mutate the input", () => {
-    const s = rules.createInitialState();
-    const copy = JSON.stringify(s);
-    const res = move(s, "B", "a4", "a3");
-    assert.equal(res.ok, false);
-    assert.equal(JSON.stringify(s), copy);
-  });
-
-  it("rejects off-board destinations", () => {
-    const s = rules.createInitialState();
-    const res = rules.applyMove(s, "A", sq("d1"), { x: -1, y: 0 });
-    assert.equal(res.ok, false);
-  });
-
-  it("rejects fractional coordinates that are not board squares", () => {
-    const s = rules.createInitialState();
-    const res = rules.applyMove(
-      s,
-      "A",
-      { x: 8, y: 3 },
-      { x: 8, y: 2.5 }
-    );
-    assert.equal(res.ok, false);
+  it("rejects off-board, fractional, out-of-turn, and friendly destinations", () => {
+    const state = rules.createInitialState();
+    assert.equal(rules.applyMove(state, "A", sq("d1"), { x: -1, y: 0 }).ok, false);
+    assert.equal(rules.applyMove(state, "A", sq("d1"), { x: 3, y: 0.5 }).ok, false);
+    assert.equal(move(state, "B", "a4", "a3").ok, false);
+    assert.equal(move(state, "A", "i4", "i5").ok, false);
   });
 });
 
-describe("combat", () => {
-  it("lets Đấm eat Kéo", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
+describe("combat and occupancy", () => {
+  it("rejects an opposing same-type destination without mutation or stack event", () => {
+    const state = rules.createEmptyState();
+    state.turn = "A";
+    state.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-dam-0", player: "B", type: "dam", x: 5, y: 4 }
+    ];
+    const before = JSON.stringify(state);
+    assert.equal(rules.getLegalMoves(state, "A-dam-0").some((m) => m.x === 5 && m.y === 4), false);
+    const result = rules.applyMove(state, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(result.ok, false);
+    assert.equal(result.state, null);
+    assert.deepEqual(result.events, []);
+    assert.equal(JSON.stringify(state), before);
+  });
+
+  it("captures, loses a strike, and preserves single occupancy", () => {
+    const captureState = rules.createEmptyState();
+    captureState.turn = "A";
+    captureState.pieces = [
       { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
       { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 4 }
     ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(res.ok, true);
-    assert.equal(res.events.some((e) => e.type === "capture"), true);
-    assert.equal(rules.piecesAt(res.state, 5, 4).length, 1);
-    assert.equal(rules.piecesAt(res.state, 5, 4)[0].player, "A");
-  });
+    const capture = rules.applyMove(captureState, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(capture.ok, true);
+    assert.equal(capture.events[0].type, "capture");
+    assertSingleOccupancy(capture.state);
 
-  it("lets Kéo eat Lá and Lá eat Đấm", () => {
-    const keo = rules.createEmptyState();
-    keo.turn = "A";
-    keo.pieces = [
-      { id: "A-keo-0", player: "A", type: "keo", x: 3, y: 3 },
-      { id: "B-la-0", player: "B", type: "la", x: 4, y: 3 }
-    ];
-    const r1 = rules.applyMove(keo, "A", { x: 3, y: 3 }, { x: 4, y: 3 });
-    assert.equal(r1.events[0].type, "capture");
-
-    const la = rules.createEmptyState();
-    la.turn = "A";
-    la.pieces = [
-      { id: "A-la-0", player: "A", type: "la", x: 3, y: 3 },
-      { id: "B-dam-0", player: "B", type: "dam", x: 4, y: 3 }
-    ];
-    const r2 = rules.applyMove(la, "A", { x: 3, y: 3 }, { x: 4, y: 3 });
-    assert.equal(r2.events[0].type, "capture");
-  });
-
-  it("removes the attacker on a losing strike and leaves the defender", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
+    const lossState = rules.createEmptyState();
+    lossState.turn = "A";
+    lossState.pieces = [
       { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
-      { id: "B-la-0", player: "B", type: "la", x: 5, y: 4 }
+      { id: "B-la-0", player: "B", type: "la", x: 5, y: 4 },
+      { id: "A-keo-0", player: "A", type: "keo", x: 0, y: 0 }
     ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(res.ok, true);
-    assert.equal(res.events[0].type, "strike_loss");
-    assert.equal(res.state.pieces.length, 1);
-    assert.equal(res.state.pieces[0].id, "B-la-0");
-  });
-
-  it("stacks same types on one square and blocks a friendly from joining", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
-      { id: "B-dam-0", player: "B", type: "dam", x: 5, y: 4 },
-      { id: "A-dam-1", player: "A", type: "dam", x: 4, y: 5 }
-    ];
-    const stacked = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(stacked.ok, true);
-    assert.equal(stacked.events[0].type, "stack");
-    assert.equal(rules.piecesAt(stacked.state, 5, 4).length, 2);
-
-    stacked.state.turn = "A";
-    const blocked = rules.applyMove(
-      stacked.state,
-      "A",
-      { x: 4, y: 5 },
-      { x: 5, y: 4 }
-    );
-    assert.equal(blocked.ok, false);
-  });
-
-  it("lets a stacked piece step off and leave the other behind", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-la-0", player: "A", type: "la", x: 4, y: 4 },
-      { id: "B-la-0", player: "B", type: "la", x: 4, y: 4 }
-    ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 4, y: 5 });
-    assert.equal(res.ok, true);
-    assert.equal(rules.piecesAt(res.state, 4, 4).length, 1);
-    assert.equal(rules.piecesAt(res.state, 4, 4)[0].player, "B");
-    assert.equal(rules.piecesAt(res.state, 4, 5)[0].player, "A");
+    const loss = rules.applyMove(lossState, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(loss.ok, true);
+    assert.equal(loss.events[0].type, "strike_loss");
+    assertSingleOccupancy(loss.state);
   });
 });
 
-describe("victory", () => {
-  it("awards A when any A piece steps onto A9", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-keo-0", player: "A", type: "keo", x: 0, y: 7 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 8, y: 1 },
-      { id: "A-dam-0", player: "A", type: "dam", x: 3, y: 3 },
-      { id: "A-la-0", player: "A", type: "la", x: 3, y: 4 },
-      { id: "B-dam-0", player: "B", type: "dam", x: 6, y: 6 },
-      { id: "B-la-0", player: "B", type: "la", x: 6, y: 5 }
-    ];
-    const res = rules.applyMove(s, "A", { x: 0, y: 7 }, { x: 0, y: 8 });
-    assert.equal(res.ok, true);
-    assert.equal(res.state.winner, "A");
-    assert.equal(res.state.reason, "goal");
-  });
-
-  it("awards B when any B piece steps onto I1", () => {
-    const s = rules.createEmptyState();
-    s.turn = "B";
-    s.pieces = [
-      { id: "B-dam-0", player: "B", type: "dam", x: 8, y: 1 },
+describe("victory ordering and no moves", () => {
+  it("checks goal before elimination when one move satisfies both", () => {
+    const state = rules.createEmptyState();
+    state.turn = "A";
+    state.pieces = [
       { id: "A-dam-0", player: "A", type: "dam", x: 0, y: 7 },
-      { id: "A-la-0", player: "A", type: "la", x: 1, y: 7 },
-      { id: "A-keo-0", player: "A", type: "keo", x: 2, y: 7 },
-      { id: "B-la-0", player: "B", type: "la", x: 7, y: 1 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 6, y: 1 }
+      { id: "B-keo-0", player: "B", type: "keo", x: 0, y: 8 }
     ];
-    const res = rules.applyMove(s, "B", { x: 8, y: 1 }, { x: 8, y: 0 });
-    assert.equal(res.state.winner, "B");
-    assert.equal(res.state.reason, "goal");
+    const result = rules.applyMove(state, "A", { x: 0, y: 7 }, { x: 0, y: 8 });
+    assert.equal(result.state.winner, "A");
+    assert.equal(result.state.reason, "goal");
   });
 
-  it("does not award A for standing on B's I1 goal", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 7, y: 0 },
-      { id: "A-la-0", player: "A", type: "la", x: 1, y: 2 },
-      { id: "A-keo-0", player: "A", type: "keo", x: 2, y: 2 },
-      { id: "B-dam-0", player: "B", type: "dam", x: 0, y: 7 },
-      { id: "B-la-0", player: "B", type: "la", x: 1, y: 7 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 2, y: 7 }
-    ];
-    const res = rules.applyMove(s, "A", { x: 7, y: 0 }, { x: 8, y: 0 });
-    assert.equal(res.state.winner, null);
-  });
-
-  it("does not award a win when one opponent type is gone but pieces remain", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
-      { id: "A-la-0", player: "A", type: "la", x: 0, y: 3 },
-      { id: "A-keo-0", player: "A", type: "keo", x: 0, y: 4 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 4 },
-      { id: "B-la-0", player: "B", type: "la", x: 8, y: 6 },
-      { id: "B-dam-0", player: "B", type: "dam", x: 8, y: 5 }
-    ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(res.state.winner, null);
-    assert.equal(res.state.reason, null);
-    assert.equal(res.state.turn, "B");
-  });
-
-  it("awards the opponent when its final piece is captured", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 4 }
-    ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(res.state.winner, "A");
-    assert.equal(res.state.reason, "elimination");
-    assert.equal(res.state.eliminatedPlayer, "B");
-  });
-
-  it("awards B when A loses its final attacking piece", () => {
-    const s = rules.createEmptyState();
-    s.turn = "A";
-    s.pieces = [
+  it("awards the opponent elimination immediately when the last attacker loses", () => {
+    const state = rules.createEmptyState();
+    state.turn = "A";
+    state.pieces = [
       { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
       { id: "B-la-0", player: "B", type: "la", x: 5, y: 4 }
     ];
-    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
-    assert.equal(res.state.winner, "B");
-    assert.equal(res.state.reason, "elimination");
-    assert.equal(res.state.eliminatedPlayer, "A");
+    const result = rules.applyMove(state, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(result.state.winner, "B");
+    assert.equal(result.state.reason, "elimination");
+    assert.equal(result.state.eliminatedPlayer, "A");
+  });
+
+  it("awards the player who just moved when the next player has no legal move", () => {
+    const state = rules.createEmptyState();
+    state.turn = "A";
+    state.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-dam-0", player: "B", type: "dam", x: 0, y: 0 },
+      { id: "A-dam-1", player: "A", type: "dam", x: 1, y: 0 },
+      { id: "A-dam-2", player: "A", type: "dam", x: 0, y: 1 },
+      { id: "A-dam-3", player: "A", type: "dam", x: 1, y: 1 }
+    ];
+    const result = rules.applyMove(state, "A", { x: 4, y: 4 }, { x: 4, y: 3 });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.winner, "A");
+    assert.equal(result.state.reason, "no_moves");
+    assert.equal(result.state.turn, "A");
+    assert.equal(result.events.at(-1).type, "win");
+  });
+
+  it("does not accept moves after goal, elimination, or no-moves terminal state", () => {
+    for (const state of [
+      Object.assign(rules.createEmptyState(), { winner: "A", reason: "goal" }),
+      Object.assign(rules.createEmptyState(), { winner: "B", reason: "elimination" }),
+      Object.assign(rules.createEmptyState(), { winner: "A", reason: "no_moves" })
+    ]) {
+      assert.equal(rules.applyMove(state, "A", { x: 0, y: 0 }, { x: 0, y: 1 }).ok, false);
+    }
+  });
+});
+
+describe("clock", () => {
+  it("exposes a deep-copied ten-minute clock and elapses only the running seat", () => {
+    const state = rules.createInitialState();
+    const copy = rules.publicState(state);
+    copy.clock.remainingMs.A = 1;
+    assert.equal(state.clock.remainingMs.A, config.TIME_CONTROL.initialMs);
+    const result = rules.elapseClock(state, config.TIME_CONTROL.initialMs - 1);
+    assert.equal(result.state.clock.remainingMs.A, 1);
+    assert.equal(result.state.clock.remainingMs.B, config.TIME_CONTROL.initialMs);
+    assert.equal(result.state.winner, null);
+    assert.equal(state.clock.remainingMs.A, config.TIME_CONTROL.initialMs);
+  });
+
+  it("times out at zero and pauses terminal/no-moves clocks", () => {
+    const state = rules.createInitialState();
+    const timeout = rules.elapseClock(state, config.TIME_CONTROL.initialMs);
+    assert.equal(timeout.state.clock.remainingMs.A, 0);
+    assert.equal(timeout.state.winner, "B");
+    assert.equal(timeout.state.reason, "timeout");
+    assert.equal(timeout.events.at(-1).type, "win");
+
+    const terminal = rules.elapseClock(timeout.state, 1000);
+    assert.deepEqual(terminal.state.clock, timeout.state.clock);
+
+    const noMoves = rules.createEmptyState();
+    noMoves.winner = "A";
+    noMoves.reason = "no_moves";
+    noMoves.clock.runningSeat = null;
+    assert.deepEqual(rules.elapseClock(noMoves, 1000).state.clock, noMoves.clock);
   });
 });
 

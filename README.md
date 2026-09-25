@@ -2,9 +2,11 @@
 
 Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá hoặc Kéo. Ăn theo oẳn tù tì. Thắng khi đưa quân vào ô thắng của mình, hoặc khi ăn hết toàn bộ quân đối phương.
 
+**Demo online:** [https://ottv2.tail05145a.ts.net/](https://ottv2.tail05145a.ts.net/)
+
 - Người A (Đỏ) thắng trên **a9**. Người B (Xanh) thắng trên **i1**.
 - Đi như vua cờ vua: 8 hướng, 1 ô.
-- Cùng loại: xếp chồng, không ăn.
+- Cùng loại khác phe: nước đi bị từ chối; mỗi ô chỉ có một quân.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
 - Đường chéo a1–i9 là dải phân cách: không quân nào đứng trên đó khi bắt đầu.
 - Mỗi bên triển khai ba cánh Đấm–Lá–Kéo phản chiếu qua đường chéo và cách ranh giới ít nhất 3 lớp, nên không bên nào chạm dải phân cách ở nước đầu.
@@ -48,10 +50,12 @@ Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http:
 | Quân | Mỗi bên 9 quân: 3 Đấm, 3 Lá, 3 Kéo |
 | Vòng ăn | Đấm > Kéo > Lá > Đấm |
 | Di chuyển | 1 ô, 8 hướng; không ra ngoài bàn; không vào ô có quân cùng phe |
-| Xếp chồng | Hai quân đối địch cùng loại đứng chung ô |
+| Cùng loại | Không được đi vào ô có quân đối phương cùng loại |
 | Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
 | Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
 | Thế trận | A và B ở hai phía đường chéo a1–i9, phản chiếu qua đường chéo; ba cánh quân cách ranh giới ít nhất 3 lớp |
+| Đồng hồ | 10 phút mỗi ghế; server quyết định timeout |
+| Kết nối lại | Grace 60 giây; `leave` xử thua ngay, `close` giữ ghế |
 
 Chi tiết thuật ngữ: [CONTEXT.md](CONTEXT.md).
 
@@ -82,7 +86,7 @@ Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.a
 npm test
 ```
 
-`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, xếp chồng, ô thắng, ăn hết quân.
+`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
 
 `tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
 
@@ -101,4 +105,4 @@ pf.join("K7P2", "Bình");
 pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
 ```
 
-Sự kiện: `open`, `close`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.
+Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.

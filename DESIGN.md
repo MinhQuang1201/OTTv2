@@ -42,7 +42,7 @@ Token `--duration-*` / `--ease-smooth-out` trong `tokens.css`.
 - Toast: `.t-toast.is-open`
 - Lỗi: `.t-toast.is-error` shake
 - Thắng: `dialog.t-modal` + `.t-success-check`
-- Ăn / đòn thua / xếp chồng: `.cell.is-burst`
+- Ăn / đòn thua: `.cell.is-burst`; mỗi ô chỉ render một token.
 - `prefers-reduced-motion: reduce` tắt animation
 
 ## Layout

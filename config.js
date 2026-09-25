@@ -11,6 +11,11 @@
   const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
   const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
 
+  const TIME_CONTROL = {
+    initialMs: 10 * 60 * 1000,
+    reconnectGraceMs: 60 * 1000
+  };
+
   // The a1-i9 diagonal (x === y) is the neutral divider. A deploys in three
   // independent RPS wings at least three layers away from it, so neither side
   // can reach the divider or make contact on the opening move. B is reflected
@@ -50,6 +55,7 @@
     SEAT_LABEL,
     GOAL,
     A_SETUP,
+    TIME_CONTROL,
     DELTAS,
     PORT,
     HOST: "0.0.0.0",
