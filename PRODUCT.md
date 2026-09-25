@@ -26,7 +26,7 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 
 ## Capabilities
 
-- Tạo phòng, vào bằng mã, nhiều phòng song song.
+- Tạo phòng Duel (2) hoặc Arena (4), vào bằng mã, xem trận, nhiều phòng song song.
 - Chơi hai người một máy và đấu với máy (AI thay thế được).
 - Highlight quân đang chọn và ô đi được.
 - Hiệu ứng ăn quân, đổi lượt, thắng/thua.

@@ -11,6 +11,7 @@
       this.ws = null;
       this.handlers = Object.create(null);
       this.you = null;
+      this.role = null;
       this.roomId = null;
       this.state = null;
       this.connected = false;
@@ -94,6 +95,7 @@
           }
           if (msg.type === "joined") {
             this.you = msg.you;
+            this.role = msg.role || msg.you;
             this.roomId = msg.roomId;
             if (msg.resumeToken) {
               this.resumeContext = { roomId: msg.roomId, resumeToken: msg.resumeToken, name: msg.name };
@@ -103,11 +105,13 @@
           }
           if (msg.type === "state") {
             this.you = msg.you || this.you;
+            this.role = msg.role || this.role || this.you;
             this.roomId = msg.roomId || this.roomId;
             this.state = msg.state;
           }
           if (msg.type === "left") {
             this.you = null;
+            this.role = null;
             this.roomId = null;
             this.state = null;
             this.resumeContext = null;
@@ -132,8 +136,14 @@
       }, delay);
     }
 
-    create(name) {
-      return this.send({ type: "create", name });
+    create(name, options) {
+      const opts = options || {};
+      return this.send({
+        type: "create",
+        name: name,
+        mode: opts.mode,
+        roomName: opts.roomName
+      });
     }
 
     join(roomId, name) {
@@ -145,12 +155,24 @@
       return this.send({ type: "resume", roomId, resumeToken });
     }
 
+    watch(roomId, name) {
+      return this.send({ type: "watch", roomId: roomId, name: name });
+    }
+
     list() {
       return this.send({ type: "list" });
     }
 
     move(from, to) {
       return this.send({ type: "move", from, to });
+    }
+
+    chat(text) {
+      return this.send({ type: "chat", text: text });
+    }
+
+    react(code) {
+      return this.send({ type: "react", code: code });
     }
 
     leave() {

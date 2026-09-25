@@ -55,3 +55,19 @@ _Avoid_: lobby như toàn server, table như poker
 **Playfull**:
 Thư viện khách kết nối WebSocket, tạo/vào phòng, gửi nước đi, nhận trạng thái.
 _Avoid_: socket wrapper, netcode
+
+**Duel**:
+Chế độ hai ghế A/B, luật gốc.
+_Avoid_: 1v1 như boxing card
+
+**Arena**:
+Chế độ bốn ghế A/B/C/D, đối xứng 90°, FFA.
+_Avoid_: battle royale, team deathmatch
+
+**Khán giả**:
+Người trong phòng không có ghế, xem bàn và chat, không được đi.
+_Avoid_: observer như Twitch mod, ghost
+
+**Chat phòng**:
+Tin nhắn trong một phòng, ghế và khán giả cùng kênh.
+_Avoid_: global chat, whisper

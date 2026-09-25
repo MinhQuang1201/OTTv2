@@ -7,17 +7,59 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   global.OTT_RULES = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (config) {
-  const { SIZE, FILES, BEATS, GOAL, A_SETUP, DELTAS, TIME_CONTROL } = config;
+  const {
+    SIZE,
+    FILES,
+    BEATS,
+    GOAL,
+    ARENA_GOAL,
+    A_SETUP,
+    A_ARENA_SETUP,
+    DELTAS,
+    MODES,
+    TIME_CONTROL
+  } = config;
+
+  function normalizeMode(mode) {
+    return mode === "arena" ? "arena" : "duel";
+  }
+
+  function seatsOfMode(mode) {
+    return MODES[normalizeMode(mode)].seats.slice();
+  }
+
+  function seatsOf(state) {
+    if (state && Array.isArray(state.seats) && state.seats.length) {
+      return state.seats.slice();
+    }
+    return seatsOfMode(state && state.mode);
+  }
+
+  function goalsOf(state) {
+    return state && state.mode === "arena" ? ARENA_GOAL : GOAL;
+  }
+
+  function rotate90(x, y) {
+    return { x: SIZE - 1 - y, y: x };
+  }
 
   function inside(x, y) {
-    return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < SIZE && y < SIZE;
+    return (
+      Number.isInteger(x) &&
+      Number.isInteger(y) &&
+      x >= 0 &&
+      y >= 0 &&
+      x < SIZE &&
+      y < SIZE
+    );
   }
 
   function parseSquare(name) {
-    const file = FILES.indexOf(String(name).charAt(0).toLowerCase());
-    const rank = Number(String(name).slice(1));
+    const text = String(name || "");
+    const file = FILES.indexOf(text.charAt(0).toLowerCase());
+    const rank = Number(text.slice(1));
     if (file < 0 || !Number.isInteger(rank) || rank < 1 || rank > SIZE) {
-      throw new Error("Ô không hợp lệ");
+      throw new Error("Invalid square");
     }
     return { x: file, y: rank - 1 };
   }
@@ -32,68 +74,103 @@
     return "lose";
   }
 
-  function freshClock() {
+  function freshClock(mode) {
+    const remainingMs = {};
+    for (const seat of seatsOfMode(mode)) {
+      remainingMs[seat] = TIME_CONTROL.initialMs;
+    }
     return {
-      remainingMs: { A: TIME_CONTROL.initialMs, B: TIME_CONTROL.initialMs },
+      remainingMs,
       runningSeat: "A"
     };
   }
 
-  function cloneClock(clock) {
-    const source = clock || freshClock();
+  function cloneClock(clock, seats) {
+    const source = clock || freshClock(seats.length === 4 ? "arena" : "duel");
+    const remainingMs = {};
+    for (const seat of seats) {
+      const value = source.remainingMs && source.remainingMs[seat];
+      remainingMs[seat] = Number.isFinite(value) ? value : TIME_CONTROL.initialMs;
+    }
     return {
-      remainingMs: {
-        A: Number.isFinite(source.remainingMs && source.remainingMs.A)
-          ? source.remainingMs.A
-          : TIME_CONTROL.initialMs,
-        B: Number.isFinite(source.remainingMs && source.remainingMs.B)
-          ? source.remainingMs.B
-          : TIME_CONTROL.initialMs
-      },
-      runningSeat: source.runningSeat === "A" || source.runningSeat === "B" ? source.runningSeat : null
+      remainingMs,
+      runningSeat: seats.includes(source.runningSeat) ? source.runningSeat : null
     };
   }
 
   function cloneState(state) {
+    const seats = seatsOf(state);
     return {
+      mode: normalizeMode(state && state.mode),
+      seats,
       turn: state.turn,
       winner: state.winner || null,
       reason: state.reason || null,
       eliminatedPlayer: state.eliminatedPlayer || null,
-      clock: cloneClock(state.clock),
-      pieces: (state.pieces || []).map((p) => ({
-        id: p.id,
-        player: p.player,
-        type: p.type,
-        x: p.x,
-        y: p.y
+      clock: cloneClock(state.clock, seats),
+      pieces: (state.pieces || []).map((piece) => ({
+        id: piece.id,
+        player: piece.player,
+        type: piece.type,
+        x: piece.x,
+        y: piece.y
       }))
     };
   }
 
-  function createEmptyState() {
+  function createEmptyState(mode) {
+    const normalized = normalizeMode(mode);
     return {
+      mode: normalized,
+      seats: seatsOfMode(normalized),
       turn: "A",
       winner: null,
       reason: null,
       eliminatedPlayer: null,
-      clock: freshClock(),
+      clock: freshClock(normalized),
       pieces: []
     };
   }
 
-  function createInitialState() {
-    const state = createEmptyState();
-    A_SETUP.forEach((spot, i) => {
+  function placeRotated(state, setup, seats) {
+    setup.forEach((spot, index) => {
+      seats.forEach((seat, rotation) => {
+        let x = spot.x;
+        let y = spot.y;
+        for (let step = 0; step < rotation; step += 1) {
+          const rotated = rotate90(x, y);
+          x = rotated.x;
+          y = rotated.y;
+        }
+        state.pieces.push({
+          id: seat + "-" + spot.type + "-" + index,
+          player: seat,
+          type: spot.type,
+          x,
+          y
+        });
+      });
+    });
+  }
+
+  function createInitialState(mode) {
+    const normalized = normalizeMode(mode);
+    const state = createEmptyState(normalized);
+    if (normalized === "arena") {
+      placeRotated(state, A_ARENA_SETUP, state.seats);
+      return state;
+    }
+
+    A_SETUP.forEach((spot, index) => {
       state.pieces.push({
-        id: "A-" + spot.type + "-" + i,
+        id: "A-" + spot.type + "-" + index,
         player: "A",
         type: spot.type,
         x: spot.x,
         y: spot.y
       });
       state.pieces.push({
-        id: "B-" + spot.type + "-" + i,
+        id: "B-" + spot.type + "-" + index,
         player: "B",
         type: spot.type,
         x: spot.y,
@@ -104,7 +181,7 @@
   }
 
   function piecesAt(state, x, y) {
-    return (state.pieces || []).filter((p) => p.x === x && p.y === y);
+    return (state.pieces || []).filter((piece) => piece.x === x && piece.y === y);
   }
 
   function hasSingleOccupancy(state) {
@@ -119,23 +196,53 @@
 
   function countByType(state, player) {
     const counts = { dam: 0, la: 0, keo: 0 };
-    for (const p of state.pieces || []) {
-      if (p.player === player && counts[p.type] !== undefined) counts[p.type] += 1;
+    for (const piece of state.pieces || []) {
+      if (piece.player === player && counts[piece.type] !== undefined) {
+        counts[piece.type] += 1;
+      }
     }
     return counts;
   }
 
+  function livingSeats(state) {
+    const pieces = state.pieces || [];
+    return seatsOf(state).filter((seat) =>
+      pieces.some((piece) => piece.player === seat)
+    );
+  }
+
+  function nextTurn(state, current) {
+    const seats = seatsOf(state);
+    const living = livingSeats(state);
+    if (living.length <= 1) return current;
+    let index = seats.indexOf(current);
+    if (index < 0) index = 0;
+    for (let step = 0; step < seats.length; step += 1) {
+      index = (index + 1) % seats.length;
+      if (living.includes(seats[index])) return seats[index];
+    }
+    return current;
+  }
+
   function getLegalMoves(state, pieceId) {
-    if (!state || !hasSingleOccupancy(state) || state.winner) return [];
-    const piece = state.pieces.find((p) => p.id === pieceId);
+    if (!state || state.winner || !hasSingleOccupancy(state)) return [];
+    const piece = state.pieces.find((candidate) => candidate.id === pieceId);
     if (!piece) return [];
+
     const moves = [];
     for (const [dx, dy] of DELTAS) {
       const x = piece.x + dx;
       const y = piece.y + dy;
       if (!inside(x, y)) continue;
-      const occ = piecesAt(state, x, y);
-      if (occ.length > 0 && (occ[0].player === piece.player || occ[0].type === piece.type)) continue;
+      const occupants = piecesAt(state, x, y);
+      if (
+        occupants.some(
+          (occupant) =>
+            occupant.player === piece.player || occupant.type === piece.type
+        )
+      ) {
+        continue;
+      }
       moves.push({ x, y });
     }
     return moves;
@@ -143,135 +250,241 @@
 
   function allMoves(state, player) {
     if (!state || state.winner) return [];
-    const out = [];
+    const moves = [];
     for (const piece of state.pieces || []) {
       if (piece.player !== player) continue;
       for (const to of getLegalMoves(state, piece.id)) {
-        out.push({ pieceId: piece.id, from: { x: piece.x, y: piece.y }, to });
+        moves.push({
+          pieceId: piece.id,
+          from: { x: piece.x, y: piece.y },
+          to
+        });
       }
     }
-    return out;
+    return moves;
   }
 
   function detectWinner(state) {
-    for (const seat of ["A", "B"]) {
-      const goal = GOAL[seat];
-      if (state.pieces.some((p) => p.player === seat && p.x === goal.x && p.y === goal.y)) {
+    const seats = seatsOf(state);
+    const goals = goalsOf(state);
+    for (const seat of seats) {
+      const goal = goals[seat];
+      if (!goal) continue;
+      if (
+        state.pieces.some(
+          (piece) =>
+            piece.player === seat && piece.x === goal.x && piece.y === goal.y
+        )
+      ) {
         return { winner: seat, reason: "goal", eliminatedPlayer: null };
       }
     }
-    for (const seat of ["A", "B"]) {
-      if (!state.pieces.some((p) => p.player === seat)) {
-        return {
-          winner: seat === "A" ? "B" : "A",
-          reason: "elimination",
-          eliminatedPlayer: seat
-        };
-      }
+
+    const living = livingSeats(state);
+    if (living.length === 1) {
+      const eliminated = seats.filter((seat) => seat !== living[0]);
+      return {
+        winner: living[0],
+        reason: "elimination",
+        eliminatedPlayer: eliminated.length === 1 ? eliminated[0] : null
+      };
     }
     return null;
   }
 
-  function fail(message) {
-    return { ok: false, error: message, state: null, events: [] };
+  function eliminatePlayer(state, seat) {
+    const next = cloneState(state);
+    next.pieces = next.pieces.filter((piece) => piece.player !== seat);
+    const winner = detectWinner(next);
+    if (winner) {
+      next.winner = winner.winner;
+      next.reason = winner.reason;
+      next.eliminatedPlayer = seat;
+      next.clock.runningSeat = null;
+    } else if (next.turn === seat) {
+      next.turn = nextTurn(next, seat);
+      next.clock.runningSeat = next.turn;
+    }
+    return next;
+  }
+
+  function fail(error) {
+    return { ok: false, error, state: null, events: [] };
   }
 
   function applyMove(state, player, from, to) {
-    if (!state) return fail("Thiếu trạng thái");
-    if (state.winner) return fail("Ván đã kết thúc");
-    if (!hasSingleOccupancy(state)) return fail("Trạng thái bàn cờ không hợp lệ");
-    if (player !== "A" && player !== "B") return fail("Ghế không hợp lệ");
-    if (state.turn !== player) return fail("Chưa tới lượt");
-    if (!from || !to) return fail("Thiếu tọa độ");
-    if (!inside(from.x, from.y) || !inside(to.x, to.y)) return fail("Ngoài bàn cờ");
+    if (!state) return fail("Missing state");
+    if (state.winner) return fail("Game already ended");
+    if (!hasSingleOccupancy(state)) return fail("Invalid board occupancy");
+    if (!seatsOf(state).includes(player)) return fail("Invalid seat");
+    if (state.turn !== player) return fail("Not your turn");
+    if (!from || !to) return fail("Missing coordinates");
+    if (
+      !inside(from.x, from.y) ||
+      !inside(to.x, to.y)
+    ) {
+      return fail("Outside board");
+    }
+
     const dx = Math.abs(to.x - from.x);
     const dy = Math.abs(to.y - from.y);
-    if (dx > 1 || dy > 1 || (dx === 0 && dy === 0)) return fail("Chỉ được đi 1 ô theo 8 hướng");
+    if (dx > 1 || dy > 1 || (dx === 0 && dy === 0)) {
+      return fail("A move must go one square in any direction");
+    }
 
-    const mover = state.pieces.find((p) => p.player === player && p.x === from.x && p.y === from.y);
-    if (!mover) return fail("Không có quân của bạn ở ô này");
+    const mover = state.pieces.find(
+      (piece) =>
+        piece.player === player &&
+        piece.x === from.x &&
+        piece.y === from.y
+    );
+    if (!mover) return fail("Your piece is not on that square");
+
     const occupants = piecesAt(state, to.x, to.y);
-    if (occupants.length > 1) return fail("Trạng thái bàn cờ không hợp lệ");
-    if (occupants.some((p) => p.player === player)) return fail("Không được đi vào ô có quân cùng phe");
-    if (occupants.some((p) => p.type === mover.type)) return fail("Không được đi vào ô có quân cùng loại");
+    if (occupants.length > 1) return fail("Invalid board occupancy");
+    if (occupants.some((piece) => piece.player === player)) {
+      return fail("Cannot move onto a friendly piece");
+    }
+    if (occupants.some((piece) => piece.type === mover.type)) {
+      return fail("Cannot move onto the same piece type");
+    }
 
     const next = cloneState(state);
-    const nextMover = next.pieces.find((p) => p.id === mover.id);
-    const events = [];
+    const nextMover = next.pieces.find((piece) => piece.id === mover.id);
     const enemy = occupants[0];
+    const events = [];
+
     if (!enemy) {
       nextMover.x = to.x;
       nextMover.y = to.y;
-      events.push({ type: "move", pieceId: nextMover.id, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y } });
+      events.push({
+        type: "move",
+        pieceId: nextMover.id,
+        moverType: nextMover.type,
+        from: { x: from.x, y: from.y },
+        to: { x: to.x, y: to.y }
+      });
     } else {
       const result = compare(nextMover.type, enemy.type);
       if (result === "win") {
-        next.pieces = next.pieces.filter((p) => p.id !== enemy.id);
+        next.pieces = next.pieces.filter((piece) => piece.id !== enemy.id);
         nextMover.x = to.x;
         nextMover.y = to.y;
         events.push({
           type: "capture",
           pieceId: nextMover.id,
+          moverType: nextMover.type,
           capturedId: enemy.id,
           capturedType: enemy.type,
+          capturedPlayer: enemy.player,
           from: { x: from.x, y: from.y },
           to: { x: to.x, y: to.y }
         });
       } else {
-        next.pieces = next.pieces.filter((p) => p.id !== nextMover.id);
+        next.pieces = next.pieces.filter((piece) => piece.id !== nextMover.id);
         events.push({
           type: "strike_loss",
           pieceId: nextMover.id,
+          moverType: nextMover.type,
           byId: enemy.id,
+          byType: enemy.type,
           from: { x: from.x, y: from.y },
           to: { x: to.x, y: to.y }
         });
       }
     }
 
-    const win = detectWinner(next);
-    if (win) {
-      next.winner = win.winner;
-      next.reason = win.reason;
-      next.eliminatedPlayer = win.eliminatedPlayer;
+    const winner = detectWinner(next);
+    if (winner) {
+      next.winner = winner.winner;
+      next.reason = winner.reason;
+      next.eliminatedPlayer = winner.eliminatedPlayer;
       next.clock.runningSeat = null;
-      events.push({ type: "win", winner: win.winner, reason: win.reason, eliminatedPlayer: win.eliminatedPlayer });
+      events.push({
+        type: "win",
+        winner: winner.winner,
+        reason: winner.reason,
+        eliminatedPlayer: winner.eliminatedPlayer
+      });
     } else {
-      const nextTurn = player === "A" ? "B" : "A";
-      if (allMoves(next, nextTurn).length === 0) {
+      const following = nextTurn(next, player);
+      if (allMoves(next, following).length === 0) {
         next.winner = player;
         next.reason = "no_moves";
         next.eliminatedPlayer = null;
         next.clock.runningSeat = null;
-        events.push({ type: "win", winner: player, reason: "no_moves", eliminatedPlayer: null });
+        events.push({
+          type: "win",
+          winner: player,
+          reason: "no_moves",
+          eliminatedPlayer: null
+        });
       } else {
-        next.turn = nextTurn;
-        next.clock.runningSeat = nextTurn;
+        next.turn = following;
+        next.clock.runningSeat = following;
       }
     }
-    if (!hasSingleOccupancy(next)) return fail("Trạng thái bàn cờ không hợp lệ");
+
+    if (!hasSingleOccupancy(next)) return fail("Invalid board occupancy");
     return { ok: true, error: null, state: next, events };
   }
 
   function elapseClock(state, elapsedMs) {
-    if (!state) return fail("Thiếu trạng thái");
-    if (!Number.isInteger(elapsedMs) || elapsedMs < 0) return fail("Thời gian không hợp lệ");
+    if (!state) return fail("Missing state");
+    if (!Number.isInteger(elapsedMs) || elapsedMs < 0) {
+      return fail("Invalid elapsed time");
+    }
+
     const next = cloneState(state);
     const seat = next.clock.runningSeat;
     if (next.winner || !seat || elapsedMs === 0) {
       return { ok: true, error: null, state: next, events: [] };
     }
-    const before = next.clock.remainingMs[seat];
-    next.clock.remainingMs[seat] = Math.max(0, before - elapsedMs);
+
+    next.clock.remainingMs[seat] = Math.max(
+      0,
+      next.clock.remainingMs[seat] - elapsedMs
+    );
+    if (next.clock.remainingMs[seat] > 0) {
+      return { ok: true, error: null, state: next, events: [] };
+    }
+
     const events = [];
-    if (next.clock.remainingMs[seat] === 0) {
+    if (next.mode === "duel") {
       const winner = seat === "A" ? "B" : "A";
       next.winner = winner;
       next.reason = "timeout";
       next.eliminatedPlayer = null;
       next.clock.runningSeat = null;
-      events.push({ type: "win", winner, reason: "timeout", eliminatedPlayer: null });
+      events.push({
+        type: "win",
+        winner,
+        reason: "timeout",
+        eliminatedPlayer: null
+      });
+      return { ok: true, error: null, state: next, events };
     }
+
+    next.pieces = next.pieces.filter((piece) => piece.player !== seat);
+    const winner = detectWinner(next);
+    if (winner) {
+      next.winner = winner.winner;
+      next.reason = winner.reason;
+      next.eliminatedPlayer = seat;
+      next.clock.runningSeat = null;
+      events.push({
+        type: "win",
+        winner: winner.winner,
+        reason: winner.reason,
+        eliminatedPlayer: seat
+      });
+      return { ok: true, error: null, state: next, events };
+    }
+
+    const following = nextTurn(next, seat);
+    next.turn = following;
+    next.clock.runningSeat = following;
+    events.push({ type: "timeout", seat });
     return { ok: true, error: null, state: next, events };
   }
 
@@ -289,11 +502,18 @@
     createInitialState,
     piecesAt,
     countByType,
+    livingSeats,
+    nextTurn,
     getLegalMoves,
     allMoves,
     detectWinner,
+    eliminatePlayer,
     applyMove,
     elapseClock,
-    publicState
+    publicState,
+    goalsOf,
+    seatsOf,
+    rotate90,
+    normalizeMode
   };
 });

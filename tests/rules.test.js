@@ -261,3 +261,88 @@ describe("algebraic", () => {
     assert.equal(config.SIZE, 9);
   });
 });
+
+describe("arena setup", () => {
+  it("places 6 pieces per seat, 2 of each type, and leaves the four goals empty", () => {
+    const s = rules.createInitialState("arena");
+    assert.equal(s.mode, "arena");
+    assert.deepEqual(s.seats, ["A", "B", "C", "D"]);
+    assert.equal(s.pieces.length, 24);
+    for (const seat of s.seats) {
+      assert.deepEqual(rules.countByType(s, seat), { dam: 2, la: 2, keo: 2 });
+    }
+    for (const goal of Object.values(config.ARENA_GOAL)) {
+      assert.equal(rules.piecesAt(s, goal.x, goal.y).length, 0);
+    }
+  });
+
+  it("copies A onto B/C/D by 90-degree rotation with the same types", () => {
+    const s = rules.createInitialState("arena");
+    const aPieces = s.pieces.filter((p) => p.player === "A");
+    for (const p of aPieces) {
+      const b = rules.rotate90(p.x, p.y);
+      const q = s.pieces.find(
+        (x) => x.player === "B" && x.x === b.x && x.y === b.y
+      );
+      assert.ok(q, `missing B mirror of A ${p.type} at ${p.x},${p.y}`);
+      assert.equal(q.type, p.type);
+    }
+  });
+
+  it("does not let a seat step into its own goal on move 1", () => {
+    const s = rules.createInitialState("arena");
+    for (const seat of s.seats) {
+      const goal = config.ARENA_GOAL[seat];
+      for (const p of s.pieces.filter((x) => x.player === seat)) {
+        const legal = rules.getLegalMoves(s, p.id);
+        assert.equal(
+          legal.some((m) => m.x === goal.x && m.y === goal.y),
+          false
+        );
+      }
+    }
+  });
+});
+
+describe("arena victory", () => {
+  it("awards B on a1 and does not end when only one of four seats is wiped", () => {
+    const s = rules.createEmptyState("arena");
+    s.turn = "B";
+    s.pieces = [
+      { id: "B-dam-0", player: "B", type: "dam", x: 0, y: 1 },
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "C-la-0", player: "C", type: "la", x: 5, y: 5 },
+      { id: "D-keo-0", player: "D", type: "keo", x: 3, y: 3 }
+    ];
+    const res = rules.applyMove(s, "B", { x: 0, y: 1 }, { x: 0, y: 0 });
+    assert.equal(res.state.winner, "B");
+    assert.equal(res.state.reason, "goal");
+  });
+
+  it("skips a wiped seat and continues the turn cycle", () => {
+    const s = rules.createEmptyState("arena");
+    s.turn = "A";
+    s.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 4 },
+      { id: "C-la-0", player: "C", type: "la", x: 1, y: 1 },
+      { id: "D-dam-0", player: "D", type: "dam", x: 2, y: 2 }
+    ];
+    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(res.state.winner, null);
+    assert.equal(res.state.turn, "C");
+    assert.equal(res.state.pieces.some((p) => p.player === "B"), false);
+  });
+
+  it("awards the last living seat after the third opponent is eliminated", () => {
+    const s = rules.createEmptyState("arena");
+    s.turn = "A";
+    s.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "C-keo-0", player: "C", type: "keo", x: 5, y: 4 }
+    ];
+    const res = rules.applyMove(s, "A", { x: 4, y: 4 }, { x: 5, y: 4 });
+    assert.equal(res.state.winner, "A");
+    assert.equal(res.state.reason, "elimination");
+  });
+});

@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Playfull – thư viện multiplayer OTTv2</title>
+    <link rel="preconnect" href="https://fonts.bunny.net" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.bunny.net/css?family=azeret-mono:500,600,700|be-vietnam-pro:400,500,600,700,800"
+    />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="style.css" />
     <script src="playfull.js"></script>
@@ -13,21 +18,35 @@
       <p class="docs-kicker">OTTv2</p>
       <h1>Playfull</h1>
       <p>
-        Thư viện khách quản lý WebSocket, phòng chơi và đồng bộ nước đi. Game
-        nạp file này qua <code>playfull.js</code>.
+        Thư viện khách quản lý WebSocket, phòng Duel/Arena, khán giả và đồng bộ
+        nước đi. Game nạp file này qua <code>playfull.js</code>. Luật nằm trên
+        máy chủ, không trong file này.
       </p>
       <pre class="docs-code">const pf = new Playfull();
 await pf.connect();
 pf.on("state", (msg) => render(msg.state));
-pf.create("An");
+pf.create("An", { mode: "arena", roomName: "Rồng" });
 pf.join("K7P2", "Bình");
-pf.move({ x: 0, y: 2 }, { x: 0, y: 1 });</pre>
+pf.watch("K7P2", "Khán");
+pf.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+pf.chat("GG");
+pf.react("fire");</pre>
+      <h2>Lệnh</h2>
+      <ul>
+        <li><code>create(name, { mode, roomName })</code> — <code>duel</code> hoặc <code>arena</code></li>
+        <li><code>join(roomId, name)</code> ghế còn trống</li>
+        <li><code>watch(roomId, name)</code> khán giả, tối đa 100</li>
+        <li><code>move(from, to)</code> — bị từ chối nếu là người xem</li>
+        <li><code>chat(text)</code> / <code>react(code)</code> — fire fight gg clap lol</li>
+        <li><code>leave()</code> / <code>list()</code></li>
+      </ul>
       <h2>Sự kiện</h2>
       <ul>
         <li><code>open</code> / <code>close</code> / <code>error</code></li>
-        <li><code>hello</code> <code>rooms</code> danh sách phòng chờ</li>
-        <li><code>joined</code> ghế A hoặc B</li>
-        <li><code>state</code> bàn cờ do server gửi</li>
+        <li><code>hello</code> <code>rooms</code> phòng chờ và đang chơi</li>
+        <li><code>joined</code> ghế A–D hoặc <code>spectator</code></li>
+        <li><code>state</code> bàn cờ, <code>history</code>, số người xem</li>
+        <li><code>chat</code> / <code>react</code></li>
         <li><code>gameover</code> lý do thắng</li>
         <li><code>left</code> đã rời phòng</li>
       </ul>

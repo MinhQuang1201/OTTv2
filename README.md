@@ -33,10 +33,11 @@ npm run assets
 ## Chơi
 
 1. Đặt tên.
-2. **Tạo phòng** — nhận mã 4 ký tự, chờ người thứ hai.
-3. **Vào phòng** — nhập mã, hoặc bấm một phòng đang chờ.
-4. **Hai người một máy** — luân phiên trên cùng trình duyệt.
-5. **Đấu với máy** — bạn là Người A; máy là Người B.
+2. Chọn **Duel** (2 người) hoặc **Arena** (4 người).
+3. **Tạo phòng** — nhận mã 4 ký tự, chờ đủ ghế.
+4. **Vào phòng** / **Xem trận** — nhập mã, hoặc bấm một phòng trên sảnh.
+5. **Hai người một máy** — luân phiên trên cùng trình duyệt.
+6. **Đấu với máy** — bạn là Người A; máy là Người B.
 
 Hai máy / hai tab: một bên tạo phòng, bên kia vào bằng mã. Luật online do server quyết.
 
@@ -62,10 +63,11 @@ Chi tiết thuật ngữ: [CONTEXT.md](CONTEXT.md).
 ## Cấu trúc
 
 ```
-config.js          Hằng số bàn, quân, cổng
-rules.js           Luật thuần: đi, ăn, thắng
+config.js          Hằng số bàn, quân, cổng, Duel/Arena
+rules.js           Luật thuần: đi, ăn, thắng, 2 hoặc 4 ghế
 ai.js              Máy chọn nước (thay thế được)
-room.js            Phòng, ghế A/B, trọng tài
+room.js            Phòng, ghế, khán giả, chat, trọng tài
+persist.js         Thắng/thua, bảng xếp (JSON)
 server.js          HTTP tĩnh + WebSocket
 playfull.js        Thư viện khách realtime
 playfull.html      Tài liệu Playfull
@@ -88,7 +90,7 @@ npm test
 
 `tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
 
-`tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
+`tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên, Arena 4 ghế, khán giả, chat.
 
 ## Biến môi trường
 
@@ -100,9 +102,12 @@ npm test
 const pf = new Playfull();
 await pf.connect();
 pf.on("state", (msg) => render(msg.state));
-pf.create("An");
+pf.create("An", { mode: "arena", roomName: "Rồng" });
 pf.join("K7P2", "Bình");
+pf.watch("K7P2", "Khán");
 pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
+pf.chat("GG");
+pf.react("fire");
 ```
 
-Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.
+Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `chat`, `react`, `gameover`, `left`.

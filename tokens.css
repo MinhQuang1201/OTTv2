@@ -1,30 +1,36 @@
 /* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: 35
  * theme: custom · vibe: night zinc print shop
- * paper oklch(22% 0.028 192) · accent oklch(64% 0.18 35)
+ * paper oklch(17% 0.03 192) · accent oklch(72% 0.19 35)
  * display: Be Vietnam Pro · mono: Azeret Mono
  * paper-band: dark / display-style: grotesk-sans / accent-hue: warm
  */
 :root {
-  --color-paper: oklch(22% 0.028 192);
-  --color-paper-2: oklch(26% 0.03 192);
-  --color-paper-3: oklch(30% 0.032 192);
-  --color-ink: oklch(93% 0.02 95);
-  --color-ink-dim: oklch(78% 0.025 192);
-  --color-line: oklch(40% 0.03 192);
-  --color-accent: oklch(64% 0.18 35);
-  --color-accent-ink: oklch(18% 0.05 35);
-  --color-a: oklch(68% 0.15 350);
-  --color-a-deep: oklch(48% 0.14 350);
-  --color-b: oklch(70% 0.11 210);
-  --color-b-deep: oklch(46% 0.1 210);
+  --color-paper: oklch(17% 0.03 192);
+  --color-paper-2: oklch(21% 0.032 192);
+  --color-paper-3: oklch(26% 0.034 192);
+  --color-ink: oklch(94% 0.02 95);
+  --color-ink-dim: oklch(74% 0.028 192);
+  --color-line: oklch(38% 0.03 192);
+  --color-accent: oklch(72% 0.19 35);
+  --color-accent-ink: oklch(16% 0.05 35);
+  --color-a: oklch(68% 0.16 350);
+  --color-a-deep: oklch(46% 0.15 350);
+  --color-b: oklch(70% 0.12 210);
+  --color-b-deep: oklch(44% 0.11 210);
+  --color-c: oklch(78% 0.14 85);
+  --color-c-deep: oklch(50% 0.13 85);
+  --color-d: oklch(68% 0.13 145);
+  --color-d-deep: oklch(42% 0.11 145);
+  --color-goal-c: oklch(32% 0.06 85);
+  --color-goal-d: oklch(32% 0.055 145);
   --color-good: oklch(72% 0.14 150);
-  --color-warn: oklch(72% 0.14 85);
-  --color-focus: oklch(78% 0.14 35);
-  --color-board-a: oklch(28% 0.022 192);
-  --color-board-b: oklch(24% 0.03 192);
-  --color-legal: oklch(70% 0.12 150);
-  --color-goal-a: oklch(34% 0.06 350);
-  --color-goal-b: oklch(34% 0.055 210);
+  --color-warn: oklch(74% 0.15 70);
+  --color-focus: oklch(80% 0.15 35);
+  --color-board-a: oklch(24% 0.024 192);
+  --color-board-b: oklch(20% 0.03 192);
+  --color-legal: oklch(72% 0.13 150);
+  --color-goal-a: oklch(32% 0.07 350);
+  --color-goal-b: oklch(32% 0.06 210);
 
   --font-display: "Be Vietnam Pro", "Segoe UI", sans-serif;
   --font-mono: "Azeret Mono", "Cascadia Mono", ui-monospace, monospace;
@@ -47,9 +53,9 @@
   --text-2xl: 2.75rem;
   --text-display: 4.5rem;
 
-  --radius-cell: 4px;
-  --radius-panel: 12px;
-  --radius-pill: 999px;
+  --radius-cell: 2px;
+  --radius-panel: 4px;
+  --radius-pill: 2px;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
@@ -78,18 +84,18 @@
   --digit-dur: 500ms;
   --toast-dur: 350ms;
 
-  --color-glow-cyan: oklch(28% 0.04 192);
-  --color-glow-amber: oklch(26% 0.05 35);
-  --color-shell: oklch(18% 0.03 192 / 0.35);
-  --color-shell-line: oklch(40% 0.03 192 / 0.45);
-  --color-panel-shine: oklch(95% 0.02 95 / 0.08);
-  --color-hover: oklch(34% 0.03 192);
-  --color-accent-hover: oklch(70% 0.18 35);
-  --color-placeholder: oklch(62% 0.03 192);
-  --color-icon-well: oklch(18% 0.04 35 / 0.18);
-  --color-piece-ring: oklch(95% 0.02 95 / 0.28);
-  --color-piece-shadow: oklch(10% 0.02 192 / 0.35);
-  --color-backdrop: oklch(10% 0.03 192 / 0.62);
+  --color-glow-cyan: oklch(26% 0.05 192);
+  --color-glow-amber: oklch(24% 0.07 35);
+  --color-shell: oklch(14% 0.03 192 / 0.55);
+  --color-shell-line: oklch(42% 0.03 192 / 0.55);
+  --color-panel-shine: oklch(95% 0.02 95 / 0.06);
+  --color-hover: oklch(28% 0.032 192);
+  --color-accent-hover: oklch(76% 0.18 35);
+  --color-placeholder: oklch(58% 0.03 192);
+  --color-icon-well: oklch(18% 0.05 35 / 0.28);
+  --color-piece-ring: oklch(95% 0.02 95 / 0.22);
+  --color-piece-shadow: oklch(8% 0.02 192 / 0.5);
+  --color-backdrop: oklch(8% 0.03 192 / 0.72);
 
   --z-grain: 0;
   --z-table: 1;

@@ -196,3 +196,88 @@ describe("room", () => {
     assert.equal(joined.name, "Lan");
   });
 });
+
+describe("arena room", () => {
+  it("seats four players before the match starts", () => {
+    const room = new Room("AREN", { mode: "arena", name: "Rồng" });
+    const sockets = [fakeWs(), fakeWs(), fakeWs(), fakeWs()];
+    const seats = sockets.map((ws, i) => room.addPlayer(ws, "P" + i).seat);
+    assert.deepEqual(seats, ["A", "B", "C", "D"]);
+    assert.equal(room.status, "playing");
+    assert.equal(room.mode, "arena");
+    assert.equal(room.name, "Rồng");
+  });
+
+  it("rejects a fifth player and a spectator move", () => {
+    const room = new Room("AREN", { mode: "arena" });
+    const players = [fakeWs(), fakeWs(), fakeWs(), fakeWs()];
+    players.forEach((ws, i) => room.addPlayer(ws, "P" + i));
+    const extra = fakeWs();
+    assert.equal(room.addPlayer(extra, "E").ok, false);
+    const spec = fakeWs();
+    const watched = room.addSpectator(spec, "Khán");
+    assert.equal(watched.ok, true);
+    const res = room.handleMove(spec, { x: 6, y: 1 }, { x: 6, y: 2 });
+    assert.equal(res.ok, false);
+  });
+
+  it("keeps the match going when one arena player disconnects", () => {
+    const room = new Room("AREN", { mode: "arena" });
+    const a = fakeWs();
+    const b = fakeWs();
+    const c = fakeWs();
+    const d = fakeWs();
+    room.addPlayer(a, "A1");
+    room.addPlayer(b, "B1");
+    room.addPlayer(c, "C1");
+    room.addPlayer(d, "D1");
+    room.removePlayer(b);
+    assert.equal(room.status, "playing");
+    assert.equal(room.state.winner, null);
+    assert.equal(room.state.pieces.some((p) => p.player === "B"), false);
+    assert.equal(room.state.turn, "A");
+  });
+
+  it("awards the last remaining player after arena disconnects", () => {
+    const room = new Room("AREN", { mode: "arena" });
+    const a = fakeWs();
+    const b = fakeWs();
+    const c = fakeWs();
+    const d = fakeWs();
+    room.addPlayer(a, "A1");
+    room.addPlayer(b, "B1");
+    room.addPlayer(c, "C1");
+    room.addPlayer(d, "D1");
+    room.removePlayer(b);
+    room.removePlayer(c);
+    room.removePlayer(d);
+    assert.equal(room.state.winner, "A");
+    assert.equal(room.state.reason, "disconnect");
+    assert.equal(room.status, "done");
+  });
+
+  it("rejects the 101st spectator", () => {
+    const room = new Room("AREN", { mode: "arena" });
+    for (let i = 0; i < 100; i += 1) {
+      assert.equal(room.addSpectator(fakeWs(), "S" + i).ok, true);
+    }
+    assert.equal(room.addSpectator(fakeWs(), "X").ok, false);
+  });
+
+  it("strips markup from chat and records history on a legal move", () => {
+    const room = new Room("TEST");
+    const a = fakeWs();
+    const b = fakeWs();
+    room.addPlayer(a, "An");
+    room.addPlayer(b, "Bình");
+    const chat = room.handleChat(a, "<b>xin chào</b>");
+    assert.equal(chat.ok, true);
+    assert.equal(chat.message.text, "xin chào");
+    const from = rules.parseSquare("i4");
+    const to = rules.parseSquare("h3");
+    const res = room.handleMove(a, from, to);
+    assert.equal(res.ok, true);
+    assert.equal(room.history.length, 1);
+    assert.equal(room.history[0].seat, "A");
+  });
+});

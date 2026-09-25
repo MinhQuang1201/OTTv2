@@ -8,34 +8,88 @@
     <link rel="preconnect" href="https://fonts.bunny.net" />
     <link
       rel="stylesheet"
-      href="https://fonts.bunny.net/css?family=azeret-mono:500,600|be-vietnam-pro:400,500,600,700"
+      href="https://fonts.bunny.net/css?family=azeret-mono:500,600,700|be-vietnam-pro:400,500,600,700,800"
     />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
+    <div class="hatch" aria-hidden="true"></div>
     <div id="app" data-screen="lobby">
       <section id="lobby" class="lobby" aria-label="Sảnh">
         <div class="lobby-brand">
-          <p class="mark">OTTv2</p>
-          <h1>Oẳn tù tì trên bàn 9×9</h1>
-          <p class="lede">
-            Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Đưa quân vào ô thắng hoặc ăn hết
-            quân đối phương.
-          </p>
+          <div class="poster">
+            <span class="reg tl" aria-hidden="true"></span>
+            <span class="reg tr" aria-hidden="true"></span>
+            <span class="reg bl" aria-hidden="true"></span>
+            <span class="reg br" aria-hidden="true"></span>
+            <p class="mark">OTTv2</p>
+            <p class="plate-no">Plate 09×09</p>
+            <h1>Oẳn tù tì trên bàn 9×9</h1>
+            <p class="lede">
+              Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Đưa quân vào ô thắng hoặc ăn hết
+              quân đối phương. Duel hai ghế, Arena bốn ghế, xem trực tiếp.
+            </p>
+            <ul class="spec-strip">
+              <li><span>Mực</span> Hue 35</li>
+              <li><span>Kẽm</span> Đêm</li>
+              <li><span>Ô thắng</span> a9 · i1</li>
+            </ul>
+          </div>
+          <ol id="leaderboard" class="leaderboard" aria-label="Bảng xếp hạng"></ol>
         </div>
         <div class="lobby-shell">
           <div class="lobby-core">
+            <header class="ticket-head">
+              <span>Phiếu việc</span>
+              <span class="ticket-index">JOB</span>
+            </header>
             <form id="start-form" class="start-form" autocomplete="on">
               <label class="field">
-                <span>Tên</span>
+                <span class="field-idx">01</span>
+                <span class="field-name">Tên</span>
                 <input
                   id="player-name"
                   name="name"
                   maxlength="20"
                   required
                   placeholder="Tên của bạn"
+                />
+              </label>
+              <fieldset class="mode-switch">
+                <legend>Chế độ</legend>
+                <label class="mode-option">
+                  <input type="radio" name="mode" value="duel" checked />
+                  <span class="mode-badge" aria-hidden="true">02</span>
+                  <span class="mode-option-body">
+                    <span class="mode-option-heading">
+                      <span class="mode-name">Duel</span>
+                    </span>
+                    <span class="mode-meta">2 ghế</span>
+                  </span>
+                  <span class="mode-check" aria-hidden="true"></span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="mode" value="arena" />
+                  <span class="mode-badge" aria-hidden="true">04</span>
+                  <span class="mode-option-body">
+                    <span class="mode-option-heading">
+                      <span class="mode-name">Arena</span>
+                    </span>
+                    <span class="mode-meta">4 ghế</span>
+                  </span>
+                  <span class="mode-check" aria-hidden="true"></span>
+                </label>
+              </fieldset>
+              <label class="field">
+                <span class="field-idx">02</span>
+                <span class="field-name">Tên phòng</span>
+                <input
+                  id="room-name"
+                  name="roomName"
+                  maxlength="28"
+                  placeholder="Rồng"
                 />
               </label>
               <div class="form-row">
@@ -45,7 +99,8 @@
                 </button>
               </div>
               <label class="field">
-                <span>Mã phòng</span>
+                <span class="field-idx">03</span>
+                <span class="field-name">Mã phòng</span>
                 <input
                   id="room-code"
                   name="room"
@@ -55,9 +110,14 @@
                   autocapitalize="characters"
                 />
               </label>
-              <button class="btn btn-ghost" type="submit" name="intent" value="join">
-                Vào phòng
-              </button>
+              <div class="local-row">
+                <button class="btn btn-ghost" type="submit" name="intent" value="join">
+                  Vào phòng
+                </button>
+                <button class="btn btn-ghost" type="submit" name="intent" value="watch">
+                  Xem trận
+                </button>
+              </div>
               <div class="local-row">
                 <button class="btn btn-ghost" type="submit" name="intent" value="local">
                   Hai người một máy
@@ -68,7 +128,7 @@
               </div>
             </form>
             <div class="waiting-list">
-              <h2>Phòng đang chờ</h2>
+              <h2>Hàng chờ</h2>
               <ul id="room-list" class="room-list">
                 <li class="empty-line">Chưa có phòng mở.</li>
               </ul>
@@ -77,20 +137,49 @@
         </div>
       </section>
 
-      <section id="table" class="table" hidden aria-label="Bàn cờ">
+      <section id="table" class="table" data-mode="duel" hidden aria-label="Bàn cờ">
         <div class="table-bar">
           <button class="btn btn-quiet" id="btn-leave" type="button">Rời bàn</button>
           <p class="room-chip" id="room-chip">Phòng</p>
           <p class="net-chip" id="net-chip" data-state="off">Ngoại tuyến</p>
+          <p class="role-chip" id="role-chip" hidden>Xem</p>
+          <p class="view-chip" id="view-chip" hidden>0 xem</p>
         </div>
 
         <article class="hud hud-b" data-seat="B">
           <header>
-            <p class="seat-tag">Xanh · I1</p>
-            <h2 id="name-b">Xanh</h2>
+            <span class="avatar" id="avatar-b" aria-hidden="true">B</span>
+            <div>
+              <p class="seat-tag">Xanh · I1</p>
+              <h2 id="name-b">Xanh</h2>
+            </div>
             <output class="clock" id="clock-b" aria-label="Thời gian còn lại của người B">10:00</output>
           </header>
           <ul class="counts" id="counts-b" aria-label="Quân còn lại người B"></ul>
+        </article>
+
+        <article class="hud hud-c" data-seat="C">
+          <header>
+            <span class="avatar" id="avatar-c" aria-hidden="true">C</span>
+            <div>
+              <p class="seat-tag">Vàng · I1</p>
+              <h2 id="name-c">Vàng</h2>
+            </div>
+            <output class="clock" id="clock-c" aria-label="Thời gian còn lại của người C">10:00</output>
+          </header>
+          <ul class="counts" id="counts-c" aria-label="Quân còn lại người C"></ul>
+        </article>
+
+        <article class="hud hud-d" data-seat="D">
+          <header>
+            <span class="avatar" id="avatar-d" aria-hidden="true">D</span>
+            <div>
+              <p class="seat-tag">Lục · I9</p>
+              <h2 id="name-d">Lục</h2>
+            </div>
+            <output class="clock" id="clock-d" aria-label="Thời gian còn lại của người D">10:00</output>
+          </header>
+          <ul class="counts" id="counts-d" aria-label="Quân còn lại người D"></ul>
         </article>
 
         <div class="board-shell">
@@ -98,6 +187,7 @@
           <div class="crop tr" aria-hidden="true"></div>
           <div class="crop bl" aria-hidden="true"></div>
           <div class="crop br" aria-hidden="true"></div>
+          <p class="combat-banner" id="combat-banner" hidden></p>
           <div class="board-frame">
             <div class="ranks" id="ranks" aria-hidden="true"></div>
             <div
@@ -114,19 +204,56 @@
 
         <article class="hud hud-a" data-seat="A">
           <header>
-            <p class="seat-tag">Đỏ · A9</p>
-            <h2 id="name-a">Đỏ</h2>
+            <span class="avatar" id="avatar-a" aria-hidden="true">A</span>
+            <div>
+              <p class="seat-tag">Đỏ · A9</p>
+              <h2 id="name-a">Đỏ</h2>
+            </div>
             <output class="clock" id="clock-a" aria-label="Thời gian còn lại của người A">10:00</output>
           </header>
           <ul class="counts" id="counts-a" aria-label="Quân còn lại người A"></ul>
         </article>
+
+        <div class="match-dock">
+          <section class="chat-panel" aria-label="Chat phòng">
+            <ul id="chat-log" class="chat-log"></ul>
+            <div class="react-row" id="react-row">
+              <button type="button" data-react="fire">🔥</button>
+              <button type="button" data-react="fight">⚔️</button>
+              <button type="button" data-react="gg">GG</button>
+              <button type="button" data-react="clap">👏</button>
+              <button type="button" data-react="lol">😂</button>
+            </div>
+            <form id="chat-form" class="chat-form">
+              <label class="sr-only" for="chat-input">Tin nhắn</label>
+              <input id="chat-input" maxlength="120" placeholder="Chat phòng" autocomplete="off" />
+              <button class="btn btn-ghost" type="submit">Gửi</button>
+            </form>
+          </section>
+          <section class="history-panel" aria-label="Lịch sử nước">
+            <header>
+              <h2>Nước đi</h2>
+              <label class="replay-label">
+                Phát
+                <input id="replay-slider" type="range" min="0" max="0" value="0" disabled />
+              </label>
+            </header>
+            <ol id="history-log" class="history-log"></ol>
+          </section>
+        </div>
       </section>
     </div>
 
     <div id="toast" class="t-toast" role="status" aria-live="polite" hidden></div>
+    <div id="react-float" class="react-float" aria-hidden="true"></div>
 
     <dialog id="win-dialog" class="t-modal">
       <div class="win-card">
+        <span class="reg tl" aria-hidden="true"></span>
+        <span class="reg tr" aria-hidden="true"></span>
+        <span class="reg bl" aria-hidden="true"></span>
+        <span class="reg br" aria-hidden="true"></span>
+        <div class="confetti" aria-hidden="true"></div>
         <svg class="t-success-check" viewBox="0 0 48 48" aria-hidden="true">
           <circle cx="24" cy="24" r="20" fill="none" />
           <path d="M14 25 l7 7 13-15" fill="none" />

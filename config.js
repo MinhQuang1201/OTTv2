@@ -8,8 +8,18 @@
   const TYPES = ["dam", "la", "keo"];
   const BEATS = { dam: "keo", keo: "la", la: "dam" };
   const TYPE_LABEL = { dam: "Đấm", la: "Lá", keo: "Kéo" };
-  const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
+  const SEAT_LABEL = { A: "Đỏ", B: "Xanh", C: "Vàng", D: "Lục" };
   const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
+  const ARENA_GOAL = {
+    A: { x: 0, y: 8 },
+    B: { x: 0, y: 0 },
+    C: { x: 8, y: 0 },
+    D: { x: 8, y: 8 }
+  };
+  const MODES = {
+    duel: { seats: ["A", "B"], maxPlayers: 2 },
+    arena: { seats: ["A", "B", "C", "D"], maxPlayers: 4 }
+  };
 
   const TIME_CONTROL = {
     initialMs: 10 * 60 * 1000,
@@ -35,6 +45,16 @@
     { type: "dam", x: 8, y: 4 } // i5
   ];
 
+  // Arena A: g–i / rank 2–3. B/C/D are 90° clockwise copies.
+  const A_ARENA_SETUP = [
+    { type: "la", x: 6, y: 1 },
+    { type: "dam", x: 7, y: 1 },
+    { type: "keo", x: 8, y: 1 },
+    { type: "dam", x: 6, y: 2 },
+    { type: "keo", x: 7, y: 2 },
+    { type: "la", x: 8, y: 2 }
+  ];
+
   const DELTAS = [
     [-1, -1], [0, -1], [1, -1],
     [-1, 0],           [1, 0],
@@ -46,6 +66,14 @@
       ? Number(process.env.PORT)
       : 3000;
 
+  const REACTS = {
+    fire: "🔥",
+    fight: "⚔️",
+    gg: "GG",
+    clap: "👏",
+    lol: "😂"
+  };
+
   return {
     SIZE,
     FILES,
@@ -54,14 +82,23 @@
     TYPE_LABEL,
     SEAT_LABEL,
     GOAL,
+    ARENA_GOAL,
+    MODES,
     A_SETUP,
+    A_ARENA_SETUP,
     TIME_CONTROL,
     DELTAS,
+    REACTS,
     PORT,
     HOST: "0.0.0.0",
     NAME_MAX: 20,
+    ROOM_NAME_MAX: 28,
+    CHAT_MAX: 120,
+    CHAT_KEEP: 30,
+    HISTORY_KEEP: 200,
     ROOM_ID_LEN: 4,
     MAX_ROOMS: 200,
+    MAX_SPECTATORS: 100,
     MAX_MESSAGE: 8192,
     ASSET: { dam: "assets/dam.png", la: "assets/la.png", keo: "assets/keo.png" }
   };

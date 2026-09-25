@@ -12,45 +12,86 @@ function sanitizeName(name) {
   return raw.slice(0, config.NAME_MAX);
 }
 
-function snapshotPlayers(room) {
-  return {
-    A: room.players.A ? { name: room.players.A.name, connected: room.players.A.connected } : null,
-    B: room.players.B ? { name: room.players.B.name, connected: room.players.B.connected } : null
-  };
+function sanitizeText(text, max) {
+  const raw = String(text || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return raw.slice(0, max);
 }
 
 function token() {
   return crypto.randomBytes(32).toString("hex");
 }
 
+function snapshotPlayers(room) {
+  const out = {};
+  for (const seat of room.seats) {
+    const player = room.players[seat];
+    out[seat] = player
+      ? { name: player.name, connected: player.connected !== false }
+      : null;
+  }
+  return out;
+}
+
 class Room {
-  constructor(id, deps = {}) {
+  constructor(id, options) {
+    const opts = options || {};
     this.id = id;
-    this.now = deps.now || Date.now;
-    this.schedule = deps.schedule || setTimeout;
-    this.cancel = deps.cancel || clearTimeout;
-    this.onUpdate = deps.onUpdate || null;
-    this.players = { A: null, B: null };
-    this.state = rules.createInitialState();
+    this.now = opts.now || Date.now;
+    this.schedule = opts.schedule || setTimeout;
+    this.cancel = opts.cancel || clearTimeout;
+    this.onUpdate = opts.onUpdate || null;
+    this.mode = rules.normalizeMode(opts.mode);
+    this.seats = config.MODES[this.mode].seats.slice();
+    this.name =
+      sanitizeText(opts.name, config.ROOM_NAME_MAX) || "Phòng " + id;
+    this.players = {};
+    for (const seat of this.seats) this.players[seat] = null;
+    this.spectators = [];
+    this.state = rules.createInitialState(this.mode);
     this.status = "waiting";
     this.lastEvents = [];
+    this.history = [];
+    this.chatLog = [];
+    this.playerNames = {};
     this.createdAt = this.now();
     this.clockAnchorMs = this.createdAt;
     this.clockTimer = null;
     this.reconnectTimers = new Map();
   }
 
+  filledCount() {
+    return this.seats.reduce(
+      (count, seat) => count + (this.players[seat] ? 1 : 0),
+      0
+    );
+  }
+
   isEmpty() {
-    if (!this.players.A && !this.players.B) return true;
+    if (this.spectators.length) return false;
+    const players = this.seats
+      .map((seat) => this.players[seat])
+      .filter(Boolean);
+    if (!players.length) return true;
     if (this.status !== "done") return false;
-    return !this.players.A?.connected && !this.players.B?.connected;
+    return players.every((player) => player.connected === false);
   }
 
   seatOf(ws) {
-    for (const seat of ["A", "B"]) {
-      if (this.players[seat] && this.players[seat].connected && this.players[seat].ws === ws) return seat;
+    for (const seat of this.seats) {
+      const player = this.players[seat];
+      if (player && player.connected !== false && player.ws === ws) {
+        return seat;
+      }
     }
     return null;
+  }
+
+  spectatorOf(ws) {
+    return this.spectators.find((spectator) => spectator.ws === ws) || null;
   }
 
   notify(update) {
@@ -69,36 +110,76 @@ class Room {
   }
 
   addPlayer(ws, name) {
-    if (this.status === "done") return { ok: false, error: "Phòng đã kết thúc" };
-    let seat = null;
-    if (!this.players.A) seat = "A";
-    else if (!this.players.B) seat = "B";
-    else return { ok: false, error: "Phòng đã đủ người" };
+    if (this.status === "done") {
+      return { ok: false, error: "Phòng đã kết thúc" };
+    }
+    const seat = this.seats.find((candidate) => !this.players[candidate]);
+    if (!seat) return { ok: false, error: "Phòng đã đủ người" };
 
     const player = this.makePlayer(ws, name, seat);
     this.players[seat] = player;
-    if (this.players.A && this.players.B) {
+    this.playerNames[seat] = player.name;
+    if (this.filledCount() === this.seats.length) {
       this.status = "playing";
-      this.state = rules.createInitialState();
+      this.state = rules.createInitialState(this.mode);
       this.clockAnchorMs = this.now();
       this.scheduleClockDeadline();
     }
-    return { ok: true, seat, name: player.name, resumeToken: player.resumeToken };
+    return {
+      ok: true,
+      seat,
+      role: seat,
+      name: player.name,
+      resumeToken: player.resumeToken
+    };
+  }
+
+  addSpectator(ws, name) {
+    if (this.status === "done") {
+      return { ok: false, error: "Phòng đã kết thúc" };
+    }
+    if (this.spectators.length >= config.MAX_SPECTATORS) {
+      return { ok: false, error: "Đã đủ người xem" };
+    }
+    if (this.seatOf(ws) || this.spectatorOf(ws)) {
+      return { ok: false, error: "Bạn đã ở trong phòng" };
+    }
+    const spectator = { ws, name: sanitizeName(name) };
+    this.spectators.push(spectator);
+    return {
+      ok: true,
+      seat: "spectator",
+      role: "spectator",
+      name: spectator.name
+    };
   }
 
   settleClock(now = this.now()) {
-    if (this.status !== "playing" || !this.state.clock || !this.state.clock.runningSeat) {
+    if (
+      this.status !== "playing" ||
+      !this.state.clock ||
+      !this.state.clock.runningSeat
+    ) {
       this.clockAnchorMs = now;
       return { ok: true, state: this.state, events: [] };
     }
     const elapsed = Math.max(0, Math.floor(now - this.clockAnchorMs));
-    if (elapsed === 0) return { ok: true, state: this.state, events: [] };
+    if (elapsed === 0) {
+      return { ok: true, state: this.state, events: [] };
+    }
     const result = rules.elapseClock(this.state, elapsed);
     this.state = result.state;
     this.clockAnchorMs = now;
     if (result.events.length) this.lastEvents = result.events;
     if (this.state.winner) this.finishTerminal();
+    else if (result.events.length) this.scheduleClockDeadline();
     return result;
+  }
+
+  scheduleJob(fn, delay) {
+    const handle = this.schedule(fn, delay);
+    if (handle && typeof handle.unref === "function") handle.unref();
+    return handle;
   }
 
   cancelClockDeadline() {
@@ -108,22 +189,23 @@ class Room {
     }
   }
 
-  scheduleJob(fn, delay) {
-    const handle = this.schedule(fn, delay);
-    if (handle && typeof handle.unref === "function") handle.unref();
-    return handle;
-  }
-
   scheduleClockDeadline() {
     this.cancelClockDeadline();
     if (this.status !== "playing" || !this.state.clock.runningSeat) return;
     const seat = this.state.clock.runningSeat;
-    const delay = Math.max(0, this.state.clock.remainingMs[seat]);
+    const delay = Math.max(
+      0,
+      this.state.clock.remainingMs[seat] || config.TIME_CONTROL.initialMs
+    );
     this.clockTimer = this.scheduleJob(() => {
       this.clockTimer = null;
       const result = this.settleClock(this.now());
       if (result.events.length || this.state.winner) {
-        this.notify({ type: "clock", result, terminal: Boolean(this.state.winner) });
+        this.notify({
+          type: "clock",
+          result,
+          terminal: Boolean(this.state.winner)
+        });
       }
     }, delay);
   }
@@ -132,22 +214,50 @@ class Room {
     this.cancelClockDeadline();
     for (const handle of this.reconnectTimers.values()) this.cancel(handle);
     this.reconnectTimers.clear();
-    this.state.clock.runningSeat = null;
+    if (this.state.clock) this.state.clock.runningSeat = null;
     this.status = "done";
   }
 
   handleMove(ws, from, to) {
     const seat = this.seatOf(ws);
-    if (!seat) return { ok: false, error: "Bạn không ở trong phòng này", state: null, events: [] };
-    if (this.status !== "playing") return { ok: false, error: "Ván chưa bắt đầu", state: null, events: [] };
+    if (!seat) {
+      return {
+        ok: false,
+        error: "Bạn không ở trong phòng này",
+        state: null,
+        events: []
+      };
+    }
+    if (this.status !== "playing") {
+      return {
+        ok: false,
+        error: "Ván chưa bắt đầu",
+        state: null,
+        events: []
+      };
+    }
+
     const settled = this.settleClock(this.now());
     if (this.state.winner) {
-      return { ok: false, error: "Ván đã kết thúc", state: this.state, events: settled.events };
+      return {
+        ok: false,
+        error: "Ván đã kết thúc",
+        state: this.state,
+        events: settled.events
+      };
     }
+
     const result = rules.applyMove(this.state, seat, from, to);
     if (!result.ok) return result;
     this.state = result.state;
     this.lastEvents = result.events;
+    this.history.push({
+      seat,
+      from: { x: from.x, y: from.y },
+      to: { x: to.x, y: to.y },
+      events: result.events
+    });
+    if (this.history.length > config.HISTORY_KEEP) this.history.shift();
     this.clockAnchorMs = this.now();
     if (this.state.winner) this.finishTerminal();
     else this.scheduleClockDeadline();
@@ -155,6 +265,8 @@ class Room {
   }
 
   disconnectPlayer(ws) {
+    if (this.mode === "arena") return this.abandonArena(ws, "disconnect");
+
     const seat = this.seatOf(ws);
     if (!seat) return null;
     const player = this.players[seat];
@@ -162,12 +274,19 @@ class Room {
       player.connected = false;
       return { seat, name: player.name, reason: "disconnect" };
     }
+
     const now = this.now();
     const settled = this.settleClock(now);
     if (this.state.winner) {
       player.connected = false;
-      return { seat, name: player.name, reason: this.state.reason, events: settled.events };
+      return {
+        seat,
+        name: player.name,
+        reason: this.state.reason,
+        events: settled.events
+      };
     }
+
     player.connected = false;
     player.reconnectDeadlineMs = now + config.TIME_CONTROL.reconnectGraceMs;
     if (this.state.clock.runningSeat === seat) {
@@ -175,13 +294,25 @@ class Room {
       this.clockAnchorMs = now;
       this.cancelClockDeadline();
     }
+
     const timer = this.scheduleJob(() => {
       this.reconnectTimers.delete(seat);
       const result = this.expireReconnect(this.now(), seat);
-      if (result && result.events.length) this.notify({ type: "reconnect", result, terminal: Boolean(this.state.winner) });
+      if (result && result.events.length) {
+        this.notify({
+          type: "reconnect",
+          result,
+          terminal: Boolean(this.state.winner)
+        });
+      }
     }, config.TIME_CONTROL.reconnectGraceMs);
     this.reconnectTimers.set(seat, timer);
-    return { seat, name: player.name, reason: "disconnect", resumeToken: player.resumeToken };
+    return {
+      seat,
+      name: player.name,
+      reason: "disconnect",
+      resumeToken: player.resumeToken
+    };
   }
 
   removePlayer(ws) {
@@ -189,11 +320,21 @@ class Room {
   }
 
   leavePlayer(ws) {
+    if (this.mode === "arena") return this.abandonArena(ws, "leave");
+
     const seat = this.seatOf(ws);
     if (!seat) return null;
     const player = this.players[seat];
     this.settleClock(this.now());
-    if (this.state.winner) return { seat, name: player.name, reason: this.state.reason };
+
+    if (this.status !== "playing") {
+      this.players[seat] = null;
+      return { seat, name: player.name, reason: "leave" };
+    }
+    if (this.state.winner) {
+      return { seat, name: player.name, reason: this.state.reason };
+    }
+
     const other = seat === "A" ? "B" : "A";
     player.connected = false;
     player.reconnectDeadlineMs = null;
@@ -203,19 +344,73 @@ class Room {
     this.state.winner = other;
     this.state.reason = "leave";
     this.state.eliminatedPlayer = null;
-    this.lastEvents = [{ type: "win", winner: other, reason: "leave", eliminatedPlayer: null }];
+    this.lastEvents = [
+      { type: "win", winner: other, reason: "leave", eliminatedPlayer: null }
+    ];
     this.finishTerminal();
-    return { seat, name: player.name, reason: "leave", result: { ok: true, state: this.state, events: this.lastEvents } };
+    return {
+      seat,
+      name: player.name,
+      reason: "leave",
+      result: { ok: true, state: this.state, events: this.lastEvents }
+    };
+  }
+
+  abandonArena(ws, reason) {
+    const spectator = this.spectatorOf(ws);
+    if (spectator) {
+      this.spectators = this.spectators.filter((item) => item.ws !== ws);
+      return { seat: "spectator", name: spectator.name, reason };
+    }
+
+    const seat = this.seatOf(ws);
+    if (!seat) return null;
+    const player = this.players[seat];
+    this.players[seat] = null;
+
+    if (this.status === "playing" && !this.state.winner) {
+      this.state = rules.eliminatePlayer(this.state, seat);
+      if (this.state.winner) {
+        this.state.reason = reason;
+        this.lastEvents = [
+          {
+            type: "win",
+            winner: this.state.winner,
+            reason,
+            eliminatedPlayer: seat
+          }
+        ];
+        this.finishTerminal();
+      } else {
+        this.clockAnchorMs = this.now();
+        this.scheduleClockDeadline();
+      }
+    }
+    return { seat, name: player.name, reason };
   }
 
   resumePlayer(ws, resumeToken) {
-    if (this.status === "done") return { ok: false, error: "Ván đã kết thúc" };
+    if (this.mode !== "duel" || this.status === "done") {
+      return { ok: false, error: "Ván đã kết thúc" };
+    }
     const now = this.now();
-    const seat = ["A", "B"].find((candidate) => {
+    const seat = this.seats.find((candidate) => {
       const player = this.players[candidate];
-      return player && !player.connected && player.resumeToken === resumeToken && player.reconnectDeadlineMs >= now;
+      return (
+        player &&
+        player.connected === false &&
+        player.resumeToken === resumeToken &&
+        player.reconnectDeadlineMs !== null &&
+        player.reconnectDeadlineMs >= now
+      );
     });
-    if (!seat) return { ok: false, error: "Mã khôi phục không hợp lệ hoặc đã hết hạn" };
+    if (!seat) {
+      return {
+        ok: false,
+        error: "Mã khôi phục không hợp lệ hoặc đã hết hạn"
+      };
+    }
+
     const player = this.players[seat];
     const settled = this.settleClock(now);
     const timer = this.reconnectTimers.get(seat);
@@ -229,22 +424,41 @@ class Room {
       this.clockAnchorMs = now;
       this.scheduleClockDeadline();
     }
-    return { ok: true, seat, name: player.name, state: this.state, events: settled.events };
+    return {
+      ok: true,
+      seat,
+      name: player.name,
+      state: this.state,
+      events: settled.events
+    };
   }
 
   expireReconnect(now = this.now(), onlySeat = null) {
-    if (this.status !== "playing") return { ok: false, state: this.state, events: [] };
-    const expiredAll = ["A", "B"].filter((seat) => {
-      const p = this.players[seat];
-      return p && !p.connected && p.reconnectDeadlineMs !== null && p.reconnectDeadlineMs <= now;
+    if (this.mode !== "duel" || this.status !== "playing") {
+      return { ok: false, state: this.state, events: [] };
+    }
+    const expiredAll = this.seats.filter((seat) => {
+      const player = this.players[seat];
+      return (
+        player &&
+        player.connected === false &&
+        player.reconnectDeadlineMs !== null &&
+        player.reconnectDeadlineMs <= now
+      );
     });
-    const expired = onlySeat ? expiredAll.filter((seat) => seat === onlySeat) : expiredAll;
-    if (!expired.length) return { ok: true, state: this.state, events: [] };
-    const simultaneous = expiredAll.length === 2 && this.players.A.reconnectDeadlineMs === this.players.B.reconnectDeadlineMs;
-    if (simultaneous) {
-      // Rule.md does not define a winner when both grace deadlines tie.
+    const expired = onlySeat
+      ? expiredAll.filter((seat) => seat === onlySeat)
+      : expiredAll;
+    if (!expired.length) {
       return { ok: true, state: this.state, events: [] };
     }
+    const deadlines = expiredAll.map(
+      (seat) => this.players[seat].reconnectDeadlineMs
+    );
+    if (expiredAll.length === 2 && deadlines[0] === deadlines[1]) {
+      return { ok: true, state: this.state, events: [] };
+    }
+
     const loser = expired[0];
     const winner = loser === "A" ? "B" : "A";
     const settled = this.settleClock(now);
@@ -252,28 +466,97 @@ class Room {
     this.state.winner = winner;
     this.state.reason = "disconnect_timeout";
     this.state.eliminatedPlayer = null;
-    this.lastEvents = [{ type: "win", winner, reason: "disconnect_timeout", eliminatedPlayer: null }];
+    this.lastEvents = [
+      {
+        type: "win",
+        winner,
+        reason: "disconnect_timeout",
+        eliminatedPlayer: null
+      }
+    ];
     this.finishTerminal();
     return { ok: true, state: this.state, events: this.lastEvents };
+  }
+
+  handleChat(ws, text) {
+    const seat = this.seatOf(ws);
+    const spectator = this.spectatorOf(ws);
+    if (!seat && !spectator) {
+      return { ok: false, error: "Bạn không ở trong phòng này" };
+    }
+    const clean = sanitizeText(text, config.CHAT_MAX);
+    if (!clean) return { ok: false, error: "Tin trống" };
+    const message = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      seat: seat || "spectator",
+      name: seat ? this.players[seat].name : spectator.name,
+      text: clean,
+      at: Date.now()
+    };
+    this.chatLog.push(message);
+    if (this.chatLog.length > config.CHAT_KEEP) this.chatLog.shift();
+    return { ok: true, message };
+  }
+
+  handleReact(ws, code) {
+    const seat = this.seatOf(ws);
+    const spectator = this.spectatorOf(ws);
+    if (!seat && !spectator) {
+      return { ok: false, error: "Bạn không ở trong phòng này" };
+    }
+    if (!Object.prototype.hasOwnProperty.call(config.REACTS, code)) {
+      return { ok: false, error: "Cảm xúc không hợp lệ" };
+    }
+    return {
+      ok: true,
+      react: {
+        code,
+        glyph: config.REACTS[code],
+        seat: seat || "spectator",
+        name: seat ? this.players[seat].name : spectator.name
+      }
+    };
   }
 
   payload() {
     this.settleClock(this.now());
     return {
       roomId: this.id,
+      name: this.name,
+      mode: this.mode,
       status: this.status,
       serverNow: this.now(),
       players: snapshotPlayers(this),
+      spectators: this.spectators.length,
       state: rules.publicState(this.state),
-      events: this.lastEvents || []
+      events: this.lastEvents || [],
+      history: this.history,
+      chat: this.chatLog
+    };
+  }
+
+  lobbyInfo() {
+    return {
+      id: this.id,
+      name: this.name,
+      mode: this.mode,
+      players: this.filledCount(),
+      maxPlayers: this.seats.length,
+      viewers: this.spectators.length,
+      status: this.status,
+      names: this.seats
+        .map((seat) => this.players[seat] && this.players[seat].name)
+        .filter(Boolean)
     };
   }
 
   waitingInfo() {
     return {
       id: this.id,
-      players: Number(!!this.players.A) + Number(!!this.players.B),
-      names: [this.players.A && this.players.A.name, this.players.B && this.players.B.name].filter(Boolean)
+      players: this.filledCount(),
+      names: this.seats
+        .map((seat) => this.players[seat] && this.players[seat].name)
+        .filter(Boolean)
     };
   }
 
@@ -281,21 +564,34 @@ class Room {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
   }
 
-  broadcast(msg, except) {
-    for (const seat of ["A", "B"]) {
-      const slot = this.players[seat];
-      if (slot && slot.connected && slot.ws !== except) this.send(slot.ws, msg);
+  eachClient(fn) {
+    for (const seat of this.seats) {
+      const player = this.players[seat];
+      if (player && player.connected !== false) fn(player.ws, seat);
     }
+    for (const spectator of this.spectators) fn(spectator.ws, "spectator");
+  }
+
+  broadcast(msg, except) {
+    this.eachClient((ws) => {
+      if (ws !== except) this.send(ws, msg);
+    });
   }
 
   emitState() {
     const payload = this.payload();
-    for (const seat of ["A", "B"]) {
-      const slot = this.players[seat];
-      if (!slot || !slot.connected) continue;
-      this.send(slot.ws, Object.assign({ type: "state", you: seat }, payload));
-    }
+    this.eachClient((ws, role) => {
+      this.send(
+        ws,
+        Object.assign({ type: "state", you: role, role }, payload)
+      );
+    });
   }
 }
 
-module.exports = { Room, sanitizeName, snapshotPlayers };
+module.exports = {
+  Room,
+  sanitizeName,
+  sanitizeText,
+  snapshotPlayers
+};
