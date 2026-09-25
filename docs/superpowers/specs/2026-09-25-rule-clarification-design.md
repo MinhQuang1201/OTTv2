@@ -23,8 +23,9 @@ hình thời gian; việc đồng bộ phần mềm là một công việc riên
    khi nước hợp lệ hoàn thành, ván kết thúc, hoặc họ hết giờ. Nước sai không
    dừng hay chuyển đồng hồ. Hết giờ là thua.
 4. Khi mất kết nối, giữ ghế và dừng đồng hồ của người mất kết nối trong 60 giây.
-   Nếu họ không quay lại đúng ghế trong thời hạn này, đối thủ thắng. Không áp
-   dụng xử thua sau khi ván đã kết thúc.
+   Nếu họ không quay lại đúng ghế trong thời hạn này, đối thủ thắng. Nếu quay
+   lại đúng hạn, đồng hồ tiếp tục chạy theo lượt hiện tại. Không áp dụng xử thua
+   sau khi ván đã kết thúc.
 5. Bảng tương tác mô tả tình trạng của ô đích thay vì đặt quan hệ giữa hai quân
    vào cột “Quân đi”.
 
