@@ -52,6 +52,9 @@ _Avoid_: team, side như màu cờ vua trắng/đen
 Một ván đang chờ hoặc đang chơi, có mã phòng, tối đa hai ghế.
 _Avoid_: lobby như toàn server, table như poker
 
-**Playfull**:
-Thư viện khách kết nối WebSocket, tạo/vào phòng, gửi nước đi, nhận trạng thái.
+**Playfull (lịch sử)**:
+Tên của adapter/thư viện khách trong kiến trúc cũ, kết nối WebSocket để tạo/vào phòng, gửi nước đi và nhận trạng thái. Không phải kiến trúc active.
+
+**PlayHTML/PartyKit (active)**:
+Kiến trúc đích: adapter client gửi command `ott:*` tới worker authoritative đã kiểm chứng; worker/`Room` quyết định ghế, luật, đồng hồ và kết quả. Hiện rollout **BLOCKED**: fork/worker PlayHTML và bootstrap connection chưa có evidence runtime trực tiếp; đồng thời PartyKit `0.0.115` chỉ cho `Stub.socket()` trả `WebSocket` và `Server.onMessage` không có authenticated inter-party origin/route metadata. Direct game create bị từ chối, nhưng lobby không thể khởi tạo game qua channel đã chứng minh an toàn. Không thay bằng internal marker forgeable, client relay, process map, bridge/mock, unit test hay fallback transport; online UI phải unavailable, còn local/AI vẫn hoạt động.
 _Avoid_: socket wrapper, netcode

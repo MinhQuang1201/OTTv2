@@ -34,9 +34,9 @@ npm run assets
 4. **Hai người một máy** — luân phiên trên cùng trình duyệt.
 5. **Đấu với máy** — bạn là Người A; máy là Người B.
 
-Hai máy / hai tab: một bên tạo phòng, bên kia vào bằng mã. Luật online do server quyết.
+Hai người trên cùng máy có thể chơi ngay. Chế độ AI hoạt động local. Chế độ online là mục tiêu kiến trúc worker-authoritative, nhưng hiện chưa khả dụng khi rollout còn blocked.
 
-Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http://localhost:3000/playfull.html)
+Tài liệu adapter PlayHTML: [http://localhost:3000/playhtml-game.html](http://localhost:3000/playhtml-game.html)
 
 ## Luật tóm tắt
 
@@ -62,9 +62,9 @@ config.js          Hằng số bàn, quân, cổng
 rules.js           Luật thuần: đi, ăn, thắng
 ai.js              Máy chọn nước (thay thế được)
 room.js            Phòng, ghế A/B, trọng tài
-server.js          HTTP tĩnh + WebSocket
-playfull.js        Thư viện khách realtime
-playfull.html      Tài liệu Playfull
+server.js          HTTP tĩnh, không xử lý game online
+playhtml-game-client.js Adapter lệnh authoritative PlayHTML/PartyKit
+playhtml-game.html Tài liệu adapter PlayHTML
 index.html         Giao diện
 game.js            Sảnh, bàn, chế độ chơi
 style.css          Bố cục
@@ -74,7 +74,7 @@ tests/             Luật và phòng
 scripts/gen-assets.js
 ```
 
-Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.applyMove`; khách chỉ vẽ trạng thái server gửi.
+Luật không nằm trong UI. Khi online được mở sau các evidence gate, `Room.handleMove` gọi `rules.applyMove`; khách chỉ vẽ trạng thái worker gửi.
 
 ## Kiểm thử
 
@@ -82,23 +82,21 @@ Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.a
 npm test
 ```
 
-`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
+`tests/rules.test.js` — phạm vi kiểm thử luật; chạy `npm test` để xác minh kết quả trên revision hiện tại.
 
-`tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
+`tests/room.test.js` — phạm vi kiểm thử `Room`; chạy `npm test` để xác minh kết quả trên revision hiện tại.
 
 ## Biến môi trường
 
-`PORT` — cổng HTTP/WS, mặc định `3000`.
+`PORT` — cổng HTTP static, mặc định `3000`.
+`OTT_PLAYHTML_HOST` — endpoint self-hosted dành cho adapter; không đặt secret trong frontend.
 
-## Playfull (khách)
+## Online qua PlayHTML/PartyKit
 
-```js
-const pf = new Playfull();
-await pf.connect();
-pf.on("state", (msg) => render(msg.state));
-pf.create("An");
-pf.join("K7P2", "Bình");
-pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
-```
+Kiến trúc đích dùng worker PartyKit/PlayHTML đã pin và kiểm chứng. Khi và chỉ khi evidence gate cho phép, `window.OTT_PLAYHTML_CONNECTION_FACTORY` được bootstrap từ cùng connection PlayHTML đã xác minh; adapter gửi các lệnh `ott:*` và chuyển tiếp message `ott:*` do worker trả về.
 
-Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.
+Không dùng public PlayHTML host cho dữ liệu ván và không tạo WebSocket thứ hai. Static server chỉ phục vụ file tĩnh; authority online thuộc worker. Local và AI không phụ thuộc worker.
+
+Trạng thái rollout hiện tại: **BLOCKED**. Không có factory, WebSocket/PartySocket, polling, second PlayHTML session hoặc fallback transport nào được dùng để giả lập online. PartyKit `0.0.115` đã được kiểm tra: `Stub.socket()` chỉ trả `WebSocket` và `Server.onMessage` không có authenticated inter-party origin/route metadata. Direct game create bị từ chối, nhưng secure lobby-driven game initialization vẫn blocked; không thay bằng internal payload marker forgeable, client relay hoặc process map. UI phải báo online unavailable; local và AI vẫn dùng được. Không coi bridge/mock, unit test hoặc tài liệu là evidence runtime.
+
+**Gate bắt buộc trước production:** Task 4 phải có evidence trực tiếp cho lobby-to-game channel/metadata server-authenticated; Task 5 vẫn phải có evidence trực tiếp theo `docs/playhtml-upstream-lock.md`; initial sync và OTT phải đi cùng một verified connection; routing/lifecycle/persistence phải qua runtime integration; static host phải từ chối private paths kể cả case variants; và two-profile acceptance phải ghi nhận create/list/join, legal/invalid move, timeout, leave, disconnect/reload/resume, expiry, token isolation, local/AI fallback. Không đánh dấu gate hoặc acceptance PASS nếu scenario chưa chạy.
