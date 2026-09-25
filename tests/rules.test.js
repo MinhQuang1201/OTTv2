@@ -30,52 +30,65 @@ describe("setup", () => {
     assert.equal(rules.piecesAt(s, ...Object.values(config.GOAL.B)).length, 0);
   });
 
-  it("mirrors A onto B by 180-degree rotation with the same types", () => {
+  it("reflects A onto B across the a1-i9 diagonal with the same types", () => {
     const s = rules.createInitialState();
     for (const p of s.pieces.filter((p) => p.player === "A")) {
       const q = s.pieces.find(
-        (b) => b.player === "B" && b.x === 8 - p.x && b.y === 8 - p.y
+        (b) => b.player === "B" && b.x === p.y && b.y === p.x
       );
       assert.ok(q, `missing mirror of A ${p.type} at ${p.x},${p.y}`);
       assert.equal(q.type, p.type);
     }
   });
 
-  it("uses three staggered RPS triangles instead of a solid 3x3 block", () => {
+  it("uses three staggered RPS wings instead of a solid 3x3 block", () => {
     const s = rules.createInitialState();
     const actual = s.pieces
       .filter((p) => p.player === "A")
       .map((p) => `${rules.formatSquare(p)}:${p.type}`)
       .sort();
     const expected = [
-      "g1:dam",
-      "h1:keo",
-      "g2:la",
-      "h3:dam",
-      "i3:keo",
+      "d1:dam",
+      "e1:keo",
+      "e2:la",
+      "f2:la",
+      "g2:dam",
+      "g3:keo",
+      "h4:keo",
       "i4:la",
-      "g4:dam",
-      "h5:keo",
-      "g5:la"
+      "i5:dam"
     ].sort();
 
     assert.deepEqual(actual, expected);
   });
 
-  it("starts A in the upper-right and B in the lower-left", () => {
+  it("keeps both armies off the diagonal with a three-layer neutral buffer", () => {
     const s = rules.createInitialState();
     assert.ok(
       s.pieces
         .filter((p) => p.player === "A")
-        .every((p) => p.x >= 6 && p.y <= 4)
+        .every((p) => p.x > p.y && p.x - p.y >= 3)
     );
     assert.ok(
       s.pieces
         .filter((p) => p.player === "B")
-        .every((p) => p.x <= 2 && p.y >= 4)
+        .every((p) => p.x < p.y && p.y - p.x >= 3)
     );
+    assert.equal(s.pieces.some((p) => p.x === p.y), false);
     assert.deepEqual(config.GOAL.A, sq("a9"));
     assert.deepEqual(config.GOAL.B, sq("i1"));
+  });
+
+  it("does not let either side reach the diagonal on its opening move", () => {
+    const s = rules.createInitialState();
+    for (const p of s.pieces) {
+      const legal = rules.getLegalMoves(s, p.id);
+      assert.equal(
+        legal.some((m) => m.x === m.y),
+        false,
+        `${p.id} can reach the divider immediately`
+      );
+    }
   });
 
   it("does not let either seat step into its own goal on move 1", () => {
@@ -121,30 +134,30 @@ describe("movement", () => {
 
   it("allows a king-step onto an empty square and rejects longer steps", () => {
     const s = rules.createInitialState();
-    const ok = move(s, "A", "i3", "i2");
+    const ok = move(s, "A", "i4", "h3");
     assert.equal(ok.ok, true);
-    assert.equal(pieceAt(ok.state, "i2", "A").type, "keo");
-    const far = move(s, "A", "i3", "i1");
+    assert.equal(pieceAt(ok.state, "h3", "A").type, "la");
+    const far = move(s, "A", "i4", "g2");
     assert.equal(far.ok, false);
   });
 
   it("rejects moving onto a friendly piece", () => {
     const s = rules.createInitialState();
-    const res = move(s, "A", "i3", "h3");
+    const res = move(s, "A", "i4", "i5");
     assert.equal(res.ok, false);
   });
 
   it("rejects out-of-turn moves and does not mutate the input", () => {
     const s = rules.createInitialState();
     const copy = JSON.stringify(s);
-    const res = move(s, "B", "a7", "a8");
+    const res = move(s, "B", "a4", "a3");
     assert.equal(res.ok, false);
     assert.equal(JSON.stringify(s), copy);
   });
 
   it("rejects off-board destinations", () => {
     const s = rules.createInitialState();
-    const res = rules.applyMove(s, "A", sq("a3"), { x: -1, y: 2 });
+    const res = rules.applyMove(s, "A", sq("d1"), { x: -1, y: 0 });
     assert.equal(res.ok, false);
   });
 
@@ -153,8 +166,8 @@ describe("movement", () => {
     const res = rules.applyMove(
       s,
       "A",
-      { x: 8, y: 2 },
-      { x: 8, y: 1.5 }
+      { x: 8, y: 3 },
+      { x: 8, y: 2.5 }
     );
     assert.equal(res.ok, false);
   });

@@ -79,8 +79,8 @@
         id: "B-" + spot.type + "-" + i,
         player: "B",
         type: spot.type,
-        x: SIZE - 1 - spot.x,
-        y: SIZE - 1 - spot.y
+        x: spot.y,
+        y: spot.x
       });
     });
     return state;

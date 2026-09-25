@@ -34,8 +34,9 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 
 ## Constraints
 
-- Bàn 9x9, 9 quân mỗi bên, đối xứng 180 độ qua tâm.
-- A khởi tạo phía trên bên phải, B khởi tạo phía dưới bên trái và hai đội đối xứng 180°.
+- Bàn 9x9, 9 quân mỗi bên, phản chiếu qua đường chéo a1–i9.
+- Đường chéo a1–i9 là dải phân cách và không có quân đứng trên đó lúc khởi tạo.
+- Mỗi bên có ba cánh Đấm–Lá–Kéo, cách dải phân cách ít nhất 3 lớp để không thể chiếm ranh giới hoặc giao chiến ở nước đầu.
 - Không đặt quân lên a9/i1 lúc xếp.
 - Quân không đứng kề ô thắng của mình lúc xếp (tránh thắng nước 1).
 - Luật do server quyết khi chơi online.

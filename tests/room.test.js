@@ -22,8 +22,8 @@ describe("room", () => {
     assert.equal(room.addPlayer(a, "An").seat, "A");
     assert.equal(room.addPlayer(b, "Bình").seat, "B");
     assert.equal(room.status, "playing");
-    const from = rules.parseSquare("i3");
-    const to = rules.parseSquare("i2");
+    const from = rules.parseSquare("i4");
+    const to = rules.parseSquare("h3");
     const res = room.handleMove(a, from, to);
     assert.equal(res.ok, true);
     assert.equal(room.state.turn, "B");

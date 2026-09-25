@@ -11,20 +11,23 @@
   const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
   const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
 
-  // A uses three interlocking RPS triangles in the upper-right. Each triangle
-  // can answer the counter that threatens either of its other two pieces,
-  // while the gaps keep opening moves from being locked into a 3x3 block.
-  // B is the 180-degree rotation around e5, so both sides remain balanced.
+  // The a1-i9 diagonal (x === y) is the neutral divider. A deploys in three
+  // independent RPS wings at least three layers away from it, so neither side
+  // can reach the divider or make contact on the opening move. B is reflected
+  // across the divider in rules.createInitialState.
   const A_SETUP = [
-    { type: "dam", x: 6, y: 0 }, // g1
-    { type: "keo", x: 7, y: 0 }, // h1
-    { type: "la", x: 6, y: 1 }, // g2
-    { type: "dam", x: 7, y: 2 }, // h3
-    { type: "keo", x: 8, y: 2 }, // i3
+    // Cánh 1: áp sát khu vực a1 nhưng vẫn ngoài vùng trung lập.
+    { type: "dam", x: 3, y: 0 }, // d1
+    { type: "keo", x: 4, y: 0 }, // e1
+    { type: "la", x: 4, y: 1 }, // e2
+    // Cánh 2: giữ trục giữa.
+    { type: "la", x: 5, y: 1 }, // f2
+    { type: "dam", x: 6, y: 1 }, // g2
+    { type: "keo", x: 6, y: 2 }, // g3
+    // Cánh 3: gây sức ép về phía i9.
+    { type: "keo", x: 7, y: 3 }, // h4
     { type: "la", x: 8, y: 3 }, // i4
-    { type: "dam", x: 6, y: 3 }, // g4
-    { type: "keo", x: 7, y: 4 }, // h5
-    { type: "la", x: 6, y: 4 } // g5
+    { type: "dam", x: 8, y: 4 } // i5
   ];
 
   const DELTAS = [

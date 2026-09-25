@@ -6,7 +6,8 @@ Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá h
 - Đi như vua cờ vua: 8 hướng, 1 ô.
 - Cùng loại: xếp chồng, không ăn.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
-- Đội hình mở dùng ba tam giác Đấm–Lá–Kéo đan xen, có khe triển khai và khả năng hỗ trợ phản công.
+- Đường chéo a1–i9 là dải phân cách: không quân nào đứng trên đó khi bắt đầu.
+- Mỗi bên triển khai ba cánh Đấm–Lá–Kéo phản chiếu qua đường chéo và cách ranh giới ít nhất 3 lớp, nên không bên nào chạm dải phân cách ở nước đầu.
 
 ## Chạy
 
@@ -50,7 +51,7 @@ Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http:
 | Xếp chồng | Hai quân đối địch cùng loại đứng chung ô |
 | Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
 | Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
-| Thế trận | A phía trên bên phải, B phía dưới bên trái, đối xứng 180°; không đặt quân lên a9/i1 lúc xếp |
+| Thế trận | A và B ở hai phía đường chéo a1–i9, phản chiếu qua đường chéo; ba cánh quân cách ranh giới ít nhất 3 lớp |
 
 Chi tiết thuật ngữ: [CONTEXT.md](CONTEXT.md).
 
