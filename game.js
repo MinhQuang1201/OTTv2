@@ -73,6 +73,10 @@
     els.netChip.textContent = label;
   }
 
+  function hasOnlineConnection() {
+    return typeof window.OTT_PLAYHTML_CONNECTION_FACTORY === "function";
+  }
+
   function playerName() {
     return (els.name.value || "Khách").trim().slice(0, config.NAME_MAX);
   }
@@ -343,9 +347,14 @@
     else selectAt(x, y);
   }
 
-  function bindPlayfull() {
+  function bindOnlineClient() {
     if (app.pf) return app.pf;
-    const pf = new window.Playfull();
+    if (!hasOnlineConnection()) {
+      throw new Error("PlayHTML game connection is not configured");
+    }
+    const pf = new window.PlayhtmlGameClient({
+      connectionFactory: window.OTT_PLAYHTML_CONNECTION_FACTORY
+    });
     app.pf = pf;
     pf.on("open", function () {
       if (app.reconnecting) setNet("wait", "Đang khôi phục");
@@ -378,6 +387,8 @@
       drawRoomList(msg.rooms || []);
     });
     pf.on("joined", function (msg) {
+      app.mode = "online";
+      stopClock();
       app.you = msg.you;
       app.roomId = msg.roomId;
       app.status = msg.status;
@@ -405,11 +416,6 @@
       }
     });
     pf.on("gameover", function (msg) {
-      if (app.state) {
-        app.state.winner = msg.winner;
-        app.state.reason = msg.reason;
-        app.state.eliminatedPlayer = msg.eliminatedPlayer || null;
-      }
       openWin(app.state || msg);
     });
     return pf;
@@ -428,7 +434,10 @@
       const li = document.createElement("li");
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.innerHTML = "<span>" + room.id + "</span><span>" + (room.names || []).join(", ") + "</span>";
+      const names = Array.isArray(room.names)
+        ? room.names
+        : [room.names && room.names.A, room.names && room.names.B].filter(Boolean);
+      btn.innerHTML = "<span>" + room.id + "</span><span>" + names.join(", ") + "</span>";
       btn.addEventListener("click", function () {
         els.room.value = room.id;
         startOnline("join");
@@ -456,11 +465,22 @@
   }
 
   async function startOnline(intent) {
+    if (!hasOnlineConnection()) {
+      setNet("off", "Trực tuyến chưa sẵn sàng");
+      toast("Trực tuyến chưa sẵn sàng: chưa có kết nối PlayHTML đã xác minh.", "error");
+      return;
+    }
     if (intent === "join" && !(els.room.value || "").trim()) {
       toast("Nhập mã phòng", "error");
       return;
     }
-    const pf = bindPlayfull();
+    let pf;
+    try {
+      pf = bindOnlineClient();
+    } catch (err) {
+      toast("Chưa cấu hình kết nối PlayHTML", "error");
+      return;
+    }
     try {
       await pf.connect();
     } catch (err) {
@@ -470,7 +490,7 @@
     app.mode = "online";
     app.reconnecting = false;
     stopClock();
-    app.state = rules.createInitialState();
+    app.state = null;
     if (intent === "create") pf.create(playerName());
     else pf.join((els.room.value || "").trim().toUpperCase(), playerName());
   }
@@ -518,12 +538,16 @@
   if (params.get("room")) els.room.value = params.get("room");
   if (params.get("name")) els.name.value = params.get("name");
 
-  bindPlayfull()
-    .connect()
-    .then(function () {
-      app.pf.list();
-    })
-    .catch(function () {
-      setNet("off", "Ngoại tuyến");
-    });
+  if (hasOnlineConnection()) {
+    const onlineClient = bindOnlineClient();
+    onlineClient.connect()
+      .then(function () {
+        onlineClient.list();
+      })
+      .catch(function () {
+        setNet("off", "Ngoại tuyến");
+      });
+  } else {
+    setNet("off", "Trực tuyến chưa sẵn sàng");
+  }
 })();

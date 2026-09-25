@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="vi">
+  <head><meta charset="utf-8"><title>OTTv2 PlayHTML game adapter</title></head>
+  <body>
+    <h1>PlayHTML game adapter</h1>
+    <p><code>playhtml-game-client.js</code> does not open a second connection or store game state in PlayHTML data primitives.</p>
+    <p><strong>Bootstrap unavailable:</strong> Task 1 has not proven a pinned PlayHTML worker connection API, so this page intentionally does not claim to connect.</p>
+    <p>When that proof exists, register <code>window.OTT_PLAYHTML_CONNECTION_FACTORY</code> before loading the game adapter. The factory must return an adapter with <code>connect()</code>, <code>send(message)</code>, <code>on(event, fn)</code>, and optional <code>close()</code>.</p>
+    <script src="playhtml-bootstrap.js"></script>
+    <script src="playhtml-game-client.js"></script>
+  </body>
+</html>
