@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname);
+const REAL_ROOT = fs.realpathSync(ROOT);
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -23,7 +24,15 @@ const DENY = new Set([
   ".env.example",
   "partykit.json"
 ]);
-const PRIVATE_DIRS = new Set(["partykit"]);
+const PRIVATE_DIRS = new Set(["partykit", "workers"]);
+
+function isPrivatePath(filePath) {
+  const rel = path.relative(ROOT, filePath);
+  const firstSegment = rel.split(path.sep)[0].toLowerCase();
+  const base = path.basename(filePath).toLowerCase();
+  return DENY.has(base) || PRIVATE_DIRS.has(firstSegment) ||
+    firstSegment === "node_modules" || firstSegment === "tests" || firstSegment.startsWith(".");
+}
 
 function publicPath(urlPath) {
   let clean;
@@ -32,16 +41,10 @@ function publicPath(urlPath) {
   } catch {
     return null;
   }
-  const rel = clean === "/" ? "index.html" : clean.replace(/^\/+/, "");
+  const rel = path.normalize(clean === "/" ? "index.html" : clean.replace(/^\/+/, ""));
   const resolved = path.resolve(ROOT, rel);
   if (resolved !== ROOT && !resolved.startsWith(ROOT + path.sep)) return null;
-  const base = path.basename(resolved).toLowerCase();
-  if (DENY.has(base)) return null;
-  const firstSegment = rel.split(/[\\/]/)[0].toLowerCase();
-  if (PRIVATE_DIRS.has(firstSegment)) return null;
-  if (firstSegment === "node_modules" || firstSegment === "tests" || firstSegment.startsWith(".")) {
-    return null;
-  }
+  if (isPrivatePath(resolved)) return null;
   return resolved;
 }
 
@@ -76,13 +79,30 @@ const server = http.createServer((req, res) => {
     res.end("Không cho phép");
     return;
   }
-  fs.stat(filePath, (err, st) => {
-    if (err || !st.isFile()) {
+  fs.realpath(filePath, (err, realPath) => {
+    if (err) {
       res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Không tìm thấy");
       return;
     }
-    sendFile(res, filePath);
+    if (realPath !== REAL_ROOT && !realPath.startsWith(REAL_ROOT + path.sep)) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Không cho phép");
+      return;
+    }
+    if (isPrivatePath(realPath)) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Không cho phép");
+      return;
+    }
+    fs.stat(realPath, (statErr, st) => {
+      if (statErr || !st.isFile()) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Không tìm thấy");
+        return;
+      }
+      sendFile(res, realPath);
+    });
   });
 });
 
