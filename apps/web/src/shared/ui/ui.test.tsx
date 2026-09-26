@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -131,6 +131,26 @@ describe("shared UI primitives", () => {
   it("gives an unnamed dialog a safe accessible fallback name", () => {
     render(<Dialog open onClose={() => undefined}><p>Details</p></Dialog>);
     expect(screen.getByRole("dialog", { name: "Dialog" })).toBeInTheDocument();
+  });
+
+  it("updates a forwarded ref to the live dialog when opening", () => {
+    const dialogRef = { current: null as HTMLDivElement | null };
+    const view = render(<Dialog ref={dialogRef} open={false} onClose={() => undefined}><p>Details</p></Dialog>);
+    expect(dialogRef.current).toBeNull();
+
+    view.rerender(<Dialog ref={dialogRef} open onClose={() => undefined}><p>Details</p></Dialog>);
+    expect(dialogRef.current).toBe(screen.getByRole("dialog"));
+  });
+
+  it("calls a caller key handler when Escape closes the dialog", () => {
+    const onClose = vi.fn();
+    const onKeyDown = vi.fn();
+    render(<Dialog open onClose={onClose} onKeyDown={onKeyDown}><p>Details</p></Dialog>);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onKeyDown).toHaveBeenCalledOnce();
+    expect(onKeyDown.mock.calls[0][0]).toMatchObject({ key: "Escape" });
   });
 
   it("bounds toast history and removes a toast after its lifetime", () => {

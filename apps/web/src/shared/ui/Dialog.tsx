@@ -28,7 +28,7 @@ export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function Dialog({
   const closeRef = useRef<HTMLButtonElement>(null);
   const previousActiveRef = useRef<HTMLElement | null>(null);
 
-  useImperativeHandle(forwardedRef, () => dialogRef.current as HTMLDivElement, []);
+  useImperativeHandle(forwardedRef, () => dialogRef.current as HTMLDivElement, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -62,6 +62,7 @@ export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function Dialog({
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
+            props.onKeyDown?.(event);
             onClose();
             return;
           }
