@@ -5,7 +5,7 @@ import type {
   Position,
   Seat,
 } from "../../shared/model/game";
-import { makeEvent, makePiece, makePlayer, makeSnapshot } from "./fixtureBuilders";
+import { freezeFixture, makeEvent, makePiece, makePlayer, makeSnapshot } from "./fixtureBuilders";
 
 export const DEMO_SCENARIOS: readonly DemoScenario[] = [
   "lobby-default",
@@ -29,6 +29,10 @@ export const DEMO_SCENARIOS: readonly DemoScenario[] = [
   "result-disconnect-timeout",
   "result-leave",
 ] as const;
+
+export function isDemoScenario(value: unknown): value is DemoScenario {
+  return typeof value === "string" && (DEMO_SCENARIOS as readonly string[]).includes(value);
+}
 
 export interface DemoMove {
   readonly from: Position;
@@ -71,6 +75,12 @@ function canonicalBoard() {
   return pieces;
 }
 
+const CANONICAL_BOARD = canonicalBoard();
+
+function pieceAt(position: Position) {
+  return CANONICAL_BOARD.find((piece) => piece.position.x === position.x && piece.position.y === position.y);
+}
+
 function players(overrides: Partial<Record<Seat, Partial<Parameters<typeof makePlayer>[2]>>> = {}) {
   return {
     A: makePlayer("A", "An", overrides.A),
@@ -83,21 +93,25 @@ const REJECTED_MOVE: DemoMove = { from: { x: 0, y: 2 }, to: { x: 0, y: 1 } };
 
 function eventFor(scenario: DemoScenario): GameEventView | null {
   if (scenario === "game-capture") {
+    const attacker = pieceAt({ x: 1, y: 2 });
+    const defender = pieceAt({ x: 6, y: 5 });
     return makeEvent({
       id: 1,
       type: "capture",
-      pieceId: "A-dam-0",
-      capturedId: "B-la-1",
+      pieceId: attacker?.id ?? "A-dam-0",
+      capturedId: defender?.id ?? "B-la-1",
       from: { x: 1, y: 2 },
       to: { x: 6, y: 5 },
     });
   }
   if (scenario === "game-strike-loss") {
+    const attacker = pieceAt({ x: 1, y: 2 });
+    const defender = pieceAt({ x: 6, y: 5 });
     return makeEvent({
       id: 1,
       type: "strike_loss",
-      pieceId: "A-dam-0",
-      byId: "B-la-1",
+      pieceId: attacker?.id ?? "A-dam-0",
+      byId: defender?.id ?? "B-la-1",
       from: { x: 1, y: 2 },
       to: { x: 6, y: 5 },
     });
@@ -122,6 +136,7 @@ function eventFor(scenario: DemoScenario): GameEventView | null {
 }
 
 export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixture {
+  if (!isDemoScenario(scenario)) throw new Error(`Unknown demo scenario: ${String(scenario)}`);
   const isLobby = scenario.startsWith("lobby-");
   const isResult = scenario.startsWith("result-");
   const event = eventFor(scenario);
@@ -133,26 +148,33 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
     : scenario === "game-recoverable-error"
       ? { code: "session_failed" as const, message: "Không thể đồng bộ ván đấu.", retryable: true }
       : null;
+  const waitingRooms = scenario === "lobby-rooms"
+    ? [
+        { roomId: "DEMO-17", hostName: "Chi", playerCount: 1, maxPlayers: 2 },
+        { roomId: "DEMO-23", hostName: "Dũng", playerCount: 1, maxPlayers: 2 },
+      ]
+    : [];
   const snapshot = makeSnapshot({
     mode: "demo",
     phase: isResult ? "finished" : isLobby ? (scenario === "lobby-online-connecting" ? "preparing" : "idle") : scenario === "game-waiting" ? "waiting" : scenario === "game-recoverable-error" ? "error" : "playing",
     boardRevision: isResult ? 2 : isLobby || scenario === "game-waiting" ? 0 : 1,
     viewerSeat: isLobby ? null : "A",
     turn: isLobby || scenario === "game-waiting" || isResult ? null : "A",
-    board: canonicalBoard(),
+    board: CANONICAL_BOARD,
     players: players({
       A: { remainingMs: warning ? 35_000 : 10 * 60 * 1000 },
       B: { connected: !reconnecting },
     }),
     connection: scenario === "lobby-online-unavailable" ? "unavailable" : scenario === "lobby-online-connecting" ? "connecting" : reconnecting ? "reconnecting" : "online",
-    pendingMove: false,
+    pendingMove: scenario === "game-piece-selected",
     aiThinking: scenario === "game-ai-thinking",
     roomId: isLobby ? null : "DEMO-42",
+    waitingRooms,
     result,
     events: event ? [event] : [],
     error,
   });
-  return {
+  return freezeFixture({
     snapshot,
     moves: isLobby || isResult || scenario === "game-waiting"
       ? []
@@ -164,5 +186,5 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
             ? [{ from: { x: 1, y: 2 }, to: { x: 6, y: 5 }, eventType: "strike_loss" }]
             : [MOVE],
     rejectMoves: scenario === "game-move-rejected" ? [REJECTED_MOVE] : [],
-  };
+  });
 }

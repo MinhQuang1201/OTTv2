@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type { DemoScenario } from "../../shared/model/game";
 
 import { DemoSession } from "./DemoSession";
-import { DEMO_SCENARIOS } from "./scenarios";
+import { createScenarioFixture, DEMO_SCENARIOS } from "./scenarios";
 
 describe("DemoSession fixtures", () => {
   it.each(DEMO_SCENARIOS)("builds a valid 9x9 snapshot for %s", (scenario) => {
@@ -49,6 +50,19 @@ describe("DemoSession fixtures", () => {
     expect(session.getSnapshot().events).toEqual(before.events);
   });
 
+  it("keeps lobby leave and finished moves as no-op commands", async () => {
+    const lobby = new DemoSession("lobby-default");
+    const lobbyBefore = lobby.getSnapshot();
+    await lobby.leave();
+    expect(lobby.getSnapshot()).toBe(lobbyBefore);
+
+    const finished = new DemoSession("result-goal");
+    const finishedBefore = finished.getSnapshot();
+    const result = await finished.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    expect(result).toMatchObject({ accepted: false, error: { code: "session_failed" } });
+    expect(finished.getSnapshot()).toBe(finishedBefore);
+  });
+
   it("increments board revision for a move but retains it for display-only scenarios", async () => {
     const moving = new DemoSession("game-active-a");
     const movingRevision = moving.getSnapshot().boardRevision;
@@ -78,6 +92,72 @@ describe("DemoSession fixtures", () => {
       pieceId: "A-dam-0",
       byId: "B-la-1",
     });
+  });
+
+  it("updates both player counts for capture and strike-loss transitions", async () => {
+    const capture = new DemoSession("game-capture");
+    await capture.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+    expect(capture.getSnapshot().players.B?.counts.la).toBe(2);
+    expect(capture.getSnapshot().players.A?.counts.dam).toBe(3);
+
+    const strike = new DemoSession("game-strike-loss");
+    await strike.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+    expect(strike.getSnapshot().players.A?.counts.dam).toBe(2);
+    expect(strike.getSnapshot().players.B?.counts.la).toBe(3);
+  });
+
+  it("exposes explicit waiting-room data only for the rooms lobby", () => {
+    const rooms = new DemoSession("lobby-rooms").getSnapshot();
+    expect(rooms.waitingRooms).toEqual([
+      { roomId: "DEMO-17", hostName: "Chi", playerCount: 1, maxPlayers: 2 },
+      { roomId: "DEMO-23", hostName: "Dũng", playerCount: 1, maxPlayers: 2 },
+    ]);
+    expect(new DemoSession("lobby-default").getSnapshot().waitingRooms).toEqual([]);
+  });
+
+  it("freezes the complete fixture graph and validates scenario keys", () => {
+    const fixture = createScenarioFixture("game-move-rejected");
+    expect(Object.isFrozen(fixture)).toBe(true);
+    expect(Object.isFrozen(fixture.moves)).toBe(true);
+    expect(Object.isFrozen(fixture.moves[0])).toBe(true);
+    expect(Object.isFrozen(fixture.rejectMoves)).toBe(true);
+    expect(() => createScenarioFixture("not-a-scenario" as never)).toThrow(/Unknown demo scenario/);
+  });
+
+  it("covers category-specific scenario state and result reasons", () => {
+    expect(new DemoSession("lobby-online-unavailable").getSnapshot()).toMatchObject({ connection: "unavailable", error: { code: "online_unavailable" } });
+    expect(new DemoSession("lobby-online-connecting").getSnapshot()).toMatchObject({ phase: "preparing", connection: "connecting" });
+    expect(new DemoSession("game-waiting").getSnapshot()).toMatchObject({ phase: "waiting", turn: null });
+    expect(new DemoSession("game-piece-selected").getSnapshot()).toMatchObject({ pendingMove: true, turn: "A" });
+    expect(new DemoSession("game-ai-thinking").getSnapshot()).toMatchObject({ aiThinking: true, turn: "A" });
+    expect(new DemoSession("game-reconnecting").getSnapshot()).toMatchObject({ connection: "reconnecting", players: { B: { connected: false } } });
+    expect(new DemoSession("game-clock-warning").getSnapshot().players.A?.remainingMs).toBe(35_000);
+    expect(new DemoSession("game-recoverable-error").getSnapshot()).toMatchObject({ phase: "error", error: { retryable: true } });
+
+    const reasons = ["goal", "elimination", "no_moves", "timeout", "disconnect_timeout", "leave"] as const;
+    for (const reason of reasons) {
+      const scenario = `result-${reason.replace("_", "-")}` as DemoScenario;
+      const snapshot = new DemoSession(scenario).getSnapshot();
+      expect(snapshot.result?.reason).toBe(reason);
+      expect(snapshot.events.at(-1)).toMatchObject({ type: "win", reason });
+    }
+  });
+
+  it("preserves event continuity across start and leave transitions", async () => {
+    const session = new DemoSession("game-active-a");
+    const listener = vi.fn();
+    session.subscribe(listener);
+    await session.start({ mode: "demo", scenario: "result-goal" });
+    const started = session.getSnapshot();
+    await session.leave();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot()).toBe(started);
+
+    const playing = new DemoSession("game-active-a");
+    await playing.start({ mode: "demo", scenario: "game-capture" });
+    expect(playing.getSnapshot().events.at(-1)?.id).toBeGreaterThan(0);
+    await playing.leave();
+    expect(playing.getSnapshot().events.at(-1)?.id).toBeGreaterThan(1);
   });
 
   it("supports unsubscribe and dispose without further notifications", async () => {

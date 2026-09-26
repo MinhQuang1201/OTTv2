@@ -22,6 +22,7 @@ export type {
   SessionErrorView,
   SessionMode,
   SessionPhase,
+  WaitingRoomView,
 } from "../shared/model/game";
 
 export type StartGameOptions =

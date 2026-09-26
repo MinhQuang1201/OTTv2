@@ -101,6 +101,13 @@ export interface SessionErrorView {
   readonly retryable: boolean;
 }
 
+export interface WaitingRoomView {
+  readonly roomId: string;
+  readonly hostName: string;
+  readonly playerCount: number;
+  readonly maxPlayers: number;
+}
+
 /** A scenario key used by the development-only deterministic demo session. */
 export type DemoScenario =
   | "lobby-default"
@@ -137,6 +144,7 @@ export interface GameSnapshot {
   readonly pendingMove: boolean;
   readonly aiThinking: boolean;
   readonly roomId: string | null;
+  readonly waitingRooms?: readonly WaitingRoomView[];
   readonly result: GameResultView | null;
   readonly events: readonly GameEventView[];
   readonly error: SessionErrorView | null;

@@ -15,6 +15,7 @@ const EMPTY_SNAPSHOT: GameSnapshot = {
   pendingMove: false,
   aiThinking: false,
   roomId: null,
+  waitingRooms: [],
   result: null,
   events: [],
   error: null,
