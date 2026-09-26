@@ -1,0 +1,25 @@
+{
+  "$schema": "../node_modules/playhtml/node_modules/wrangler/config-schema.json",
+  "name": "ottv2-test-harness",
+  "main": "ott-test-worker.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Main",
+        "class_name": "OttTestGameServer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "test-v1",
+      "new_sqlite_classes": ["OttTestGameServer"]
+    }
+  ],
+  "vars": {
+    "OTT_INTERNAL_SECRET": "ott-test-internal-only",
+    "OTT_TEST_PROBE_SECRET": "ott-test-probe-local-only"
+  }
+}

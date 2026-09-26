@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "types": ["../node_modules/playhtml/node_modules/@cloudflare/workers-types"]
+  },
+  "include": ["*.ts", "../node_modules/playhtml/node_modules/partyserver/dist/index.d.ts", "../node_modules/playhtml/node_modules/y-partyserver/dist/server/index.d.ts"]
+}

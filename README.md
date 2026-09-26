@@ -34,9 +34,9 @@ npm run assets
 4. **Hai người một máy** — luân phiên trên cùng trình duyệt.
 5. **Đấu với máy** — bạn là Người A; máy là Người B.
 
-Hai máy / hai tab: một bên tạo phòng, bên kia vào bằng mã. Luật online do server quyết.
+Hai người trên cùng máy có thể chơi ngay. Chế độ AI hoạt động local. Chế độ online là mục tiêu kiến trúc worker-authoritative, nhưng hiện chưa khả dụng khi rollout còn blocked.
 
-Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http://localhost:3000/playfull.html)
+Tài liệu adapter PlayHTML: [http://localhost:3000/playhtml-game.html](http://localhost:3000/playhtml-game.html)
 
 ## Luật tóm tắt
 
@@ -62,9 +62,9 @@ config.js          Hằng số bàn, quân, cổng
 rules.js           Luật thuần: đi, ăn, thắng
 ai.js              Máy chọn nước (thay thế được)
 room.js            Phòng, ghế A/B, trọng tài
-server.js          HTTP tĩnh + WebSocket
-playfull.js        Thư viện khách realtime
-playfull.html      Tài liệu Playfull
+server.js          HTTP tĩnh, không xử lý game online
+playhtml-game-client.js Adapter lệnh authoritative PlayHTML/Worker
+playhtml-game.html Tài liệu adapter PlayHTML
 index.html         Giao diện
 game.js            Sảnh, bàn, chế độ chơi
 style.css          Bố cục
@@ -74,7 +74,7 @@ tests/             Luật và phòng
 scripts/gen-assets.js
 ```
 
-Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.applyMove`; khách chỉ vẽ trạng thái server gửi.
+Luật không nằm trong UI. Khi online được mở sau các evidence gate, `Room.handleMove` gọi `rules.applyMove`; khách chỉ vẽ trạng thái worker gửi.
 
 ## Kiểm thử
 
@@ -82,23 +82,31 @@ Luật không nằm trong UI. Khi chơi mạng, `Room.handleMove` gọi `rules.a
 npm test
 ```
 
-`tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
+`tests/rules.test.js` — phạm vi kiểm thử luật; chạy `npm test` để xác minh kết quả trên revision hiện tại.
 
-`tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên.
+`tests/room.test.js` — phạm vi kiểm thử `Room`; chạy `npm test` để xác minh kết quả trên revision hiện tại.
 
 ## Biến môi trường
 
-`PORT` — cổng HTTP/WS, mặc định `3000`.
+`PORT` — cổng HTTP static, mặc định `3000`.
+`OTT_PLAYHTML_HOST` — endpoint self-hosted dành cho adapter; không đặt secret trong frontend.
+`OTT_PLAYHTML_CONTROL_ENDPOINT` — HTTPS Worker control endpoint for create/list/join/resume; bỏ trống thì online unavailable.
 
-## Playfull (khách)
+## Online qua Cloudflare Worker
 
-```js
-const pf = new Playfull();
-await pf.connect();
-pf.on("state", (msg) => render(msg.state));
-pf.create("An");
-pf.join("K7P2", "Bình");
-pf.move({ x: 8, y: 2 }, { x: 8, y: 1 });
+Kiến trúc online production duy nhất được cấu hình là Cloudflare Worker + Durable Objects trong `workers/wrangler.jsonc`. PartyKit legacy không còn là route deploy hoặc authority online. Các file `partykit/` và test tương ứng được giữ lại như tài liệu/coverage legacy cho các ràng buộc bảo mật, không được dùng để deploy production.
+
+Worker local/deploy commands:
+
+```bash
+npx wrangler dev --config workers/wrangler.jsonc
+npx wrangler deploy --config workers/wrangler.jsonc
 ```
 
-Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `gameover`, `left`.
+Local demo dùng minimal browser fork trong `vendor/playhtml-minimal/browser/`: một YProvider kết nối Worker, chờ initial sync rồi gửi các lệnh `ott:*` qua custom-message channel. Playwright đã xác nhận hai browser context có thể tạo/tham gia phòng và đồng bộ một nước đi hợp lệ. Đây không phải full upstream PlayHTML bundle.
+
+Không dùng public PlayHTML host cho dữ liệu ván và không tạo WebSocket thứ hai. Static server chỉ phục vụ file tĩnh; authority online thuộc worker. Local và AI không phụ thuộc worker.
+
+Trạng thái production rollout: **BLOCKED**. Local demo path có runtime/two-browser evidence, nhưng Task 8 runtime/security matrix, Task 10 manual acceptance và deploy verification còn lại. Không suy rộng local demo thành production readiness. Local và AI modes vẫn hoạt động độc lập.
+
+**Còn lại trước production:** hoàn tất runtime/security/lifecycle matrix, manual acceptance (bao gồm timeout/reconnect/expiry và credential isolation), kiểm tra deploy và chỉ cập nhật status theo evidence đã thực sự thu được. Các mục này không cần để chạy demo local hai người.

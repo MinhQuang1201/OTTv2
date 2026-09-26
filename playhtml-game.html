@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="vi">
+  <head><meta charset="utf-8"><title>OTTv2 PlayHTML game adapter</title></head>
+  <body>
+    <h1>PlayHTML game adapter</h1>
+    <p><code>playhtml-game-client.js</code> does not open a second connection or store game state in PlayHTML data primitives.</p>
+    <p><strong>Bootstrap unavailable by default:</strong> this page only connects when a verified public PlayHTML initializer, HTTPS control endpoint, and public custom-message channel are explicitly configured.</p>
+    <p>The browser calls the HTTPS control plane before initializing the game room. It never accepts a ticket in the URL or page data, and it never opens a raw WebSocket or PartySocket.</p>
+    <script src="vendor/playhtml-minimal/browser/runtime.js"></script>
+    <script src="playhtml-bootstrap.js"></script>
+    <script src="playhtml-game-client.js"></script>
+  </body>
+</html>

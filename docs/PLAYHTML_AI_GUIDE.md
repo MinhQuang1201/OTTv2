@@ -4,7 +4,7 @@ Tài liệu này là hướng dẫn vận hành cho AI khi thêm hoặc sửa t�
 
 ## Mục tiêu và phạm vi
 
-PlayHTML biến phần tử HTML thành đối tượng cộng tác realtime. Room được đồng bộ và lưu trữ bởi dịch vụ PlayHTML; không tự xây WebSocket hay backend song song cho cùng một state nếu PlayHTML đã là nguồn đồng bộ.
+PlayHTML biến phần tử HTML thành đối tượng cộng tác realtime. Với OTTv2, PlayHTML không phải authority của state ván: worker PartyKit/`Room` mới là nguồn chuẩn. Không tự xây WebSocket thứ hai cho state ván, và không dùng PlayHTML data primitives để thay thế worker protocol.
 
 Trước khi sinh mã, AI phải xác định:
 
@@ -15,6 +15,16 @@ Trước khi sinh mã, AI phải xác định:
 5. Ứng dụng dùng HTML thuần hay React?
 
 Nếu câu trả lời về persistence, phạm vi chia sẻ, trigger hoặc shape dữ liệu chưa rõ, phải hỏi lại thay vì chọn ngẫu nhiên.
+
+## Ngoại lệ game authoritative
+
+Với OTTv2, quân cờ, lượt, ghế, đồng hồ, kết quả và lịch sử sự kiện thuộc `Room` trong worker PartyKit. Không ghi hoặc sửa các dữ liệu này bằng `pageData`, element data, `can-play`, `can-mirror`, event hay presence. Khi gate được mở, client chỉ gửi command `ott:*` qua adapter đã kiểm chứng và chỉ render snapshot worker trả về. Hiện adapter/bootstrap thật **BLOCKED**; `docs/playhtml-upstream-lock.md` là nguồn technical gate của Task 5, và bridge/mock test không phải evidence runtime. Presence/cursor chỉ dành cho state ephemeral; không dùng chúng cho authentication, authorization hoặc resume token.
+
+### Blocked mode và evidence gate
+
+Khi Task 4 hoặc Task 5 chưa có evidence trực tiếp, không đăng ký `OTT_PLAYHTML_CONNECTION_FACTORY`, không tạo WebSocket/PartySocket, polling, second PlayHTML session, fake factory hoặc fallback transport. PartyKit `0.0.115` hiện chỉ chứng minh `Stub.socket()` trả `WebSocket`, còn `Server.onMessage` không có authenticated inter-party origin/route metadata: direct game create bị từ chối, nhưng secure lobby-driven initialization vẫn BLOCKED. Không thay bằng internal payload marker forgeable, client relay hoặc process map. Online UI phải báo unavailable; local/AI vẫn dùng được. Không gọi đây là production-ready và không đánh dấu Task 5 hoặc acceptance PASS.
+
+Chỉ sau Task 4, Task 5 và Task 6 có evidence trực tiếp mới được chạy two-profile acceptance. Evidence mở rollout phải bao gồm lobby-to-game channel/metadata server-authenticated, fork/revision/license và extension API đã xác minh, initial sync và OTT trên cùng verified connection, runtime integration cho routing/lifecycle/persistence, static-host denial kể cả case variants, và ghi nhận từng scenario: create/list/join, legal/invalid move, timeout, leave, disconnect/reload/resume, reconnect expiry, token isolation, local/AI fallback. Mỗi kết quả phải kèm ngày, commit/revision, phiên bản, host và command; scenario chưa chạy là chưa chạy, không phải PASS.
 
 ## Chọn đúng primitive
 
@@ -326,6 +336,8 @@ Không đưa `developmentMode` hoặc công cụ reset/debug vào production. V�
 - [ ] Event handler idempotent và event type được đăng ký trước dispatch.
 - [ ] API có tài liệu mâu thuẫn đã được xác minh bằng exported type/runtime.
 - [ ] Đã test ít nhất hai client và reload/late-join khi tính năng có persistence.
+
+Đối với OTTv2, checklist hai client/manual acceptance chỉ được đánh dấu sau khi Task 4, Task 5 và Task 6 có evidence trực tiếp. Khi Task 4 hoặc Task 5 còn BLOCKED, xác minh blocked mode thay thế: factory/bootstrap không có, không tạo online transport hoặc forgeable lobby-to-game route, UI báo unavailable và local/AI hoạt động. Không đánh dấu Task 5 hoặc manual acceptance PASS tại tài liệu này; chỉ ghi nhận scenario thực sự đã chạy với evidence yêu cầu ở trên.
 
 ## Nguồn cần đọc khi cần chi tiết
 
