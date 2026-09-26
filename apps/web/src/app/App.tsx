@@ -8,6 +8,7 @@ import { Panel } from "../shared/ui/Panel";
 import { Spinner } from "../shared/ui/Spinner";
 import { LobbyScreen } from "../features/lobby/LobbyScreen";
 import { GameScreen } from "../features/game/GameScreen";
+import { LocalSession } from "../sessions/local/LocalSession";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import styles from "./app.module.css";
@@ -145,6 +146,18 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
     demo.setScenario("lobby-default");
   };
   const onRetry = () => setRestartToken((value) => value + 1);
+  const onStartLocal = (names: [string, string]) => {
+    activeSession?.session.dispose();
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    const session = new LocalSession();
+    dispatch({ type: "boot", generation });
+    setActiveSession({ session, scenario: "game-active-a", generation });
+    void session.start({ mode: "local", playerNames: names }).catch((error: unknown) => {
+      if (generationRef.current !== generation) return;
+      dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-active-a" });
+    });
+  };
 
   return (
     <AppProviders>
@@ -164,7 +177,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
               <AppScreen
                 state={appState}
                 onLobby={onLobby}
-                onStartLocal={() => demo.setScenario("game-active-a")}
+                onStartLocal={onStartLocal}
                 onStartAi={() => demo.setScenario("game-ai-thinking")}
                 onCreateOnline={() => demo.setScenario("game-waiting")}
                 onJoinOnline={() => demo.setScenario("game-active-a")}
