@@ -69,8 +69,11 @@ export function OnlineRoomPanel({
           <Button variant="secondary" disabled={!isReady} onClick={join}>Vào phòng</Button>
         </div>
       </div>
-      <WaitingRoomList state={waitingRooms.status === "error" && !waitingRooms.onRetry && onRetryRooms ? { ...waitingRooms, onRetry: onRetryRooms } : waitingRooms} onSelectRoom={(selectedRoomId) => { setRoomId(selectedRoomId); setRoomError(null); onJoin(name.trim(), selectedRoomId); }} />
+      <WaitingRoomList
+        state={waitingRooms.status === "error" && !waitingRooms.onRetry && onRetryRooms ? { ...waitingRooms, onRetry: onRetryRooms } : waitingRooms}
+        disabled={!isReady}
+        onSelectRoom={(selectedRoomId) => { setRoomId(selectedRoomId); setRoomError(null); onJoin(name.trim(), selectedRoomId); }}
+      />
     </Panel>
   );
 }
-

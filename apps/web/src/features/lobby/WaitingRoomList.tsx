@@ -12,9 +12,10 @@ export type WaitingRoomState =
 export interface WaitingRoomListProps {
   readonly state: WaitingRoomState;
   readonly onSelectRoom: (roomId: string) => void;
+  readonly disabled?: boolean;
 }
 
-export function WaitingRoomList({ state, onSelectRoom }: WaitingRoomListProps) {
+export function WaitingRoomList({ state, onSelectRoom, disabled = false }: WaitingRoomListProps) {
   return (
     <section className={styles.roomList} aria-labelledby="waiting-rooms-title">
       <div className={styles.sectionHeading}>
@@ -38,7 +39,7 @@ export function WaitingRoomList({ state, onSelectRoom }: WaitingRoomListProps) {
             const full = room.playerCount >= room.maxPlayers;
             return (
               <li key={room.roomId}>
-                <button className={styles.roomItem} type="button" disabled={full} onClick={() => onSelectRoom(room.roomId)}>
+                <button className={styles.roomItem} type="button" disabled={full || disabled} onClick={() => onSelectRoom(room.roomId)}>
                   <span className={styles.roomItemMain}>
                     <strong>{room.roomId}</strong>
                     <span>{room.hostName}</span>
@@ -53,4 +54,3 @@ export function WaitingRoomList({ state, onSelectRoom }: WaitingRoomListProps) {
     </section>
   );
 }
-
