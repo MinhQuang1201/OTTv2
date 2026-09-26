@@ -71,7 +71,9 @@ export class DemoSession implements GameSession {
       : candidate);
     const nextBoard = moveDefinition.eventType === "capture"
       ? board.filter((candidate) => candidate.id !== "B-la-1")
-      : board;
+      : moveDefinition.eventType === "strike_loss"
+        ? board.filter((candidate) => candidate.id !== piece.id)
+        : board;
     const nextTurn: Seat | null = this.snapshot.turn === "A" ? "B" : "A";
     this.snapshot = makeSnapshot({
       ...this.snapshot,

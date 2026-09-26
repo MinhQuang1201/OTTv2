@@ -60,6 +60,26 @@ describe("DemoSession fixtures", () => {
     expect(warning.getSnapshot().players.A?.remainingMs).toBeLessThan(60_000);
   });
 
+  it("removes the losing attacker on strike loss without duplicating the defender", async () => {
+    const session = new DemoSession("game-strike-loss");
+    const beforeRevision = session.getSnapshot().boardRevision;
+
+    const result = await session.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+    const snapshot = session.getSnapshot();
+
+    expect(result).toEqual({ accepted: true });
+    expect(snapshot.board.filter(({ position }) => position.x === 6 && position.y === 5)).toHaveLength(1);
+    expect(snapshot.board.find(({ id }) => id === "B-la-1")?.position).toEqual({ x: 6, y: 5 });
+    expect(snapshot.board.some(({ id }) => id === "A-dam-0")).toBe(false);
+    expect(snapshot.boardRevision).toBe(beforeRevision + 1);
+    expect(snapshot.events.at(-1)).toMatchObject({
+      id: 2,
+      type: "strike_loss",
+      pieceId: "A-dam-0",
+      byId: "B-la-1",
+    });
+  });
+
   it("supports unsubscribe and dispose without further notifications", async () => {
     const session = new DemoSession("game-active-a");
     const listener = vi.fn();
