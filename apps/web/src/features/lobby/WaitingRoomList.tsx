@@ -17,7 +17,7 @@ export interface WaitingRoomListProps {
 
 export function WaitingRoomList({ state, onSelectRoom, disabled = false }: WaitingRoomListProps) {
   return (
-    <section className={styles.roomList} aria-labelledby="waiting-rooms-title">
+    <section className={styles.roomList} aria-labelledby="waiting-rooms-title" data-testid="room-list">
       <div className={styles.sectionHeading}>
         <h3 id="waiting-rooms-title">Phòng đang chờ</h3>
         {state.status === "ready" && state.rooms.length > 0 ? <Badge status="info">{state.rooms.length} phòng</Badge> : null}
