@@ -1,12 +1,20 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App, createDemoSession, type AppState, type SessionFactory } from "./App";
+import { App, createDemoSession, safeSessionError, type AppState, type SessionFactory } from "./App";
 import { ScreenBoundary } from "./ScreenBoundary";
 import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 
 describe("App shell lifecycle", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function Exploder({ broken }: { broken: boolean }) {
+    if (broken) throw new Error("secret raw exception");
+    return <p>recovered screen</p>;
+  }
 
   function fakeSession() {
     let snapshot = new DemoSession("lobby-default").getSnapshot();
@@ -90,6 +98,8 @@ describe("App shell lifecycle", () => {
 
     expect(sessions).toHaveLength(2);
     expect(sessions[0]!.controls.dispose).toHaveBeenCalledTimes(1);
+    sessions[0]!.controls.transition({ phase: "error", error: { code: "session_failed", message: "stale", retryable: true } });
+    expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby");
 
     sessions[1]!.controls.transition({
       phase: "error",
@@ -121,6 +131,30 @@ describe("App shell lifecycle", () => {
     render(<ScreenBoundary error={{ code: "session_failed", message: "Tạm thời lỗi.", retryable: true }} onRetry={onRetry} onLobby={vi.fn()}><div>screen</div></ScreenBoundary>);
     await user.click(screen.getByRole("button", { name: /Thử lại/i }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets a caught boundary when the active screen changes", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { rerender } = render(<ScreenBoundary resetKey="one" onLobby={vi.fn()}><Exploder broken /></ScreenBoundary>);
+    expect(screen.getByRole("heading", { name: /Đã xảy ra sự cố/i })).toBeInTheDocument();
+    expect(screen.queryByText(/secret raw exception/i)).not.toBeInTheDocument();
+
+    rerender(<ScreenBoundary resetKey="two" onLobby={vi.fn()}><Exploder broken={false} /></ScreenBoundary>);
+    await waitFor(() => expect(screen.getByText("recovered screen")).toBeInTheDocument());
+    consoleError.mockRestore();
+  });
+
+  it("does not offer retry for non-retryable errors while keeping lobby recovery", () => {
+    render(<ScreenBoundary error={{ code: "online_unavailable", message: "Online chưa sẵn sàng.", retryable: false }} onRetry={vi.fn()} onLobby={vi.fn()}><div>screen</div></ScreenBoundary>);
+
+    expect(screen.queryByRole("button", { name: /Thử lại/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Về sảnh/i })).toBeInTheDocument();
+  });
+
+  it("normalizes unknown and thrown session errors without exposing exception text", () => {
+    expect(safeSessionError(new Error("database password"))).toEqual({ code: "session_failed", message: "Không thể xử lý phiên chơi.", retryable: false });
+    expect(safeSessionError({ code: "unknown_code", message: "raw details", retryable: true })).toEqual({ code: "session_failed", message: "Không thể xử lý phiên chơi.", retryable: false });
+    expect(safeSessionError({ code: "invalid_move", message: "Nước đi không hợp lệ.", retryable: false })).toEqual({ code: "invalid_move", message: "Nước đi không hợp lệ.", retryable: false });
   });
 
   it("falls back safely when the requested scenario is invalid", () => {

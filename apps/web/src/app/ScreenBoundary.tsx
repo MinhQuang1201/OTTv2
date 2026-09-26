@@ -8,6 +8,8 @@ interface ScreenBoundaryProps {
   readonly error?: SessionErrorView | null;
   readonly onRetry?: () => void;
   readonly onLobby: () => void;
+  /** Changes whenever the active session/screen changes, clearing a prior caught error. */
+  readonly resetKey?: string | number;
 }
 
 interface ScreenBoundaryState { readonly caught: boolean; }
@@ -16,6 +18,11 @@ export class ScreenBoundary extends Component<ScreenBoundaryProps, ScreenBoundar
   state: ScreenBoundaryState = { caught: false };
   static getDerivedStateFromError(): ScreenBoundaryState { return { caught: true }; }
   componentDidCatch(_error: Error, _info: ErrorInfo) { /* raw exceptions stay out of the UI */ }
+  componentDidUpdate(previousProps: ScreenBoundaryProps) {
+    if (this.state.caught && (previousProps.error !== this.props.error || previousProps.resetKey !== this.props.resetKey)) {
+      this.setState({ caught: false });
+    }
+  }
   private retry = () => { this.setState({ caught: false }); this.props.onRetry?.(); };
 
   render() {
