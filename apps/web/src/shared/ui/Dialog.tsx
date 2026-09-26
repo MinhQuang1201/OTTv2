@@ -19,6 +19,7 @@ export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function Dialog({
   onClose,
   children,
   className,
+  "aria-label": nativeAriaLabel,
   ...props
 }: DialogProps, forwardedRef) {
   const titleId = useId();
@@ -38,7 +39,7 @@ export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
-        aria-label={title ? undefined : ariaLabel}
+        aria-label={title ? undefined : ariaLabel ?? nativeAriaLabel}
         className={[styles.dialog, className].filter(Boolean).join(" ")}
         onKeyDown={(event) => { if (event.key === "Escape") onClose(); props.onKeyDown?.(event); }}
       >
