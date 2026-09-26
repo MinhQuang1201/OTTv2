@@ -21,13 +21,17 @@ describe("App shell lifecycle", () => {
     const listeners = new Set<() => void>();
     const controls = {
       dispose: vi.fn(),
+      throwOnRead: false,
       transition(next: Partial<GameSnapshot>) {
         snapshot = { ...snapshot, ...next };
         listeners.forEach((listener) => listener());
       },
     };
     const session: GameSession = {
-      getSnapshot: () => snapshot,
+      getSnapshot: () => {
+        if (controls.throwOnRead) throw new Error("raw snapshot secret");
+        return snapshot;
+      },
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       start: async () => undefined,
       getLegalMoves: () => [],
@@ -153,8 +157,19 @@ describe("App shell lifecycle", () => {
 
   it("normalizes unknown and thrown session errors without exposing exception text", () => {
     expect(safeSessionError(new Error("database password"))).toEqual({ code: "session_failed", message: "Không thể xử lý phiên chơi.", retryable: false });
+    const crafted = Object.assign(new Error("crafted secret"), { code: "session_failed", retryable: true });
+    expect(safeSessionError(crafted)).toEqual({ code: "session_failed", message: "Không thể xử lý phiên chơi.", retryable: false });
     expect(safeSessionError({ code: "unknown_code", message: "raw details", retryable: true })).toEqual({ code: "session_failed", message: "Không thể xử lý phiên chơi.", retryable: false });
     expect(safeSessionError({ code: "invalid_move", message: "Nước đi không hợp lệ.", retryable: false })).toEqual({ code: "invalid_move", message: "Nước đi không hợp lệ.", retryable: false });
+  });
+
+  it("turns an active session snapshot read failure into a safe error state", async () => {
+    const value = fakeSession();
+    value.controls.throwOnRead = true;
+    render(<App initialScenario="game-active-a" sessionFactory={() => value.session} />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Đã xảy ra sự cố/i })).toBeInTheDocument());
+    expect(screen.queryByText(/raw snapshot secret/i)).not.toBeInTheDocument();
   });
 
   it("falls back safely when the requested scenario is invalid", () => {

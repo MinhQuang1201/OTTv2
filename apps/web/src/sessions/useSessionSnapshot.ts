@@ -30,7 +30,17 @@ export function useSessionSnapshot(session: GameSession | null): GameSnapshot {
     [session],
   );
   const getSnapshot = useMemo(
-    () => (session ? session.getSnapshot.bind(session) : emptySnapshot),
+    () => {
+      if (!session) return emptySnapshot;
+      return () => {
+        try {
+          return session.getSnapshot();
+        } catch {
+          // App translates the failed active-session read into its safe error state.
+          return EMPTY_SNAPSHOT;
+        }
+      };
+    },
     [session],
   );
 
