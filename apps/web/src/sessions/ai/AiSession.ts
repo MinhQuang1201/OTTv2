@@ -68,6 +68,7 @@ export class AiSession implements GameSession {
       ? [options.playerName.trim() || "Người chơi", "Máy"]
       : ["Máy", options.playerName.trim() || "Người chơi"];
     await this.local.start({ mode: "local", playerNames: names });
+    this.aiThinking = this.local.getSnapshot().turn === this.aiSeat;
     this.snapshot = this.decorate(this.local.getSnapshot());
     this.publish();
     this.scheduleIfNeeded();

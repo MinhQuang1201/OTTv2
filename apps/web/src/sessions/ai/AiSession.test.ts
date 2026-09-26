@@ -93,6 +93,15 @@ describe("AiSession", () => {
     expect(second.timer.clearTimeout).toHaveBeenCalledTimes(1);
   });
 
+  it("schedules the AI opening move when the human is seat B", async () => {
+    const { deps, timer } = dependencies();
+    const session = new AiSession(deps);
+    await session.start({ mode: "ai", playerName: "Bình", humanSeat: "B" });
+
+    expect(session.getSnapshot()).toMatchObject({ viewerSeat: "B", aiThinking: true, pendingMove: true, turn: "A" });
+    expect(timer.setTimeout).toHaveBeenCalledTimes(1);
+  });
+
   it("does not schedule an AI move when the human move ends the game", async () => {
     const timer = scheduler();
     const core = getGameCoreBridge();
