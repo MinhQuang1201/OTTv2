@@ -9,7 +9,8 @@
   const BEATS = { dam: "keo", keo: "la", la: "dam" };
   const TYPE_LABEL = { dam: "Đấm", la: "Lá", keo: "Kéo" };
   const SEAT_LABEL = { A: "Đỏ", B: "Xanh", C: "Vàng", D: "Lục" };
-  const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
+  // Duel goals are opposite each player's starting side.
+  const GOAL = { A: { x: 8, y: 0 }, B: { x: 0, y: 8 } };
   const ARENA_GOAL = {
     A: { x: 0, y: 8 },
     B: { x: 0, y: 0 },
@@ -26,23 +27,18 @@
     reconnectGraceMs: 60 * 1000
   };
 
-  // The a1-i9 diagonal (x === y) is the neutral divider. A deploys in three
-  // independent RPS wings at least three layers away from it, so neither side
-  // can reach the divider or make contact on the opening move. B is reflected
-  // across the divider in rules.createInitialState.
+  // Canonical Duel setup from Rule.md. B is rotated 180 degrees in
+  // rules.createInitialState.
   const A_SETUP = [
-    // Cánh 1: áp sát khu vực a1 nhưng vẫn ngoài vùng trung lập.
-    { type: "dam", x: 3, y: 0 }, // d1
-    { type: "keo", x: 4, y: 0 }, // e1
-    { type: "la", x: 4, y: 1 }, // e2
-    // Cánh 2: giữ trục giữa.
-    { type: "la", x: 5, y: 1 }, // f2
-    { type: "dam", x: 6, y: 1 }, // g2
-    { type: "keo", x: 6, y: 2 }, // g3
-    // Cánh 3: gây sức ép về phía i9.
-    { type: "keo", x: 7, y: 3 }, // h4
-    { type: "la", x: 8, y: 3 }, // i4
-    { type: "dam", x: 8, y: 4 } // i5
+    { type: "la", x: 0, y: 2 }, // a3
+    { type: "dam", x: 1, y: 2 }, // b3
+    { type: "keo", x: 2, y: 2 }, // c3
+    { type: "dam", x: 0, y: 3 }, // a4
+    { type: "keo", x: 1, y: 3 }, // b4
+    { type: "la", x: 2, y: 3 }, // c4
+    { type: "keo", x: 0, y: 4 }, // a5
+    { type: "la", x: 1, y: 4 }, // b5
+    { type: "dam", x: 2, y: 4 } // c5
   ];
 
   // Arena A: g–i / rank 2–3. B/C/D are 90° clockwise copies.
@@ -95,11 +91,12 @@
     ROOM_NAME_MAX: 28,
     CHAT_MAX: 120,
     CHAT_KEEP: 30,
-    HISTORY_KEEP: 200,
     ROOM_ID_LEN: 4,
     MAX_ROOMS: 200,
     MAX_SPECTATORS: 100,
     MAX_MESSAGE: 8192,
-    ASSET: { dam: "assets/dam.png", la: "assets/la.png", keo: "assets/keo.png" }
+    ASSET: { dam: "assets/dam.png", la: "assets/la.png", keo: "assets/keo.png" },
+    ATLAS: "assets/rps-atlas.png",
+    ICON_CLASS: { dam: "rps-icon-dam", la: "rps-icon-la", keo: "rps-icon-keo" }
   };
 });

@@ -26,22 +26,22 @@ function assertSingleOccupancy(state) {
 }
 
 describe("setup", () => {
-  it("uses three RPS wings reflected across the a1-i9 diagonal", () => {
+  it("uses the exact Rule.md setup and a 180-degree B rotation", () => {
     const state = rules.createInitialState();
     const a = state.pieces
       .filter((p) => p.player === "A")
       .map((p) => `${rules.formatSquare(p)}:${p.type}`)
       .sort();
     const expected = [
-      "d1:dam",
-      "e1:keo",
-      "e2:la",
-      "f2:la",
-      "g2:dam",
-      "g3:keo",
-      "h4:keo",
-      "i4:la",
-      "i5:dam"
+      "a3:la",
+      "b3:dam",
+      "c3:keo",
+      "a4:dam",
+      "b4:keo",
+      "c4:la",
+      "a5:keo",
+      "b5:la",
+      "c5:dam"
     ].sort();
     assert.deepEqual(a, expected);
     assert.equal(state.pieces.length, 18);
@@ -52,7 +52,10 @@ describe("setup", () => {
     }
     for (const p of state.pieces.filter((p) => p.player === "A")) {
       const mirror = state.pieces.find(
-        (q) => q.player === "B" && q.x === p.y && q.y === p.x
+        (q) =>
+          q.player === "B" &&
+          q.x === config.SIZE - 1 - p.x &&
+          q.y === config.SIZE - 1 - p.y
       );
       assert.ok(mirror);
       assert.equal(mirror.type, p.type);
@@ -62,34 +65,28 @@ describe("setup", () => {
     assertSingleOccupancy(state);
   });
 
-  it("keeps both armies off the diagonal with a three-layer neutral buffer", () => {
+  it("keeps the canonical goals empty and places each army in its own setup zone", () => {
     const state = rules.createInitialState();
     assert.ok(
       state.pieces
         .filter((p) => p.player === "A")
-        .every((p) => p.x > p.y && p.x - p.y >= 3)
+        .every((p) => p.x <= 2 && p.y >= 2 && p.y <= 4)
     );
     assert.ok(
       state.pieces
         .filter((p) => p.player === "B")
-        .every((p) => p.x < p.y && p.y - p.x >= 3)
+        .every((p) => p.x >= 6 && p.y >= 4 && p.y <= 6)
     );
-    assert.equal(state.pieces.some((p) => p.x === p.y), false);
-    assert.deepEqual(config.GOAL.A, sq("a9"));
-    assert.deepEqual(config.GOAL.B, sq("i1"));
+    assert.deepEqual(config.GOAL.A, sq("i1"));
+    assert.deepEqual(config.GOAL.B, sq("a9"));
   });
 
-  it("starts A first without letting either side reach the divider or its goal immediately", () => {
+  it("starts A first without allowing an immediate goal", () => {
     const state = rules.createInitialState();
     assert.equal(state.turn, "A");
     for (const piece of state.pieces) {
       const legal = rules.getLegalMoves(state, piece.id);
       const ownGoal = config.GOAL[piece.player];
-      assert.equal(
-        legal.some((m) => m.x === m.y),
-        false,
-        `${piece.id} can reach the divider immediately`
-      );
       assert.equal(
         legal.some((m) => m.x === ownGoal.x && m.y === ownGoal.y),
         false
@@ -99,12 +96,12 @@ describe("setup", () => {
 });
 
 describe("movement", () => {
-  it("uses I4 to H3 as the strategic opening and rejects I4 to G2", () => {
+  it("accepts a one-step opening and rejects a move that travels two ranks", () => {
     const state = rules.createInitialState();
-    const opening = move(state, "A", "i4", "h3");
+    const opening = move(state, "A", "a3", "b2");
     assert.equal(opening.ok, true);
-    assert.equal(pieceAt(opening.state, "h3", "A").type, "la");
-    const tooFar = move(state, "A", "i4", "g2");
+    assert.equal(pieceAt(opening.state, "b2", "A").type, "la");
+    const tooFar = move(state, "A", "a3", "a1");
     assert.equal(tooFar.ok, false);
   });
 
@@ -116,10 +113,10 @@ describe("movement", () => {
 
   it("rejects off-board, fractional, out-of-turn, and friendly destinations", () => {
     const state = rules.createInitialState();
-    assert.equal(rules.applyMove(state, "A", sq("d1"), { x: -1, y: 0 }).ok, false);
-    assert.equal(rules.applyMove(state, "A", sq("d1"), { x: 3, y: 0.5 }).ok, false);
-    assert.equal(move(state, "B", "a4", "a3").ok, false);
-    assert.equal(move(state, "A", "i4", "i5").ok, false);
+    assert.equal(rules.applyMove(state, "A", sq("a3"), { x: -1, y: 0 }).ok, false);
+    assert.equal(rules.applyMove(state, "A", sq("a3"), { x: 0, y: 1.5 }).ok, false);
+    assert.equal(move(state, "B", "i7", "i8").ok, false);
+    assert.equal(move(state, "A", "a3", "b3").ok, false);
   });
 });
 
@@ -171,12 +168,36 @@ describe("victory ordering and no moves", () => {
     const state = rules.createEmptyState();
     state.turn = "A";
     state.pieces = [
-      { id: "A-dam-0", player: "A", type: "dam", x: 0, y: 7 },
-      { id: "B-keo-0", player: "B", type: "keo", x: 0, y: 8 }
+      { id: "A-dam-0", player: "A", type: "dam", x: 7, y: 0 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 5 }
     ];
-    const result = rules.applyMove(state, "A", { x: 0, y: 7 }, { x: 0, y: 8 });
+    const result = rules.applyMove(state, "A", { x: 7, y: 0 }, { x: 8, y: 0 });
     assert.equal(result.state.winner, "A");
     assert.equal(result.state.reason, "goal");
+  });
+
+  it("awards opposite corner goals to the correct Duel seat", () => {
+    const red = rules.createEmptyState();
+    red.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 8, y: 0 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 5 }
+    ];
+    assert.deepEqual(rules.detectWinner(red), {
+      winner: "A",
+      reason: "goal",
+      eliminatedPlayer: null
+    });
+
+    const blue = rules.createEmptyState();
+    blue.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 5, y: 5 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 0, y: 8 }
+    ];
+    assert.deepEqual(rules.detectWinner(blue), {
+      winner: "B",
+      reason: "goal",
+      eliminatedPlayer: null
+    });
   });
 
   it("awards the opponent elimination immediately when the last attacker loses", () => {

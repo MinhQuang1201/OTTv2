@@ -15,12 +15,13 @@ Node ≥ 18. Cổng mặc định 3000 (`PORT`).
 
 ## Ranh giới module
 
-- `config.js` — SIZE, TYPES, BEATS, GOAL, ARENA_GOAL, MODES, A_SETUP, A_ARENA_SETUP, TIME_CONTROL, PORT. Duel: A trên-phải, B đối xứng 180°. Arena: bốn góc, xoay 90°.
+- `config.js` — SIZE, TYPES, BEATS, GOAL, ARENA_GOAL, MODES, A_SETUP, A_ARENA_SETUP, TIME_CONTROL, PORT. Duel: A ở A3:C5, B đối xứng 180° ở I7:G5. Arena: bốn góc, xoay 90°.
 - `rules.js` — `createInitialState(mode)`, `getLegalMoves`, `applyMove`, `detectWinner`, `publicState`. Không I/O.
 - `room.js` — ghế Duel A/B hoặc Arena A–D, khán giả, chat, đồng hồ server-authoritative, grace reconnect và `handleMove`.
 - `persist.js` — JSON `data/store.json`, thắng/thua, bảng xếp. Không chứa luật.
 - `server.js` — file tĩnh + WS + `/api/leaderboard`. Không chứa luật.
-- `playfull.js` — khách WS. Không chứa luật.
+- `playfull.js` — khách WS ghế, nước đi, đồng hồ. Không chứa luật.
+- playHTML (CDN) — cursor, presence, chat phòng, reaction. Không quyết nước đi.
 - `game.js` — sảnh / bàn / local / AI / xem. Online: chỉ gửi `pf.move`, vẽ `state` từ server.
 - `ai.js` — `chooseMove(state, player)`. Thay file này khi gắn AI khác.
 

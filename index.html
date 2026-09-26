@@ -2,40 +2,74 @@
 <html lang="vi">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <meta name="description" content="OTTv2 – oẳn tù tì chiến thuật realtime trên bàn 9x9" />
+    <meta name="theme-color" content="#0e1f22" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>OTTv2 – Oẳn Tù Tì</title>
+    <link rel="icon" href="assets/dam.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.bunny.net" />
+    <link rel="preconnect" href="https://unpkg.com" />
     <link
       rel="stylesheet"
       href="https://fonts.bunny.net/css?family=azeret-mono:500,600,700|be-vietnam-pro:400,500,600,700,800"
     />
+    <link rel="stylesheet" href="https://unpkg.com/playhtml@2.15.0/dist/style.css" />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
-    <div class="hatch" aria-hidden="true"></div>
+    <div id="play-cursors" class="play-cursors" aria-hidden="true"></div>
     <div id="app" data-screen="lobby">
       <section id="lobby" class="lobby" aria-label="Sảnh">
         <div class="lobby-brand">
           <div class="poster">
-            <span class="reg tl" aria-hidden="true"></span>
-            <span class="reg tr" aria-hidden="true"></span>
-            <span class="reg bl" aria-hidden="true"></span>
-            <span class="reg br" aria-hidden="true"></span>
-            <p class="mark">OTTv2</p>
-            <p class="plate-no">Plate 09×09</p>
+            <span class="reg tl" aria-hidden="true" hidden></span>
+            <span class="reg tr" aria-hidden="true" hidden></span>
+            <span class="reg bl" aria-hidden="true" hidden></span>
+            <span class="reg br" aria-hidden="true" hidden></span>
+            <p class="mark" hidden>OTTv2</p>
+            <p class="plate-no" hidden>Plate 09×09</p>
             <h1>Oẳn tù tì trên bàn 9×9</h1>
-            <p class="lede">
+            <p class="lede" hidden>
               Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm. Đưa quân vào ô thắng hoặc ăn hết
               quân đối phương. Duel hai ghế, Arena bốn ghế, xem trực tiếp.
             </p>
-            <ul class="spec-strip">
+            <ol class="rps-cycle" aria-label="Vòng oẳn tù tì" hidden>
+              <li>
+                <span class="rps-icon rps-icon-dam" aria-hidden="true"></span>
+                Đấm
+              </li>
+              <li class="rps-gt" aria-hidden="true">⟩</li>
+              <li>
+                <span class="rps-icon rps-icon-keo" aria-hidden="true"></span>
+                Kéo
+              </li>
+              <li class="rps-gt" aria-hidden="true">⟩</li>
+              <li>
+                <span class="rps-icon rps-icon-la" aria-hidden="true"></span>
+                Lá
+              </li>
+              <li class="rps-gt" aria-hidden="true">⟩</li>
+              <li>
+                <span class="rps-icon rps-icon-dam" aria-hidden="true"></span>
+                Đấm
+              </li>
+            </ol>
+            <ul class="spec-strip" hidden>
               <li><span>Mực</span> Hue 35</li>
               <li><span>Kẽm</span> Đêm</li>
-              <li><span>Ô thắng</span> a9 · i1</li>
+              <li><span>Ô thắng</span> i1 · a9</li>
             </ul>
+            <button type="button" id="lobby-press" can-play class="press-count" hidden>
+              Bản in · 0
+            </button>
           </div>
           <ol id="leaderboard" class="leaderboard" aria-label="Bảng xếp hạng"></ol>
         </div>
@@ -45,6 +79,7 @@
               <span>Phiếu việc</span>
               <span class="ticket-index">JOB</span>
             </header>
+            <p id="lobby-presence" class="lobby-presence">Sảnh trống</p>
             <form id="start-form" class="start-form" autocomplete="on">
               <label class="field">
                 <span class="field-idx">01</span>
@@ -59,7 +94,7 @@
               </label>
               <fieldset class="mode-switch">
                 <legend>Chế độ</legend>
-                <label class="mode-option">
+                <label class="mode-option" id="mode-duel" can-hover>
                   <input type="radio" name="mode" value="duel" checked />
                   <span class="mode-badge" aria-hidden="true">02</span>
                   <span class="mode-option-body">
@@ -67,10 +102,13 @@
                       <span class="mode-name">Duel</span>
                     </span>
                     <span class="mode-meta">2 ghế</span>
+                    <span class="seat-dots" aria-hidden="true">
+                      <i class="ink-a"></i><i class="ink-b"></i>
+                    </span>
                   </span>
                   <span class="mode-check" aria-hidden="true"></span>
                 </label>
-                <label class="mode-option">
+                <label class="mode-option" id="mode-arena" can-hover>
                   <input type="radio" name="mode" value="arena" />
                   <span class="mode-badge" aria-hidden="true">04</span>
                   <span class="mode-option-body">
@@ -78,6 +116,9 @@
                       <span class="mode-name">Arena</span>
                     </span>
                     <span class="mode-meta">4 ghế</span>
+                    <span class="seat-dots" aria-hidden="true">
+                      <i class="ink-a"></i><i class="ink-b"></i><i class="ink-c"></i><i class="ink-d"></i>
+                    </span>
                   </span>
                   <span class="mode-check" aria-hidden="true"></span>
                 </label>
@@ -119,18 +160,18 @@
                 </button>
               </div>
               <div class="local-row">
-                <button class="btn btn-ghost" type="submit" name="intent" value="local">
-                  Hai người một máy
+                <button class="btn btn-now" type="submit" name="intent" value="ai" formnovalidate>
+                  Chơi ngay
                 </button>
-                <button class="btn btn-ghost" type="submit" name="intent" value="ai">
-                  Đấu với máy
+                <button class="btn btn-ghost" type="submit" name="intent" value="local" formnovalidate>
+                  Hai người một máy
                 </button>
               </div>
             </form>
             <div class="waiting-list">
               <h2>Hàng chờ</h2>
               <ul id="room-list" class="room-list">
-                <li class="empty-line">Chưa có phòng mở.</li>
+                <li class="empty-line">Chưa có phòng mở. Tạo phòng hoặc chơi ngay.</li>
               </ul>
             </div>
           </div>
@@ -144,13 +185,23 @@
           <p class="net-chip" id="net-chip" data-state="off">Ngoại tuyến</p>
           <p class="role-chip" id="role-chip" hidden>Xem</p>
           <p class="view-chip" id="view-chip" hidden>0 xem</p>
+          <button
+            class="audio-toggle"
+            id="audio-toggle"
+            type="button"
+            aria-pressed="true"
+            aria-label="Tắt âm thanh"
+            title="Tắt âm thanh"
+          >
+            <span id="audio-glyph" aria-hidden="true">ON</span>
+          </button>
         </div>
 
         <article class="hud hud-b" data-seat="B">
           <header>
             <span class="avatar" id="avatar-b" aria-hidden="true">B</span>
             <div>
-              <p class="seat-tag">Xanh · I1</p>
+              <p class="seat-tag">Xanh · A9</p>
               <h2 id="name-b">Xanh</h2>
             </div>
             <output class="clock" id="clock-b" aria-label="Thời gian còn lại của người B">10:00</output>
@@ -188,25 +239,31 @@
           <div class="crop bl" aria-hidden="true"></div>
           <div class="crop br" aria-hidden="true"></div>
           <p class="combat-banner" id="combat-banner" hidden></p>
-          <div class="board-frame">
-            <div class="ranks" id="ranks" aria-hidden="true"></div>
-            <div
-              id="board"
-              class="board"
-              role="grid"
-              aria-label="Bàn cờ 9 x 9"
-            ></div>
-            <div class="files" id="files" aria-hidden="true"></div>
+          <div class="board-stage">
+            <div class="board-frame">
+              <div class="ranks" id="ranks" aria-hidden="true"></div>
+              <div
+                id="board"
+                class="board"
+                role="grid"
+                aria-label="Bàn cờ 9 x 9"
+                aria-rowcount="9"
+                aria-colcount="9"
+              ></div>
+              <div class="files" id="files" aria-hidden="true"></div>
+            </div>
           </div>
+          <p class="you-stamp" id="you-stamp" hidden aria-live="polite">Lượt bạn</p>
           <p class="turn-line t-swap" id="turn-line" aria-live="polite">Lượt Đỏ</p>
-          <p class="wait-line" id="wait-line" hidden>Đang chờ đối thủ vào phòng.</p>
+          <p class="wait-line" id="wait-line" hidden>Đang chờ đối thủ. Chat vẫn mở.</p>
+          <p class="hint-line" id="hint-line" aria-live="polite">Chọn quân mình, rồi chọn ô hợp lệ.</p>
         </div>
 
         <article class="hud hud-a" data-seat="A">
           <header>
             <span class="avatar" id="avatar-a" aria-hidden="true">A</span>
             <div>
-              <p class="seat-tag">Đỏ · A9</p>
+              <p class="seat-tag">Đỏ · I1</p>
               <h2 id="name-a">Đỏ</h2>
             </div>
             <output class="clock" id="clock-a" aria-label="Thời gian còn lại của người A">10:00</output>
@@ -218,11 +275,11 @@
           <section class="chat-panel" aria-label="Chat phòng">
             <ul id="chat-log" class="chat-log"></ul>
             <div class="react-row" id="react-row">
-              <button type="button" data-react="fire">🔥</button>
-              <button type="button" data-react="fight">⚔️</button>
-              <button type="button" data-react="gg">GG</button>
-              <button type="button" data-react="clap">👏</button>
-              <button type="button" data-react="lol">😂</button>
+              <button type="button" id="react-fire" data-react="fire" can-hover aria-label="Lửa">🔥</button>
+              <button type="button" id="react-fight" data-react="fight" can-hover aria-label="Đấu">⚔️</button>
+              <button type="button" id="react-gg" data-react="gg" can-hover aria-label="GG">GG</button>
+              <button type="button" id="react-clap" data-react="clap" can-hover aria-label="Vỗ tay">👏</button>
+              <button type="button" id="react-lol" data-react="lol" can-hover aria-label="Cười">😂</button>
             </div>
             <form id="chat-form" class="chat-form">
               <label class="sr-only" for="chat-input">Tin nhắn</label>

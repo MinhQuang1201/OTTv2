@@ -46,20 +46,34 @@ Token `--duration-*` / `--ease-smooth-out` trong `tokens.css`.
 - Lỗi: `.t-toast.is-error` shake
 - Thắng: `dialog.t-modal` + `.t-success-check`
 - Ăn / đòn thua: `.cell.is-burst`
-- Combat: `.combat-banner` như con dấu
+- Combat: `.combat-banner` như con dấu; `data-kind="strike_loss"` mực vàng
+- Nước vừa đi: `.cell.is-from` / `.is-to` (lấy từ history, không từ CSS)
+- Xem trước oẳn tù tì: `.is-win` lục / `.is-loss` vàng trên ô hợp lệ có quân địch
+- Ô thắng: node `.goal-label` từ `rules.formatSquare`, không cứng tọa độ trong CSS
+- Lượt: HUD `data-active`, đồng hồ `ink-pulse`, `.turn-line[data-seat]`
+- Lượt mình: con dấu `.you-stamp` dưới lưới (ẩn dòng lượt), `data-yours`
+- Ăn: `.ink-splat` mực, đếm HUD `.is-punch`, haptic ngắn và tone Web Audio nếu đang bật
+- Âm thanh: nút `ON/OFF` trên thanh bàn, lưu trong `localStorage`; tone ngắn, không chặn thao tác
+- Sảnh: vòng RPS bằng asset quân, giếng mực 2/4 ghế, CTA «Chơi ngay»
+- playHTML: cursor, `data-playhtml-hover` trên phiếu/phòng, con dấu «Bản in». Không gắn lên ô bàn.
 - `prefers-reduced-motion: reduce` tắt animation
 
 ## Layout
 
-- Sảnh: grid 2 cột, gãy 1 cột dưới 768px. Trái poster có crop mark; phải phiếu việc đánh số 01–03.
-- Bàn Duel: HUD B trên, lưới 9×9, HUD A dưới. Arena: bốn HUD quanh bàn.
+- Sảnh: grid 2 cột, gãy 1 cột dưới 768px. Safe-area `viewport-fit=cover`. Trái poster có crop mark; phải phiếu việc grouped (radius 12).
+- Bàn: `100dvh`, không cuộn trang. Lưới 9×9 co theo `100cqmin` của `.board-stage` (container-type: size), ô nhìn co theo viewport.
+- Compact (≤480px hoặc chiều cao thấp): HUD một hàng, ẩn hint / dock khi thiếu chiều cao, ẩn poster khi phone landscape.
+- Regular (tablet / laptop): HUD + dock.
+- Expanded (≥1100px): cell-cap lớn hơn.
+- Chrome: thanh bàn như toolbar (blur zinc), control radius 10–12. Ô nhìn co theo viewport nhưng button hitbox luôn `44px` trên mobile; click quy đổi theo tọa độ bàn. Giữ Be Vietnam Pro.
 - Ô là `<button>`; rank 1→9 từ trên xuống, file a–i trái sang phải.
-- Nút là tấm kẽm (radius 4px), không pill. Icon ↗ trong `.btn-icon` vuông.
+- Nút là tấm kẽm bo 10px, không pill 999px. Icon ↗ trong `.btn-icon`.
+- Icon quân dùng `assets/rps-atlas.png`; `renderBoard` tái sử dụng 81 button prefab, không instantiate DOM liên tục.
 
 ## Do not
 
-- Tím neon AI, lưới 3 card tính năng, Inter.
-- Khung trình duyệt giả.
+- Tím neon AI, lưới 3 card tính năng, Inter, SF Pro làm mặt chính.
+- Khung cửa sổ macOS giả.
 - Số liệu bịa.
 - Luật chơi viết trong CSS.
-- Hover nâng thẻ, pill iOS, radio native Windows.
+- Hover nâng thẻ, radio native Windows.

@@ -11,6 +11,7 @@
     />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="icon" href="assets/dam.png" type="image/png" />
     <script src="playfull.js"></script>
   </head>
   <body class="docs">
@@ -20,7 +21,8 @@
       <p>
         Thư viện khách quản lý WebSocket, phòng Duel/Arena, khán giả và đồng bộ
         nước đi. Game nạp file này qua <code>playfull.js</code>. Luật nằm trên
-        máy chủ, không trong file này.
+        máy chủ, không trong file này. Cursor, presence, chat phòng và reaction
+        đi qua <a href="https://playhtml.fun">playHTML</a>, không qua file này.
       </p>
       <pre class="docs-code">const pf = new Playfull();
 await pf.connect();
@@ -42,7 +44,7 @@ pf.react("fire");</pre>
       </ul>
       <h2>Sự kiện</h2>
       <ul>
-        <li><code>open</code> / <code>close</code> / <code>error</code></li>
+        <li><code>open</code> / <code>close</code> / <code>reconnecting</code> / <code>resumed</code> / <code>resumeFailed</code> / <code>error</code></li>
         <li><code>hello</code> <code>rooms</code> phòng chờ và đang chơi</li>
         <li><code>joined</code> ghế A–D hoặc <code>spectator</code></li>
         <li><code>state</code> bàn cờ, <code>history</code>, số người xem</li>

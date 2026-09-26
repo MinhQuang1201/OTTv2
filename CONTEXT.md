@@ -17,7 +17,7 @@ Một ô trên bàn 9x9, tọa độ file a–i và rank 1–9.
 _Avoid_: tile, cell như khái niệm riêng
 
 **Ô thắng**:
-Ô ghi bàn của một người chơi. Người A (Đỏ) thắng khi có quân trên a9. Người B (Xanh) thắng khi có quân trên i1. Rank 1 ở phía trên bàn, rank 9 ở phía dưới.
+Ô ghi bàn của một người chơi. Người A (Đỏ) thắng khi có quân trên i1. Người B (Xanh) thắng khi có quân trên a9. Rank 1 ở phía trên bàn, rank 9 ở phía dưới.
 _Avoid_: king square, nhà, đích đối phương
 
 **Chiếm ô**:
@@ -55,6 +55,10 @@ _Avoid_: lobby như toàn server, table như poker
 **Playfull**:
 Thư viện khách kết nối WebSocket, tạo/vào phòng, gửi nước đi, nhận trạng thái.
 _Avoid_: socket wrapper, netcode
+
+**playHTML**:
+Thư viện đồng bộ DOM, cursor và presence. Dùng cho sảnh, chat phòng, reaction. Không dùng cho nước đi.
+_Avoid_: trọng tài, Playfull
 
 **Duel**:
 Chế độ hai ghế A/B, luật gốc.

@@ -119,6 +119,7 @@
           if (msg.type === "error" && this._resuming) {
             this.resumeContext = null;
             this._resuming = false;
+            this.emit("resumeFailed", Object.assign({ resumeFailure: true }, msg));
           }
           this.emit(msg.type, msg);
         };
@@ -152,6 +153,7 @@
 
     resume(roomId, resumeToken) {
       this.resumeContext = { roomId, resumeToken };
+      this._resuming = true;
       return this.send({ type: "resume", roomId, resumeToken });
     }
 

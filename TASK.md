@@ -1,6 +1,8 @@
+> Trạng thái: kế hoạch cũ, đã lưu trữ ngày 2026-09-26. `Rule.md` là nguồn luật hiện hành; tọa độ và kỳ vọng cũ bên dưới chỉ là lịch sử thực thi.
+
 Kế Hoạch Đồng Bộ Logic OTTv2 Với Rule.md
 Trạng thái: Chỉ lập kế hoạch. Plan Mode đang bật nên tôi không tạo/sửa file Markdown trong workspace. Khi được phép thực thi, lưu nguyên kế hoạch này tại docs/superpowers/plans/2026-09-25-rule-md-logic-alignment.md.
-Mục tiêu: Đồng bộ toàn bộ logic game, server referee, AI, giao diện và kiểm thử với Rule.md: một quân mỗi ô, cùng loại khác phe bị chặn, mục tiêu A9/I1, thắng do loại toàn bộ quân hoặc làm đối phương hết nước đi.
+Mục tiêu: Đồng bộ toàn bộ logic game, server referee, AI, giao diện và kiểm thử với Rule.md: một quân mỗi ô, cùng loại khác phe bị chặn, mục tiêu I1/A9, thắng do loại toàn bộ quân hoặc làm đối phương hết nước đi.
 Kiến trúc: rules.js là nguồn luật duy nhất cho local, AI và online. config.js chỉ chứa hằng số bàn/đội hình. room.js và server.js chỉ quản lý phiên/phòng và phát trạng thái do engine quyết định. game.js chỉ hiển thị và gửi nước đi, không tự quyết thắng thua.
 Công nghệ: Node.js 18+, JavaScript CommonJS/UMD, node:test, WebSocket ws.
 Phạm vi file
@@ -40,7 +42,7 @@ Thay test setup hiện tại bằng kiểm tra đúng 9 quân A ở:
 - A4 Đấm, B4 Kéo, C4 Lá
 - A5 Kéo, B5 Lá, C5 Đấm
 Kiểm tra B là ảnh xoay 180 độ của A và giữ nguyên loại quân.
-Kiểm tra GOAL.A === a9, GOAL.B === i1.
+Kiểm tra GOAL.A === i1, GOAL.B === a9.
 Kiểm tra A9 và I1 trống.
 Kiểm tra không quân nào có thể đi vào ô thắng của chính phe tại lượt đầu.
 Đổi assertion hướng đội hình:
@@ -72,9 +74,9 @@ Gọi helper sau:
 - Đòn thua.
 - Cố đi vào quân khác phe cùng loại.
 1.5. Cập nhật test điều kiện thắng
-Giữ fixture A8 -> A9; assert A thắng với reason === "goal".
-Giữ fixture I2 -> I1; assert B thắng với reason === "goal".
-Giữ test quân A đứng tại I1 không thắng.
+Giữ fixture H1 -> I1; assert A thắng với reason === "goal".
+Giữ fixture B9 -> A9; assert B thắng với reason === "goal".
+Giữ test quân A đứng tại A9 không thắng.
 Sửa test “mất một loại”:
 - B mất toàn bộ một loại nhưng còn quân loại khác.
 - Assert winner === null.
@@ -88,7 +90,7 @@ Thêm test ngược:
 - A thực hiện đòn thua và đó là quân A cuối cùng.
 - Assert B thắng với reason === "elimination".
 1.6. Bổ sung test ưu tiên điều kiện thắng
-Tạo nước đi hợp lệ vừa đưa A vào A9 vừa loại quân cuối cùng của B.
+Tạo nước đi hợp lệ vừa đưa A vào I1 vừa loại quân cuối cùng của B.
 Assert:
 - A thắng.
 - reason === "goal".
@@ -113,13 +115,11 @@ Files:
 Modify: config.js
 Test: tests/rules.test.js
 2.1. Sửa tọa độ ô thắng
-Đổi:
-const GOAL = { A: { x: 0, y: 0 }, B: { x: 8, y: 8 } };
-Thành:
-const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
+Đặt:
+const GOAL = { A: { x: 8, y: 0 }, B: { x: 0, y: 8 } };
 2.2. Sửa chú thích setup
 Cập nhật chú thích đang nhắc a1.
-Ghi rõ A bắt đầu tại A3:C5, mục tiêu A là A9.
+Ghi rõ A bắt đầu tại A3:C5, mục tiêu A là I1.
 Không thay A_SETUP: đội hình hiện có đã khớp bảng trong Rule.md.
 Không thay công thức xoay 180 độ của B.
 2.3. Chạy test setup và goal
@@ -222,8 +222,8 @@ room.broadcast({
 });
 4.3. Viết test Room theo luật mới
 Test cùng loại khác phe bị Room.handleMove từ chối, state và turn giữ nguyên.
-Test A đi A8 -> A9 làm room.status === "done".
-Test B đi I2 -> I1 làm room.status === "done".
+Test A đi H1 -> I1 làm room.status === "done".
+Test B đi B9 -> A9 làm room.status === "done".
 Test mất một loại nhưng còn quân không kết thúc room.
 Test ăn quân cuối cùng kết thúc room với elimination.
 Test đối phương không còn nước đi kết thúc room với no_moves.
@@ -279,8 +279,8 @@ Xóa ev.type === "stack" khỏi burst animation.
 Chỉ animate capture và strike_loss.
 6.5. Sửa thông báo kết thúc
 goal:
-- A: “Đưa quân vào ô thắng A9.”
-- B: “Đưa quân vào ô thắng I1.”
+- A: “Đưa quân vào ô thắng I1.”
+- B: “Đưa quân vào ô thắng A9.”
 elimination: “Đối phương không còn quân trên bàn.”
 no_moves: “Đối thủ không còn nước đi hợp lệ.”
 Giữ disconnect.
@@ -322,7 +322,7 @@ rtk npm start
 Mở hai trình duyệt hoặc hai tab.
 Tạo phòng và vào phòng.
 Xác nhận A đi trước.
-Xác nhận ô thắng hiển thị A9/I1.
+Xác nhận ô thắng hiển thị I1/A9.
 Xác nhận thử đi vào quân đối phương cùng loại bị từ chối.
 Xác nhận UI không hiển thị hai quân trên một ô.
 Xác nhận kết thúc ván hiển thị đúng thông báo cho goal, elimination, no_moves.

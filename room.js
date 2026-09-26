@@ -257,7 +257,6 @@ class Room {
       to: { x: to.x, y: to.y },
       events: result.events
     });
-    if (this.history.length > config.HISTORY_KEEP) this.history.shift();
     this.clockAnchorMs = this.now();
     if (this.state.winner) this.finishTerminal();
     else this.scheduleClockDeadline();
@@ -455,11 +454,13 @@ class Room {
     const deadlines = expiredAll.map(
       (seat) => this.players[seat].reconnectDeadlineMs
     );
-    if (expiredAll.length === 2 && deadlines[0] === deadlines[1]) {
-      return { ok: true, state: this.state, events: [] };
-    }
-
-    const loser = expired[0];
+    const simultaneous =
+      expiredAll.length === 2 && deadlines[0] === deadlines[1];
+    // Rule.md has no draw outcome. If both grace windows expire together,
+    // the seat whose turn was active is the deterministic loser.
+    const loser = simultaneous && expiredAll.includes(this.state.turn)
+      ? this.state.turn
+      : expired[0];
     const winner = loser === "A" ? "B" : "A";
     const settled = this.settleClock(now);
     if (this.state.winner) return settled;

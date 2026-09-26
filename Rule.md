@@ -29,8 +29,8 @@ Trò chơi có hai ghế:
 
 | Ghế | Màu | Ô thắng | Thứ tự đi |
 |---|---|---|---|
-| A | Đỏ | A9 | Đi trước |
-| B | Xanh | I1 | Đi sau |
+| A | Đỏ | I1 | Đi trước |
+| B | Xanh | A9 | Đi sau |
 
 Trong code, ghế được gọi là `A` và `B`. Trong giao diện hoặc tài liệu, ghế A tương ứng với Đỏ và ghế B tương ứng với Xanh.
 
@@ -62,8 +62,8 @@ Các cột được gọi từ A đến I, các hàng được gọi từ 1 đ�
 Theo quy ước này:
 
 - `A1` là góc trên bên trái.
-- `I1` là góc trên bên phải và là ô thắng của Xanh/B.
-- `A9` là góc dưới bên trái và là ô thắng của Đỏ/A.
+- `I1` là góc trên bên phải và là ô thắng của Đỏ/A.
+- `A9` là góc dưới bên trái và là ô thắng của Xanh/B.
 - `I9` là góc dưới bên phải.
 
 Tọa độ không phân biệt chữ hoa và chữ thường khi nhập, nhưng tọa độ hợp lệ phải có một cột từ A đến I và một hàng từ 1 đến 9.
@@ -272,9 +272,9 @@ Không tự động bỏ lượt và không xử hòa trong trường hợp này
 
 ### 10.1. Đến ô thắng
 
-Đỏ/A thắng ngay khi một quân Đỏ/A đi vào `A9`.
+Đỏ/A thắng ngay khi một quân Đỏ/A đi vào `I1`.
 
-Xanh/B thắng ngay khi một quân Xanh/B đi vào `I1`.
+Xanh/B thắng ngay khi một quân Xanh/B đi vào `A9`.
 
 Quân chỉ được ghi nhận thắng trên ô thắng của chính phe mình. Đứng trên ô thắng của đối phương không tạo ra chiến thắng.
 
@@ -337,18 +337,18 @@ Ván đã kết thúc thì mọi nước đi tiếp theo đều không hợp l�
 
 ### Đỏ đến ô thắng
 
-Một quân Đỏ đi từ `A8` vào `A9`.
+Một quân Đỏ đi từ `H1` vào `I1`.
 
 ```text
-Đỏ -> A9 -> Đỏ thắng
+Đỏ -> I1 -> Đỏ thắng
 ```
 
 ### Xanh đến ô thắng
 
-Một quân Xanh đi từ `I2` vào `I1`.
+Một quân Xanh đi từ `B9` vào `A9`.
 
 ```text
-Xanh -> I1 -> Xanh thắng
+Xanh -> A9 -> Xanh thắng
 ```
 
 ### Ăn quân cuối cùng
@@ -396,7 +396,7 @@ Luật này chỉ áp dụng khi ván chưa kết thúc và không thay đổi l
 
 ## 15. Đặc tả ngắn gọn
 
-> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng A9; ghế B màu Xanh đi sau và có ô thắng I1. Mỗi người có 9 quân gồm 3 Đấm, 3 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi chỉ được di chuyển một quân của mình đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại. Nếu ô đích có quân đối phương khác loại, Đấm thắng Kéo, Kéo thắng Lá và Lá thắng Đấm; quân thắng chiếm ô còn quân thua bị loại. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, khi đối phương tới lượt nhưng không còn nước đi hợp lệ, hoặc khi đồng hồ đối phương hết. Mỗi ghế có 10 phút cho cả ván; nước đi không hợp lệ không chuyển lượt hay dừng đồng hồ. Mất kết nối được giữ ghế trong 60 giây để quay lại, quá hạn thì đối thủ thắng. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
+> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng I1; ghế B màu Xanh đi sau và có ô thắng A9. Mỗi người có 9 quân gồm 3 Đấm, 3 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi chỉ được di chuyển một quân của mình đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại. Nếu ô đích có quân đối phương khác loại, Đấm thắng Kéo, Kéo thắng Lá và Lá thắng Đấm; quân thắng chiếm ô còn quân thua bị loại. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, khi đối phương tới lượt nhưng không còn nước đi hợp lệ, hoặc khi đồng hồ đối phương hết. Mỗi ghế có 10 phút cho cả ván; nước đi không hợp lệ không chuyển lượt hay dừng đồng hồ. Mất kết nối được giữ ghế trong 60 giây để quay lại, quá hạn thì đối thủ thắng. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
 
 ---
 
@@ -405,8 +405,8 @@ Luật này chỉ áp dụng khi ván chưa kết thúc và không thay đổi l
 ```text
 BÀN CỜ:          9 x 9
 MỖI Ô:           Tối đa 1 quân
-GHẾ A:           Đỏ, đi trước, thắng tại A9
-GHẾ B:           Xanh, đi sau, thắng tại I1
+GHẾ A:           Đỏ, đi trước, thắng tại I1
+GHẾ B:           Xanh, đi sau, thắng tại A9
 QUÂN MỖI BÊN:    3 Đấm, 3 Lá, 3 Kéo
 DI CHUYỂN:       Đúng 1 ô, 8 hướng
 KHẮC CHẾ:        Đấm > Kéo > Lá > Đấm

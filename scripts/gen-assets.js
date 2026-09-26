@@ -23,15 +23,15 @@ function chunk(type, data) {
   return Buffer.concat([len, t, data, crc]);
 }
 
-function encodePng(pixels) {
-  const raw = Buffer.alloc((SIZE * 4 + 1) * SIZE);
-  for (let y = 0; y < SIZE; y += 1) {
-    raw[y * (SIZE * 4 + 1)] = 0;
-    pixels.copy(raw, y * (SIZE * 4 + 1) + 1, y * SIZE * 4, (y + 1) * SIZE * 4);
+function encodePng(pixels, width = SIZE, height = SIZE) {
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    raw[y * (width * 4 + 1)] = 0;
+    pixels.copy(raw, y * (width * 4 + 1) + 1, y * width * 4, (y + 1) * width * 4);
   }
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(SIZE, 0);
-  ihdr.writeUInt32BE(SIZE, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;
   ihdr[9] = 6;
   const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -171,7 +171,22 @@ function drawKeo() {
 
 const dir = path.join(__dirname, "..", "assets");
 fs.mkdirSync(dir, { recursive: true });
-fs.writeFileSync(path.join(dir, "dam.png"), encodePng(drawDam()));
-fs.writeFileSync(path.join(dir, "la.png"), encodePng(drawLa()));
-fs.writeFileSync(path.join(dir, "keo.png"), encodePng(drawKeo()));
-console.log("Wrote assets/dam.png la.png keo.png");
+const dam = drawDam();
+const la = drawLa();
+const keo = drawKeo();
+const atlas = Buffer.alloc(SIZE * 3 * SIZE * 4);
+for (const [index, tile] of [dam, la, keo].entries()) {
+  for (let y = 0; y < SIZE; y += 1) {
+    tile.copy(
+      atlas,
+      (y * SIZE * 3 + index * SIZE) * 4,
+      y * SIZE * 4,
+      (y + 1) * SIZE * 4
+    );
+  }
+}
+fs.writeFileSync(path.join(dir, "dam.png"), encodePng(dam));
+fs.writeFileSync(path.join(dir, "la.png"), encodePng(la));
+fs.writeFileSync(path.join(dir, "keo.png"), encodePng(keo));
+fs.writeFileSync(path.join(dir, "rps-atlas.png"), encodePng(atlas, SIZE * 3, SIZE));
+console.log("Wrote assets/dam.png la.png keo.png rps-atlas.png");

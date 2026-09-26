@@ -4,12 +4,11 @@ Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá h
 
 **Demo online:** [https://ottv2.tail05145a.ts.net/](https://ottv2.tail05145a.ts.net/)
 
-- Người A (Đỏ) thắng trên **a9**. Người B (Xanh) thắng trên **i1**.
+- Người A (Đỏ) thắng trên **i1**. Người B (Xanh) thắng trên **a9**.
 - Đi như vua cờ vua: 8 hướng, 1 ô.
 - Cùng loại khác phe: nước đi bị từ chối; mỗi ô chỉ có một quân.
 - Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
-- Đường chéo a1–i9 là dải phân cách: không quân nào đứng trên đó khi bắt đầu.
-- Mỗi bên triển khai ba cánh Đấm–Lá–Kéo phản chiếu qua đường chéo và cách ranh giới ít nhất 3 lớp, nên không bên nào chạm dải phân cách ở nước đầu.
+- Đội hình Duel theo `Rule.md`: A ở A3:C5; B là ảnh xoay 180 độ ở I7:G5.
 
 ## Chạy
 
@@ -52,9 +51,11 @@ Tài liệu thư viện kết nối: [http://localhost:3000/playfull.html](http:
 | Vòng ăn | Đấm > Kéo > Lá > Đấm |
 | Di chuyển | 1 ô, 8 hướng; không ra ngoài bàn; không vào ô có quân cùng phe |
 | Cùng loại | Không được đi vào ô có quân đối phương cùng loại |
-| Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
+| Ô thắng | A: i1 · B: a9 — chỉ quân của chính mình |
 | Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
-| Thế trận | A và B ở hai phía đường chéo a1–i9, phản chiếu qua đường chéo; ba cánh quân cách ranh giới ít nhất 3 lớp |
+| Hết nước | Người tới lượt không còn nước hợp lệ → người vừa đi thắng |
+| Hết giờ | Đồng hồ người chơi về 0 → đối thủ thắng |
+| Thế trận | A ở A3:C5; B xoay 180 độ ở I7:G5; không đặt quân sẵn trên I1/A9 |
 | Đồng hồ | 10 phút mỗi ghế; server quyết định timeout |
 | Kết nối lại | Grace 60 giây; `leave` xử thua ngay, `close` giữ ghế |
 
@@ -75,7 +76,7 @@ index.html         Giao diện
 game.js            Sảnh, bàn, chế độ chơi
 style.css          Bố cục
 tokens.css         Màu, chữ, nhịp
-assets/            Icon Đấm, Lá, Kéo
+assets/            Icon quân và sprite sheet rps-atlas.png
 tests/             Luật và phòng
 scripts/gen-assets.js
 ```
@@ -91,6 +92,13 @@ npm test
 `tests/rules.test.js` — xếp quân, đối xứng, tám hướng, nước đi, ăn, đòn thua, ô thắng, no-moves và clock.
 
 `tests/room.test.js` — hai ghế, sai lượt, rời phòng, lọc tên, Arena 4 ghế, khán giả, chat.
+
+## UI / hiệu năng
+
+- Bàn giữ sẵn 81 button cell và tái sử dụng khi render lại.
+- Icon quân dùng `assets/rps-atlas.png`; `npm run assets` sinh lại cả icon đơn và atlas.
+- Ô nhìn co theo viewport, nhưng hitbox mobile giữ tối thiểu 44×44 px và click được quy đổi theo tọa độ bàn.
+- Âm thanh thao tác có thể bật/tắt ngay trên thanh bàn; lựa chọn lưu trong trình duyệt.
 
 ## Biến môi trường
 
@@ -110,4 +118,4 @@ pf.chat("GG");
 pf.react("fire");
 ```
 
-Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `error`, `hello`, `rooms`, `joined`, `state`, `chat`, `react`, `gameover`, `left`.
+Sự kiện: `open`, `close`, `reconnecting`, `resumed`, `resumeFailed`, `error`, `hello`, `rooms`, `joined`, `state`, `chat`, `react`, `gameover`, `left`.

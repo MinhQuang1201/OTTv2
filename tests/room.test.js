@@ -58,9 +58,9 @@ function roomWithPlayers(clock) {
 }
 
 describe("room", () => {
-  it("seats two players and accepts the strategic opening I4 to H3", () => {
+  it("seats two players and accepts the canonical opening A3 to B2", () => {
     const { room, a } = roomWithPlayers();
-    const result = room.handleMove(a, rules.parseSquare("i4"), rules.parseSquare("h3"));
+    const result = room.handleMove(a, rules.parseSquare("a3"), rules.parseSquare("b2"));
     assert.equal(result.ok, true);
     assert.equal(room.state.turn, "B");
     assert.equal(room.state.clock.runningSeat, "B");
@@ -68,7 +68,7 @@ describe("room", () => {
 
   it("rejects a move from the player who is not on turn", () => {
     const { room, b } = roomWithPlayers();
-    const result = room.handleMove(b, rules.parseSquare("a4"), rules.parseSquare("a3"));
+    const result = room.handleMove(b, rules.parseSquare("i7"), rules.parseSquare("i8"));
     assert.equal(result.ok, false);
     assert.equal(room.state.turn, "A");
     assert.equal(room.state.clock.runningSeat, "A");
@@ -78,10 +78,10 @@ describe("room", () => {
     const cases = [
       {
         pieces: [
-          { id: "A-dam-0", player: "A", type: "dam", x: 0, y: 7 },
+          { id: "A-dam-0", player: "A", type: "dam", x: 7, y: 0 },
           { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 5 }
         ],
-        from: "a8", to: "a9", winner: "A", reason: "goal"
+        from: "h1", to: "i1", winner: "A", reason: "goal"
       },
       {
         pieces: [
@@ -119,7 +119,7 @@ describe("room", () => {
     const clock = fakeClock(1000);
     const { room, a } = roomWithPlayers(clock);
     clock.advance(1250);
-    const result = room.handleMove(a, rules.parseSquare("i4"), rules.parseSquare("h3"));
+    const result = room.handleMove(a, rules.parseSquare("a3"), rules.parseSquare("b2"));
     assert.equal(result.ok, true);
     assert.equal(room.state.clock.remainingMs.A, config.TIME_CONTROL.initialMs - 1250);
     assert.equal(room.state.clock.runningSeat, "B");
@@ -178,6 +178,23 @@ describe("room", () => {
     const before = JSON.stringify(room.state);
     room.removePlayer(room.players.A.ws);
     assert.equal(JSON.stringify(room.state), before);
+  });
+
+  it("resolves simultaneous reconnect expirations instead of deadlocking the room", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    room.removePlayer(a);
+    room.removePlayer(b);
+
+    assert.equal(room.players.A.reconnectDeadlineMs, config.TIME_CONTROL.reconnectGraceMs);
+    assert.equal(room.players.B.reconnectDeadlineMs, config.TIME_CONTROL.reconnectGraceMs);
+    clock.advance(config.TIME_CONTROL.reconnectGraceMs);
+
+    assert.equal(room.state.winner, "B");
+    assert.equal(room.state.reason, "disconnect_timeout");
+    assert.equal(room.status, "done");
+    assert.equal(room.state.clock.runningSeat, null);
+    assert.equal(clock.pending(), 0);
   });
 
   it("treats explicit leave as immediate loss", () => {
@@ -273,11 +290,48 @@ describe("arena room", () => {
     const chat = room.handleChat(a, "<b>xin chào</b>");
     assert.equal(chat.ok, true);
     assert.equal(chat.message.text, "xin chào");
-    const from = rules.parseSquare("i4");
-    const to = rules.parseSquare("h3");
+    const from = rules.parseSquare("a3");
+    const to = rules.parseSquare("b2");
     const res = room.handleMove(a, from, to);
     assert.equal(res.ok, true);
     assert.equal(room.history.length, 1);
     assert.equal(room.history[0].seat, "A");
+  });
+
+  it("keeps the full move history so replay remains correct beyond 200 plies", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    room.cancelClockDeadline();
+    room.state = rules.createEmptyState("duel");
+    room.state.pieces = [
+      { id: "A-dam-0", player: "A", type: "dam", x: 4, y: 4 },
+      { id: "B-keo-0", player: "B", type: "keo", x: 4, y: 6 }
+    ];
+    room.state.turn = "A";
+    room.state.clock.runningSeat = "A";
+    room.clockAnchorMs = clock.now();
+    room.history = [];
+
+    for (let i = 0; i < 101; i += 1) {
+      const aForward = i % 2 === 0;
+      const resultA = room.handleMove(
+        a,
+        rules.parseSquare(aForward ? "e5" : "f5"),
+        rules.parseSquare(aForward ? "f5" : "e5")
+      );
+      assert.equal(resultA.ok, true);
+      if (i === 100) break;
+      const bForward = i % 2 === 0;
+      const resultB = room.handleMove(
+        b,
+        rules.parseSquare(bForward ? "e7" : "f7"),
+        rules.parseSquare(bForward ? "f7" : "e7")
+      );
+      assert.equal(resultB.ok, true);
+    }
+
+    assert.equal(room.history.length, 201);
+    assert.equal(room.payload().history.length, 201);
+    assert.equal(room.history[0].from.x, 4);
   });
 });
