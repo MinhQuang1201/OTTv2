@@ -44,7 +44,8 @@
 .quiet:hover:not(:disabled) { color: var(--ui-text); background: var(--ui-surface-2); }
 
 .danger {
-  color: #fff;
+  /* Dark ink on coral keeps the destructive action at AA contrast. */
+  color: var(--ui-surface-0);
   background: var(--ui-danger);
 }
 
@@ -132,6 +133,7 @@
 .dialogClose { flex: 0 0 auto; }
 
 .spinner {
+  display: inline-block;
   width: 1.25rem;
   height: 1.25rem;
   border: 3px solid var(--ui-line-strong);

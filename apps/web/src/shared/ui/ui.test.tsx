@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -97,6 +97,42 @@ describe("shared UI primitives", () => {
     expect(screen.getByRole("dialog", { name: "Move confirmation" })).toBeInTheDocument();
   });
 
+  it("contains keyboard focus in a dialog and restores focus to its trigger", async () => {
+    const user = userEvent.setup();
+
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open dialog</button>
+          <Dialog open={open} title="Turn details" onClose={() => setOpen(false)}>
+            <button>Confirm turn</button>
+          </Dialog>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Open dialog" });
+    await user.click(trigger);
+    const close = screen.getByRole("button", { name: /close/i });
+    const confirm = screen.getByRole("button", { name: "Confirm turn" });
+    expect(close).toHaveFocus();
+
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("gives an unnamed dialog a safe accessible fallback name", () => {
+    render(<Dialog open onClose={() => undefined}><p>Details</p></Dialog>);
+    expect(screen.getByRole("dialog", { name: "Dialog" })).toBeInTheDocument();
+  });
+
   it("bounds toast history and removes a toast after its lifetime", () => {
     vi.useFakeTimers();
 
@@ -120,6 +156,48 @@ describe("shared UI primitives", () => {
       vi.advanceTimersByTime(2200);
     });
     expect(screen.queryByText("Third")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("clears timers for evicted toasts and on unmount", () => {
+    vi.useFakeTimers();
+
+    function Harness() {
+      const { toasts, pushToast } = useToasts({ maxToasts: 2, duration: 2200 });
+      useEffect(() => {
+        pushToast("First");
+        pushToast("Second");
+        pushToast("Third");
+      }, [pushToast]);
+      return <ToastRegion toasts={toasts} onDismiss={() => undefined} />;
+    }
+
+    const { unmount } = render(<Harness />);
+    expect(vi.getTimerCount()).toBe(2);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("trims the queue when maxToasts changes", () => {
+    vi.useFakeTimers();
+
+    function Harness({ maxToasts }: { maxToasts: number }) {
+      const { toasts, pushToast } = useToasts({ maxToasts, duration: 2200 });
+      useEffect(() => {
+        if (toasts.length === 0) {
+          pushToast("First");
+          pushToast("Second");
+        }
+      }, [pushToast, toasts.length]);
+      return <ToastRegion toasts={toasts} onDismiss={() => undefined} />;
+    }
+
+    const view = render(<Harness maxToasts={2} />);
+    expect(screen.getByRole("status")).toHaveTextContent("First");
+    view.rerender(<Harness maxToasts={1} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Second");
+    expect(screen.getByRole("status")).not.toHaveTextContent("First");
     vi.useRealTimers();
   });
 });

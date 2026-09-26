@@ -24,4 +24,11 @@ describe("PieceIcon", () => {
     render(<PieceIcon type="keo" title="Kéo piece" />);
     expect(screen.getByRole("img", { name: "Kéo piece" })).toBeInTheDocument();
   });
+
+  it("forwards a ref and preserves a caller-provided accessible label", () => {
+    const ref = { current: null as SVGSVGElement | null };
+    render(<PieceIcon ref={ref} type="la" aria-label="Leaf move" />);
+    expect(ref.current).toBeInstanceOf(SVGSVGElement);
+    expect(screen.getByRole("img", { name: "Leaf move" })).toBeInTheDocument();
+  });
 });

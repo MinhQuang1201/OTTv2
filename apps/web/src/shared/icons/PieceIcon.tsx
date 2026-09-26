@@ -1,4 +1,4 @@
-import { useId, type SVGProps } from "react";
+import { forwardRef, useId, type SVGProps } from "react";
 
 export type PieceType = "dam" | "la" | "keo";
 
@@ -13,18 +13,20 @@ export interface PieceIconProps extends Omit<SVGProps<SVGSVGElement>, "title"> {
   title?: string;
   decorative?: boolean;
 }
-export function PieceIcon({ type, title, decorative = false, ...props }: PieceIconProps) {
+export const PieceIcon = forwardRef<SVGSVGElement, PieceIconProps>(function PieceIcon({ type, title, decorative = false, "aria-label": ariaLabel, ...props }, ref) {
   const titleId = useId();
   const accessibleTitle = title ?? labels[type];
   return (
     <svg
       {...props}
+      ref={ref}
       viewBox="0 0 24 24"
       width={props.width ?? 24}
       height={props.height ?? 24}
       role={decorative ? undefined : "img"}
       aria-hidden={decorative ? "true" : undefined}
-      aria-labelledby={decorative ? undefined : titleId}
+      aria-label={decorative ? undefined : ariaLabel}
+      aria-labelledby={decorative || ariaLabel ? undefined : titleId}
       focusable="false"
     >
       {!decorative ? <title id={titleId}>{accessibleTitle}</title> : null}
@@ -46,4 +48,4 @@ export function PieceIcon({ type, title, decorative = false, ...props }: PieceIc
       ) : null}
     </svg>
   );
-}
+});
