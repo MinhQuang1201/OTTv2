@@ -1,0 +1,59 @@
+.gameScreen { width: min(100%, 1260px); margin: 0 auto; }
+.topBar { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-4); padding: var(--ui-space-3) var(--ui-space-4); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-panel); background: var(--ui-surface-1); box-shadow: var(--ui-shadow-panel); }
+.topBar > div:first-child { display: grid; gap: 2px; }
+.kicker { color: var(--ui-text-subtle); font-size: var(--ui-text-xs); text-transform: uppercase; letter-spacing: .1em; }
+.topBarActions { display: flex; align-items: center; gap: var(--ui-space-3); }
+.gameLayout { display: grid; grid-template-columns: minmax(160px, 220px) minmax(480px, 680px) minmax(220px, 280px); gap: var(--ui-space-5); align-items: center; margin-top: var(--ui-space-5); }
+.players { display: grid; gap: var(--ui-space-3); align-self: stretch; align-content: space-between; }
+.playerPanel { display: grid; gap: var(--ui-space-3); padding: var(--ui-space-4); border: 1px solid var(--ui-line); border-left: 3px solid var(--ui-line-strong); border-radius: var(--ui-radius-panel); background: var(--ui-surface-1); box-shadow: var(--ui-shadow-panel); }
+.playerPanel.seatA { border-left-color: var(--ui-seat-a); }
+.playerPanel.seatB { border-left-color: var(--ui-seat-b); }
+.playerActive { border-color: color-mix(in srgb, var(--ui-focus) 60%, var(--ui-line)); }
+.playerIdentity { display: flex; align-items: center; gap: var(--ui-space-3); }
+.seatMark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--ui-surface-raised); font-weight: 900; }
+.seatA .seatMark { color: var(--ui-seat-a); }
+.seatB .seatMark { color: var(--ui-seat-b); }
+.playerName { display: block; }
+.playerMeta { display: block; margin-top: 2px; color: var(--ui-text-muted); font-size: var(--ui-text-xs); }
+.clock { font: 800 1.65rem/1 var(--ui-font-mono); letter-spacing: -.05em; }
+.clockWarning { color: var(--ui-danger); }
+.counts { display: flex; gap: var(--ui-space-2); color: var(--ui-text-muted); font: 700 var(--ui-text-sm)/1 var(--ui-font-mono); }
+.counts span { min-width: 24px; padding: 4px; border-radius: 4px; background: var(--ui-surface-2); text-align: center; }
+.boardColumn { display: grid; gap: var(--ui-space-3); justify-items: center; }
+.boardColumn h1 { margin: 0; font-size: var(--ui-text-lg); }
+.boardFrame { width: min(100%, 680px); padding: 0 var(--ui-space-4); }
+.boardCoordinatesTop, .boardCoordinatesBottom { display: grid; grid-template-columns: repeat(9, 1fr); padding-inline: 2px; color: var(--ui-text-subtle); font: 700 var(--ui-text-xs)/1 var(--ui-font-mono); text-align: center; }
+.boardCoordinatesTop { margin-bottom: 6px; }
+.boardCoordinatesBottom { margin-top: 6px; }
+.boardWithRanks { display: grid; grid-template-columns: 20px 1fr; gap: 6px; }
+.boardRanks { display: grid; grid-template-rows: repeat(9, 1fr); color: var(--ui-text-subtle); font: 700 var(--ui-text-xs)/1 var(--ui-font-mono); text-align: center; }
+.boardRanks span { display: grid; place-items: center; }
+.board { display: grid; grid-template-columns: repeat(9, 1fr); aspect-ratio: 1; overflow: hidden; border: 7px solid var(--ui-surface-2); border-radius: var(--ui-radius-panel); box-shadow: var(--ui-shadow-float); }
+.boardCell { position: relative; display: grid; place-items: center; min-width: 0; padding: 0; border: 0; border-radius: 0; color: var(--ui-text); transition: filter var(--ui-motion-fast) var(--ui-ease-standard), box-shadow var(--ui-motion-fast) var(--ui-ease-standard); }
+.boardCell:focus-visible { z-index: 2; outline: 3px solid var(--ui-focus); outline-offset: -3px; }
+.boardCell:not(:disabled):hover { filter: brightness(1.18); }
+.boardLight { background: var(--ui-board-light); }
+.boardDark { background: var(--ui-board-dark); }
+.goalA { background: var(--ui-goal-a); }
+.goalB { background: var(--ui-goal-b); }
+.cellSelected { box-shadow: inset 0 0 0 4px var(--ui-selection); }
+.cellLegal { box-shadow: inset 0 0 0 3px var(--ui-legal); }
+.legalDot { width: 22%; aspect-ratio: 1; border-radius: 50%; background: var(--ui-legal); opacity: .8; }
+.piece { display: grid; place-items: center; width: 72%; aspect-ratio: 1; border: 2px solid currentColor; border-radius: 50%; color: var(--ui-seat-a); background: color-mix(in srgb, var(--ui-seat-a) 16%, transparent); box-shadow: 0 5px 14px rgb(0 0 0 / 28%); }
+.pieceB { color: var(--ui-seat-b); background: color-mix(in srgb, var(--ui-seat-b) 16%, transparent); }
+.pieceLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.pieceCompact { width: 40px; }
+.turnStatus { min-height: 24px; margin: 0; color: var(--ui-text-muted); text-align: center; }
+.sideRail { align-self: stretch; min-height: 240px; padding: var(--ui-space-4); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-panel); background: var(--ui-surface-1); box-shadow: var(--ui-shadow-panel); }
+.sideRail h2 { margin: 0; font-size: var(--ui-text-md); }
+.emptyRail { color: var(--ui-text-subtle); font-size: var(--ui-text-sm); }
+.history { display: grid; gap: var(--ui-space-2); padding: 0; list-style: none; color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+.history li { display: flex; gap: var(--ui-space-2); }
+.history li span { color: var(--ui-text-subtle); font-family: var(--ui-font-mono); }
+.effects { animation: game-pop 220ms var(--ui-ease-standard); }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.resultBackdrop { z-index: var(--ui-z-dialog); }
+@keyframes game-pop { from { transform: scale(.96); opacity: .7; } to { transform: scale(1); opacity: 1; } }
+@media (max-width: 1080px) { .gameLayout { grid-template-columns: 160px minmax(420px, 1fr); } .sideRail { grid-column: 2; } }
+@media (max-width: 760px) { .gameLayout { grid-template-columns: 1fr; } .players { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sideRail { grid-column: auto; } .boardFrame { padding-inline: 0; } }
+@media (prefers-reduced-motion: reduce) { .effects, .boardCell { animation: none; transition: none; } }

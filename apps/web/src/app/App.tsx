@@ -6,6 +6,8 @@ import { ScenarioSwitcher } from "../demo/ScenarioSwitcher";
 import { DEFAULT_DEMO_SCENARIO, isDemoScenario, useDemoScenario } from "../demo/useDemoScenario";
 import { Panel } from "../shared/ui/Panel";
 import { Spinner } from "../shared/ui/Spinner";
+import { LobbyScreen } from "../features/lobby/LobbyScreen";
+import { GameScreen } from "../features/game/GameScreen";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import styles from "./app.module.css";
@@ -159,7 +161,14 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
               onRetry={onRetry}
               onLobby={onLobby}
             >
-              <AppScreen state={appState} />
+              <AppScreen
+                state={appState}
+                onLobby={onLobby}
+                onStartLocal={() => demo.setScenario("game-active-a")}
+                onStartAi={() => demo.setScenario("game-ai-thinking")}
+                onCreateOnline={() => demo.setScenario("game-waiting")}
+                onJoinOnline={() => demo.setScenario("game-active-a")}
+              />
             </ScreenBoundary>
           </div>
         </div>
@@ -168,13 +177,27 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
   );
 }
 
-function AppScreen({ state }: { readonly state: AppState }) {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline }: {
+  readonly state: AppState;
+  readonly onLobby: () => void;
+  readonly onStartLocal: (names: [string, string]) => void;
+  readonly onStartAi: (name: string) => void;
+  readonly onCreateOnline: (name: string) => void;
+  readonly onJoinOnline: (name: string, roomId: string) => void;
+}) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error") return null;
   if (state.status === "preparing") return <PlaceholderScreen heading="Đang chuẩn bị" state={state} detail="Đang kết nối phiên demo." />;
-  if (state.status === "lobby") return <PlaceholderScreen heading="Sảnh" state={state} detail="Chọn một phòng hoặc bắt đầu ván mới." />;
-  if (state.status === "playing") return <PlaceholderScreen heading="Bàn chơi" state={state} detail="Bàn cờ và điều khiển ván chơi sẽ được Task 7 thay thế." />;
-  return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả sẽ được Task 7 thay thế." />;
+  if (state.status === "lobby") return <LobbyScreen
+    onlineAvailability={state.snapshot.connection === "unavailable" ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
+    waitingRooms={state.snapshot.connection === "unavailable" ? { status: "unavailable", message: "Online hiện không khả dụng." } : { status: "ready", rooms: state.snapshot.waitingRooms ?? [] }}
+    onStartLocal={onStartLocal}
+    onStartAi={onStartAi}
+    onCreateOnline={onCreateOnline}
+    onJoinOnline={onJoinOnline}
+  />;
+  if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
+  return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
 }
 
 function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" }> }) {

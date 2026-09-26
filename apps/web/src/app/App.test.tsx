@@ -48,13 +48,13 @@ describe("App shell lifecycle", () => {
     render(<App initialScenario="lobby-default" />);
 
     expect(screen.getByRole("main", { name: /OTTv2/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Sảnh/i })).toBeInTheDocument();
-    expect(screen.getByText("lobby-default", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Kịch bản demo/i })).toHaveValue("lobby-default");
   });
 
   it.each([
     ["lobby-online-connecting", /Đang chuẩn bị/i, "preparing"],
-    ["lobby-online-unavailable", /Sảnh/i, "lobby"],
+    ["lobby-online-unavailable", /OTTv2/i, "lobby"],
     ["game-active-a", /Bàn chơi/i, "playing"],
     ["result-goal", /Kết quả/i, "finished"],
   ] as const)("routes %s to the %s screen", (scenario, heading, state) => {
@@ -70,8 +70,8 @@ describe("App shell lifecycle", () => {
   it("keeps an unavailable online lobby usable instead of showing the error boundary", () => {
     render(<App initialScenario="lobby-online-unavailable" />);
 
-    expect(screen.getByRole("heading", { name: /Sảnh/i })).toBeInTheDocument();
-    expect(screen.getByText("unavailable", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/không khả dụng/i);
     expect(screen.queryByRole("heading", { name: /Đã xảy ra sự cố/i })).not.toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("App shell lifecycle", () => {
     expect(screen.queryByText(/session_failed/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
-    expect(screen.getByRole("heading", { name: /Sảnh/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
   });
 
   it("disposes sessions when replacing one and returning to the lobby", async () => {
@@ -112,7 +112,7 @@ describe("App shell lifecycle", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Về sảnh/i })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
     expect(sessions[1]!.controls.dispose).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("heading", { name: /Sảnh/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
   });
 
   it("exposes the public lifecycle sequence from a fake session", async () => {
@@ -175,6 +175,6 @@ describe("App shell lifecycle", () => {
   it("falls back safely when the requested scenario is invalid", () => {
     render(<App initialScenario={"not-a-scenario" as never} />);
 
-    expect(screen.getByRole("heading", { name: /Sảnh/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
   });
 });
