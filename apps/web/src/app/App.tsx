@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { DemoScenario, GameSession, GameSnapshot, SessionErrorView } from "../sessions/contract";
+import { useEffect, useReducer, useState } from "react";
+import type { DemoScenario, GameSession, GameResultView, GameSnapshot, SessionErrorView } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import { ScenarioSwitcher } from "../demo/ScenarioSwitcher";
 import { DEFAULT_DEMO_SCENARIO, isDemoScenario, useDemoScenario } from "../demo/useDemoScenario";
@@ -14,7 +14,7 @@ export type AppState =
   | { readonly status: "lobby"; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "preparing"; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "playing"; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
-  | { readonly status: "finished"; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
+  | { readonly status: "finished"; readonly session: GameSession; readonly snapshot: GameSnapshot & { readonly result: GameResultView }; readonly scenario: DemoScenario }
   | { readonly status: "error"; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly error: SessionErrorView; readonly scenario: DemoScenario };
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
@@ -34,48 +34,68 @@ function safeSessionError(error: unknown): SessionErrorView {
 }
 
 function stateForSnapshot(session: GameSession, scenario: DemoScenario, snapshot: GameSnapshot): AppState {
-  if (snapshot.error) return { status: "error", session, snapshot, error: snapshot.error, scenario };
-  if (snapshot.result || snapshot.phase === "finished" || scenario.startsWith("result-")) return { status: "finished", session, snapshot, scenario };
-  if (scenario.startsWith("lobby-")) {
-    return snapshot.phase === "preparing"
-      ? { status: "preparing", session, snapshot, scenario }
-      : { status: "lobby", session, snapshot, scenario };
+  if (snapshot.phase === "finished") {
+    if (snapshot.result) return { status: "finished", session, snapshot: snapshot as GameSnapshot & { readonly result: GameResultView }, scenario };
+    return { status: "error", session, snapshot, error: { code: "session_failed", message: "Kết quả ván chơi không hợp lệ.", retryable: false }, scenario };
   }
-  if (scenario.startsWith("game-")) return { status: "playing", session, snapshot, scenario };
-  return { status: "lobby", session, snapshot, scenario };
+  // Idle/preparing are lobby lifecycle phases. This intentionally keeps an unavailable
+  // online lobby usable while still surfacing errors emitted during an active game.
+  if (snapshot.phase === "idle") return { status: "lobby", session, snapshot, scenario };
+  if (snapshot.phase === "preparing") return { status: "preparing", session, snapshot, scenario };
+  if (snapshot.phase === "error") {
+    return { status: "error", session, snapshot, error: snapshot.error ?? { code: "session_failed", message: "Không thể đồng bộ ván chơi.", retryable: true }, scenario };
+  }
+  return { status: "playing", session, snapshot, scenario };
+}
+
+type LifecycleAction =
+  | { readonly type: "boot" }
+  | { readonly type: "snapshot"; readonly session: GameSession; readonly scenario: DemoScenario; readonly snapshot: GameSnapshot }
+  | { readonly type: "error"; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly scenario: DemoScenario; readonly error: SessionErrorView };
+
+function appStateReducer(_state: AppState, action: LifecycleAction): AppState {
+  if (action.type === "boot") return { status: "boot" };
+  if (action.type === "error") return { status: "error", session: action.session, snapshot: action.snapshot, error: action.error, scenario: action.scenario };
+  return stateForSnapshot(action.session, action.scenario, action.snapshot);
 }
 
 export interface AppProps {
   readonly initialScenario?: unknown;
   readonly sessionFactory?: SessionFactory;
+  readonly onStateChange?: (state: AppState) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onStateChange }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
-  const [appState, setAppState] = useState<AppState>({ status: "boot" });
+  const [appState, dispatch] = useReducer(appStateReducer, { status: "boot" });
+
+  useEffect(() => {
+    onStateChange?.(appState);
+  }, [appState.status, onStateChange]);
 
   useEffect(() => {
     let active = true;
     let session: GameSession | null = null;
     let unsubscribe: () => void = () => undefined;
+    dispatch({ type: "boot" });
     try {
       session = sessionFactory(demo.scenario);
       const publish = () => {
         if (!active || !session) return;
         try {
-          setAppState(stateForSnapshot(session, demo.scenario, session.getSnapshot()));
+          dispatch({ type: "snapshot", session, scenario: demo.scenario, snapshot: session.getSnapshot() });
         } catch (error) {
-          if (active) setAppState({ status: "error", session, snapshot: null, error: safeSessionError(error), scenario: demo.scenario });
+          if (active) dispatch({ type: "error", session, snapshot: null, error: safeSessionError(error), scenario: demo.scenario });
         }
       };
       unsubscribe = session.subscribe(publish);
       publish();
       void session.start({ mode: "demo", scenario: demo.scenario }).catch((error: unknown) => {
-        if (active) setAppState({ status: "error", session, snapshot: session?.getSnapshot() ?? null, error: safeSessionError(error), scenario: demo.scenario });
+        if (active) dispatch({ type: "error", session, snapshot: session?.getSnapshot() ?? null, error: safeSessionError(error), scenario: demo.scenario });
       });
     } catch (error) {
-      if (active) setAppState({ status: "error", session, snapshot: null, error: safeSessionError(error), scenario: demo.scenario });
+      if (active) dispatch({ type: "error", session, snapshot: null, error: safeSessionError(error), scenario: demo.scenario });
     }
     return () => {
       active = false;
@@ -126,6 +146,7 @@ function PlaceholderScreen({ heading, detail, state }: { readonly heading: strin
       <dl>
         <dt>Kịch bản</dt><dd>{state.scenario}</dd>
         <dt>Trạng thái phiên</dt><dd>{state.snapshot.phase}</dd>
+        <dt>Kết nối</dt><dd data-connection={state.snapshot.connection}>{state.snapshot.connection}</dd>
         <dt>Chế độ</dt><dd>{state.snapshot.mode}</dd>
       </dl>
     </Panel>
