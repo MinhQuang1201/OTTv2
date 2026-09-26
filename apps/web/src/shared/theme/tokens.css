@@ -1,0 +1,68 @@
+:root {
+  color-scheme: dark;
+
+  /* Surfaces and text: a graphite workbench with crisp print-like contrast. */
+  --ui-surface-0: #111419;
+  --ui-surface-1: #191d24;
+  --ui-surface-2: #232934;
+  --ui-surface-raised: #2b323e;
+  --ui-text: #f4f6f8;
+  --ui-text-muted: #a8b1be;
+  --ui-text-subtle: #75808f;
+  --ui-line: #3a4452;
+  --ui-line-strong: #596678;
+
+  /* Player and board semantics. Do not repeat these seat values in features. */
+  --ui-seat-a: #ed6584;
+  --ui-seat-a-strong: #c84668;
+  --ui-seat-b: #55d4e8;
+  --ui-seat-b-strong: #25aebf;
+  --ui-board-light: #2d3540;
+  --ui-board-dark: #222a34;
+  --ui-goal-a: color-mix(in srgb, var(--ui-seat-a) 18%, var(--ui-surface-1));
+  --ui-goal-b: color-mix(in srgb, var(--ui-seat-b) 18%, var(--ui-surface-1));
+  --ui-selection: #f4b942;
+  --ui-legal: #69dc9b;
+  --ui-danger: #ff6c6c;
+  --ui-focus: #f2c15b;
+
+  /* 4px rhythm. */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+  --ui-space-10: 40px;
+  --ui-space-12: 48px;
+
+  --ui-radius-cell: 4px;
+  --ui-radius-control: 8px;
+  --ui-radius-panel: 12px;
+  --ui-radius-pill: 999px;
+  --ui-shadow-panel: 0 12px 32px rgb(0 0 0 / 24%), inset 0 1px 0 rgb(255 255 255 / 4%);
+  --ui-shadow-float: 0 20px 56px rgb(0 0 0 / 40%);
+
+  --ui-font-display: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  --ui-font-mono: "Azeret Mono", "Cascadia Mono", ui-monospace, monospace;
+  --ui-text-xs: 0.75rem;
+  --ui-text-sm: 0.875rem;
+  --ui-text-md: 1rem;
+  --ui-text-lg: 1.25rem;
+  --ui-text-xl: 1.5rem;
+
+  --ui-board-min: min(92vw, 560px);
+  --ui-panel-max: 560px;
+  --ui-control-height: 44px;
+
+  --ui-motion-fast: 150ms;
+  --ui-motion-normal: 220ms;
+  --ui-motion-slow: 360ms;
+  --ui-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --ui-z-board: 1;
+  --ui-z-hud: 2;
+  --ui-z-toast: 20;
+  --ui-z-dialog: 30;
+}
