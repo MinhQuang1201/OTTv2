@@ -4,8 +4,9 @@
   <body>
     <h1>PlayHTML game adapter</h1>
     <p><code>playhtml-game-client.js</code> does not open a second connection or store game state in PlayHTML data primitives.</p>
-    <p><strong>Bootstrap unavailable:</strong> Task 1 has not proven a pinned PlayHTML worker connection API, so this page intentionally does not claim to connect.</p>
-    <p>When that proof exists, register <code>window.OTT_PLAYHTML_CONNECTION_FACTORY</code> before loading the game adapter. The factory must return an adapter with <code>connect()</code>, <code>send(message)</code>, <code>on(event, fn)</code>, and optional <code>close()</code>.</p>
+    <p><strong>Bootstrap unavailable by default:</strong> this page only connects when a verified public PlayHTML initializer, HTTPS control endpoint, and public custom-message channel are explicitly configured.</p>
+    <p>The browser calls the HTTPS control plane before initializing the game room. It never accepts a ticket in the URL or page data, and it never opens a raw WebSocket or PartySocket.</p>
+    <script src="vendor/playhtml-minimal/browser/runtime.js"></script>
     <script src="playhtml-bootstrap.js"></script>
     <script src="playhtml-game-client.js"></script>
   </body>

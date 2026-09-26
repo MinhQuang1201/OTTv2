@@ -63,7 +63,7 @@ rules.js           Luật thuần: đi, ăn, thắng
 ai.js              Máy chọn nước (thay thế được)
 room.js            Phòng, ghế A/B, trọng tài
 server.js          HTTP tĩnh, không xử lý game online
-playhtml-game-client.js Adapter lệnh authoritative PlayHTML/PartyKit
+playhtml-game-client.js Adapter lệnh authoritative PlayHTML/Worker
 playhtml-game.html Tài liệu adapter PlayHTML
 index.html         Giao diện
 game.js            Sảnh, bàn, chế độ chơi
@@ -90,13 +90,23 @@ npm test
 
 `PORT` — cổng HTTP static, mặc định `3000`.
 `OTT_PLAYHTML_HOST` — endpoint self-hosted dành cho adapter; không đặt secret trong frontend.
+`OTT_PLAYHTML_CONTROL_ENDPOINT` — HTTPS Worker control endpoint for create/list/join/resume; bỏ trống thì online unavailable.
 
-## Online qua PlayHTML/PartyKit
+## Online qua Cloudflare Worker
 
-Kiến trúc đích dùng worker PartyKit/PlayHTML đã pin và kiểm chứng. Khi và chỉ khi evidence gate cho phép, `window.OTT_PLAYHTML_CONNECTION_FACTORY` được bootstrap từ cùng connection PlayHTML đã xác minh; adapter gửi các lệnh `ott:*` và chuyển tiếp message `ott:*` do worker trả về.
+Kiến trúc online production duy nhất được cấu hình là Cloudflare Worker + Durable Objects trong `workers/wrangler.jsonc`. PartyKit legacy không còn là route deploy hoặc authority online. Các file `partykit/` và test tương ứng được giữ lại như tài liệu/coverage legacy cho các ràng buộc bảo mật, không được dùng để deploy production.
+
+Worker local/deploy commands:
+
+```bash
+npx wrangler dev --config workers/wrangler.jsonc
+npx wrangler deploy --config workers/wrangler.jsonc
+```
+
+Local demo dùng minimal browser fork trong `vendor/playhtml-minimal/browser/`: một YProvider kết nối Worker, chờ initial sync rồi gửi các lệnh `ott:*` qua custom-message channel. Playwright đã xác nhận hai browser context có thể tạo/tham gia phòng và đồng bộ một nước đi hợp lệ. Đây không phải full upstream PlayHTML bundle.
 
 Không dùng public PlayHTML host cho dữ liệu ván và không tạo WebSocket thứ hai. Static server chỉ phục vụ file tĩnh; authority online thuộc worker. Local và AI không phụ thuộc worker.
 
-Trạng thái rollout hiện tại: **BLOCKED**. Không có factory, WebSocket/PartySocket, polling, second PlayHTML session hoặc fallback transport nào được dùng để giả lập online. PartyKit `0.0.115` đã được kiểm tra: `Stub.socket()` chỉ trả `WebSocket` và `Server.onMessage` không có authenticated inter-party origin/route metadata. Direct game create bị từ chối, nhưng secure lobby-driven game initialization vẫn blocked; không thay bằng internal payload marker forgeable, client relay hoặc process map. UI phải báo online unavailable; local và AI vẫn dùng được. Không coi bridge/mock, unit test hoặc tài liệu là evidence runtime.
+Trạng thái production rollout: **BLOCKED**. Local demo path có runtime/two-browser evidence, nhưng Task 8 runtime/security matrix, Task 10 manual acceptance và deploy verification còn lại. Không suy rộng local demo thành production readiness. Local và AI modes vẫn hoạt động độc lập.
 
-**Gate bắt buộc trước production:** Task 4 phải có evidence trực tiếp cho lobby-to-game channel/metadata server-authenticated; Task 5 vẫn phải có evidence trực tiếp theo `docs/playhtml-upstream-lock.md`; initial sync và OTT phải đi cùng một verified connection; routing/lifecycle/persistence phải qua runtime integration; static host phải từ chối private paths kể cả case variants; và two-profile acceptance phải ghi nhận create/list/join, legal/invalid move, timeout, leave, disconnect/reload/resume, expiry, token isolation, local/AI fallback. Không đánh dấu gate hoặc acceptance PASS nếu scenario chưa chạy.
+**Còn lại trước production:** hoàn tất runtime/security/lifecycle matrix, manual acceptance (bao gồm timeout/reconnect/expiry và credential isolation), kiểm tra deploy và chỉ cập nhật status theo evidence đã thực sự thu được. Các mục này không cần để chạy demo local hai người.
