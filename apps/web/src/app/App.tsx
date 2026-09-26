@@ -187,7 +187,14 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error") return null;
-  if (state.status === "preparing") return <PlaceholderScreen heading="Đang chuẩn bị" state={state} detail="Đang kết nối phiên demo." />;
+  if (state.status === "preparing") return <LobbyScreen
+    onlineAvailability="connecting"
+    waitingRooms={{ status: "loading" }}
+    onStartLocal={onStartLocal}
+    onStartAi={onStartAi}
+    onCreateOnline={onCreateOnline}
+    onJoinOnline={onJoinOnline}
+  />;
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={state.snapshot.connection === "unavailable" ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={state.snapshot.connection === "unavailable" ? { status: "unavailable", message: "Online hiện không khả dụng." } : { status: "ready", rooms: state.snapshot.waitingRooms ?? [] }}
@@ -204,7 +211,7 @@ function PlaceholderScreen({ heading, detail, state }: { readonly heading: strin
   return (
     <Panel className={styles.screen}>
       <h1>{heading}</h1>
-      <p>{detail} <em>(điểm ghép tạm thời cho Task 6/7)</em></p>
+      <p>{detail}</p>
       <dl>
         <dt>Kịch bản</dt><dd>{state.scenario}</dd>
         <dt>Trạng thái phiên</dt><dd>{state.snapshot.phase}</dd>

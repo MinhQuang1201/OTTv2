@@ -9,13 +9,14 @@ describe("Board", () => {
   it("renders 81 coordinate-aware buttons and resolves legal moves", async () => {
     const user = userEvent.setup();
     const session = new DemoSession("game-active-a");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
     const onMove = vi.fn();
     render(<Board session={session} snapshot={session.getSnapshot()} onMove={onMove} />);
 
     expect(screen.getAllByRole("button", { name: /ô [A-I][1-9]/i })).toHaveLength(81);
     await user.click(screen.getByRole("button", { name: /ô A3.*Lá.*Người A/i }));
     expect(screen.getByRole("button", { name: /ô A2.*nước hợp lệ/i })).toBeInTheDocument();
-    expect(session.getLegalMoves).toBeDefined();
+    expect(getLegalMoves).toHaveBeenCalledWith({ x: 0, y: 2 });
     await user.click(screen.getByRole("button", { name: /ô A2.*nước hợp lệ/i }));
     expect(onMove).toHaveBeenCalledWith({ x: 0, y: 2 }, { x: 0, y: 1 });
   });

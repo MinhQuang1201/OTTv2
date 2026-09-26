@@ -53,7 +53,7 @@ describe("App shell lifecycle", () => {
   });
 
   it.each([
-    ["lobby-online-connecting", /Đang chuẩn bị/i, "preparing"],
+    ["lobby-online-connecting", /OTTv2/i, "preparing"],
     ["lobby-online-unavailable", /OTTv2/i, "lobby"],
     ["game-active-a", /Bàn chơi/i, "playing"],
     ["result-goal", /Kết quả/i, "finished"],
