@@ -21,7 +21,11 @@
   }
 
   function normalizeRoomId(roomId) {
-    return String(roomId || "").trim().toUpperCase();
+    const normalized = String(roomId || "").trim();
+    if (/^(?:ott-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalized)) {
+      return normalized.toLowerCase();
+    }
+    return normalized.toUpperCase();
   }
 
   function roomIdFrom(message, fallback) {
@@ -41,6 +45,9 @@
         throw new Error("PlayHTML game connection is not configured");
       }
       this.connectionFactory = options.connectionFactory;
+      this.controlRequest = options.controlRequest || null;
+      this.playhtmlBootstrap = options.playhtmlBootstrap || null;
+      this.playhtmlHost = options.playhtmlHost || null;
       this.storage = options.storage || storageFor(options.storageScope || "ottv2");
       this.handlers = Object.create(null);
       this.connection = null;
@@ -53,6 +60,7 @@
       this.reconnectAttempt = 0;
       this.intentionalClose = false;
       this.connectPromise = null;
+      this.attachingAllocation = false;
       this.autoResumeTimer = null;
       this.stateRevision = null;
       this.resumeRoomKey = "__last_room__";
@@ -78,7 +86,12 @@
         this.emit("error", { message: "Chưa kết nối máy chủ" });
         return false;
       }
-      this.connection.send({ __ott: true, type: "ott:" + type, ...(payload || {}) });
+      this.connection.send({
+        __ott: true,
+        type: "ott:" + type,
+        ...((type === "move" || type === "leave") && this.roomId ? { roomId: this.roomId } : {}),
+        ...(payload || {})
+      });
       return true;
     }
 
@@ -110,12 +123,14 @@
       this.emit("open");
       if (!this.resumeContext && this.storage) {
         const roomId = normalizeRoomId(this.storage.getItem(this.resumeRoomKey));
-        const resumeToken = roomId && this.storage.getItem(roomId);
-        if (roomId && resumeToken) {
-          this.resumeContext = { roomId, resumeToken };
+        let metadata = null;
+        try { metadata = roomId && JSON.parse(this.storage.getItem(roomId + ":allocation") || "null"); } catch (_) {}
+        const resumeCredential = roomId && this.storage.getItem(roomId + ":resumeCredential");
+        if (roomId && resumeCredential && metadata && metadata.allocationId) {
+          this.resumeContext = { roomId, resumeCredential, allocationId: metadata.allocationId, seat: metadata.seat };
         }
       }
-      if (this.resumeContext) this.scheduleAutoResume();
+      if (this.resumeContext && !this.attachingAllocation) this.scheduleAutoResume();
     }
 
     handleClose() {
@@ -141,15 +156,21 @@
         this.setRoomId(roomId);
         msg = { ...msg, roomId: this.roomId };
         this.you = msg.you;
-        if (msg.resumeToken) {
-          this.resumeContext = { roomId: this.roomId, resumeToken: msg.resumeToken };
-          if (this.storage) {
-            this.storage.setItem(this.roomId, msg.resumeToken);
-            this.storage.setItem(this.resumeRoomKey, this.roomId);
-          }
-        }
         if (msg.resumed) this.emit("resumed", msg);
       } else if (event === "state") {
+        const projection = msg.state;
+        if (isPlainObject(projection) && projection.roomId !== undefined && projection.you !== undefined) {
+          if (normalizeRoomId(projection.roomId) !== normalizeRoomId(msg.roomId) ||
+            !["A", "B"].includes(projection.you) || !isPlainObject(projection.state)) return;
+          msg = {
+            ...msg,
+            status: projection.status,
+            players: projection.players,
+            events: projection.events,
+            you: projection.you,
+            state: projection.state,
+          };
+        }
         if (!Number.isInteger(msg.revision) || msg.revision < 0 || !isPlainObject(msg.state) ||
           (msg.events !== undefined && (!Array.isArray(msg.events) || !msg.events.every((item) =>
             isPlainObject(item) && Number.isInteger(item.id) && item.id > 0)))) return;
@@ -192,7 +213,20 @@
       if (this.autoResumeTimer || !this.resumeContext) return;
       this.autoResumeTimer = setTimeout(() => {
         this.autoResumeTimer = null;
-        if (this.connected && this.resumeContext) this.send("resume", this.resumeContext);
+        if (this.connected && this.resumeContext) {
+          const attempt = this.resumeContext;
+          if (this.controlRequest && attempt.allocationId && attempt.resumeCredential) {
+            this.controlRequest("resume", {
+              allocationId: attempt.allocationId,
+              resumeCredential: attempt.resumeCredential
+            }).then((allocation) => this.attachAllocation(allocation)).catch((error) => {
+              if (error && (error.status === 401 || error.code === "resume_rejected")) {
+                this.clearResumeIfCurrent(attempt.roomId, attempt.resumeCredential);
+              }
+              this.emit("error", { message: error.message || "Không khôi phục được phòng" });
+            });
+          }
+        }
       }, 0);
     }
 
@@ -211,27 +245,103 @@
     }
     create(name) {
       this.beginExplicitSession(null);
-      return this.send("create", { name });
+      return this.allocate("create", { name });
     }
     join(roomId, name) {
       roomId = normalizeRoomId(roomId);
       this.beginExplicitSession(roomId);
-      return this.send("join", { roomId, name });
+      return this.controlRequest
+        ? this.allocate("join", { allocationId: roomId, name })
+        : this.send("join", { roomId, name });
     }
-    resume(roomId, resumeToken) {
+    resume(roomId, resumeCredential) {
       roomId = normalizeRoomId(roomId);
-      const storedToken = resumeToken || (this.storage && this.storage.getItem(roomId));
-      if (!storedToken) {
+      resumeCredential = resumeCredential || (this.storage && this.storage.getItem(roomId + ":resumeCredential"));
+      let metadata = null;
+      try { metadata = this.storage && JSON.parse(this.storage.getItem(roomId + ":allocation") || "null"); } catch (_) {}
+      if (!resumeCredential || !metadata || !metadata.allocationId || !this.controlRequest) {
         this.emit("error", { message: "Thiếu mã khôi phục" });
         return false;
       }
       this.intentionalClose = false;
       this.cancelAutoResume();
-      this.resumeContext = { roomId, resumeToken: storedToken };
+      this.resumeContext = { roomId, resumeCredential, allocationId: metadata.allocationId, seat: metadata.seat };
+      const attempt = this.resumeContext;
       this.setRoomId(roomId);
-      return this.send("resume", this.resumeContext);
+      if (this.controlRequest && this.storage) {
+        let metadata = null;
+        try { metadata = JSON.parse(this.storage.getItem(roomId + ":allocation") || "null"); } catch (_) {}
+        if (metadata && metadata.allocationId) {
+          return this.controlRequest("resume", {
+            allocationId: metadata.allocationId,
+            resumeCredential
+          }).then((allocation) => this.attachAllocation(allocation)).catch((error) => {
+            if (error && (error.status === 401 || error.code === "resume_rejected")) {
+              this.clearResumeIfCurrent(attempt.roomId, attempt.resumeCredential);
+            }
+            this.emit("error", { message: error.message || "Không khôi phục được phòng" });
+            return false;
+          });
+        }
+      }
+      return false;
     }
     list() { return this.send("list"); }
+
+    async listRooms() {
+      if (!this.controlRequest) return this.list();
+      try {
+        const result = await this.controlRequest("list", {});
+        this.emit("rooms", result || { rooms: [] });
+        return result;
+      } catch (error) {
+        this.emit("error", { message: error.message || "Không tải được danh sách phòng" });
+        return false;
+      }
+    }
+
+    async allocate(action, body) {
+      if (!this.controlRequest) return this.send(action, body);
+      try {
+        const allocation = await this.controlRequest(action, body);
+        if (!allocation || typeof allocation.room !== "string" || typeof allocation.ticket !== "string" || typeof allocation.resumeCredential !== "string") {
+          throw new Error("Phản hồi phân bổ phòng không hợp lệ");
+        }
+        return this.attachAllocation(allocation);
+      } catch (error) {
+        this.emit("error", { message: error.message || "Không phân bổ được phòng" });
+        return false;
+      }
+    }
+
+    async attachAllocation(allocation) {
+      if (!allocation || typeof allocation.room !== "string" || typeof allocation.ticket !== "string" ||
+        typeof allocation.resumeCredential !== "string" || typeof allocation.allocationId !== "string" || !["A", "B"].includes(allocation.seat)) {
+        throw new Error("Phản hồi phân bổ phòng không hợp lệ");
+      }
+      const roomId = normalizeRoomId(allocation.room);
+      this.setRoomId(roomId);
+      this.resumeContext = {
+        roomId,
+        resumeCredential: allocation.resumeCredential,
+        allocationId: allocation.allocationId,
+        seat: allocation.seat
+      };
+      if (this.storage) {
+        this.storage.setItem(roomId + ":resumeCredential", allocation.resumeCredential);
+        this.storage.setItem(this.resumeRoomKey, roomId);
+        this.storage.setItem(roomId + ":allocation", JSON.stringify({ allocationId: allocation.allocationId, seat: allocation.seat }));
+      }
+      this.attachingAllocation = true;
+      try {
+        const bootstrap = this.playhtmlBootstrap || global.OTT_PLAYHTML_BOOTSTRAP;
+        if (typeof bootstrap === "function") await bootstrap({ host: this.playhtmlHost, room: allocation.room });
+        if (!this.connected) await this.connect();
+        return this.send("attach", { roomId, ticket: allocation.ticket });
+      } finally {
+        this.attachingAllocation = false;
+      }
+    }
     move(from, to) {
       if (!validPoint(from) || !validPoint(to)) {
         this.emit("error", { message: "Tọa độ không hợp lệ" });
@@ -246,15 +356,26 @@
       this.reconnectTimer = null;
       const sent = this.send("leave");
       this.clearResume();
+      this.roomId = null;
+      this.you = null;
+      this.state = null;
+      this.resetOrdering();
       return sent;
     }
     clearResume() {
       this.cancelAutoResume();
       if (this.resumeContext && this.storage) {
         this.storage.removeItem(this.resumeContext.roomId);
+        this.storage.removeItem(this.resumeContext.roomId + ":resumeCredential");
         this.storage.removeItem(this.resumeRoomKey);
+        this.storage.removeItem(this.resumeContext.roomId + ":allocation");
       }
       this.resumeContext = null;
+    }
+    clearResumeIfCurrent(roomId, resumeCredential) {
+      if (!this.resumeContext || this.resumeContext.roomId !== roomId || this.resumeContext.resumeCredential !== resumeCredential) return false;
+      this.clearResume();
+      return true;
     }
     setRoomId(roomId) {
       const normalized = normalizeRoomId(roomId);

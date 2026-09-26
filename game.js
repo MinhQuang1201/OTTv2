@@ -74,7 +74,26 @@
   }
 
   function hasOnlineConnection() {
-    return typeof window.OTT_PLAYHTML_CONNECTION_FACTORY === "function";
+    return typeof window.OTT_PLAYHTML_CONNECTION_FACTORY === "function" ||
+      typeof window.OTT_PLAYHTML_RUNTIME === "object";
+  }
+
+  function controlRequest(action, body) {
+    const host = window.OTT_PLAYHTML_CONTROL_ENDPOINT;
+    if (!host || typeof window.fetch !== "function") return Promise.reject(new Error("Trực tuyến chưa sẵn sàng"));
+    let endpoint;
+    try { endpoint = new URL(host); } catch (_) { return Promise.reject(new Error("HTTPS required for control requests")); }
+    if (endpoint.protocol !== "https:") return Promise.reject(new Error("HTTPS required for control requests"));
+    return window.fetch(host.replace(/\/$/, "") + "/control/" + action, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (response) {
+      return response.json().then(function (value) {
+        if (!response.ok) throw new Error(value.error || "Máy chủ từ chối yêu cầu");
+        return value;
+      });
+    });
   }
 
   function playerName() {
@@ -353,7 +372,15 @@
       throw new Error("PlayHTML game connection is not configured");
     }
     const pf = new window.PlayhtmlGameClient({
-      connectionFactory: window.OTT_PLAYHTML_CONNECTION_FACTORY
+      connectionFactory: function () {
+        if (typeof window.OTT_PLAYHTML_CONNECTION_FACTORY !== "function") {
+          throw new Error("PlayHTML game connection is not configured");
+        }
+        return window.OTT_PLAYHTML_CONNECTION_FACTORY();
+      },
+      controlRequest: controlRequest,
+      playhtmlBootstrap: window.OTT_PLAYHTML_BOOTSTRAP || null,
+      playhtmlHost: window.OTT_PLAYHTML_HOST || window.OTT_PLAYHTML_CONTROL_ENDPOINT
     });
     app.pf = pf;
     pf.on("open", function () {
@@ -399,6 +426,7 @@
       render();
     });
     pf.on("state", function (msg) {
+      showScreen("table");
       app.state = msg.state;
       app.onlineStateAt = performance.now();
       app.lastEvents = msg.events || [];
@@ -465,7 +493,7 @@
   }
 
   async function startOnline(intent) {
-    if (!hasOnlineConnection()) {
+    if (!hasOnlineConnection() || typeof window.OTT_PLAYHTML_CONTROL_ENDPOINT !== "string") {
       setNet("off", "Trực tuyến chưa sẵn sàng");
       toast("Trực tuyến chưa sẵn sàng: chưa có kết nối PlayHTML đã xác minh.", "error");
       return;
@@ -481,18 +509,16 @@
       toast("Chưa cấu hình kết nối PlayHTML", "error");
       return;
     }
-    try {
-      await pf.connect();
-    } catch (err) {
-      toast("Không nối được máy chủ", "error");
-      return;
-    }
     app.mode = "online";
     app.reconnecting = false;
     stopClock();
     app.state = null;
-    if (intent === "create") pf.create(playerName());
-    else pf.join((els.room.value || "").trim().toUpperCase(), playerName());
+    const result = intent === "create"
+      ? pf.create(playerName())
+      : pf.join((els.room.value || "").trim(), playerName());
+    if (result && typeof result.catch === "function") result.catch(function () {
+      toast("Không nối được máy chủ", "error");
+    });
   }
 
   function leaveTable() {
@@ -538,12 +564,17 @@
   if (params.get("room")) els.room.value = params.get("room");
   if (params.get("name")) els.name.value = params.get("name");
 
-  if (hasOnlineConnection()) {
-    const onlineClient = bindOnlineClient();
-    onlineClient.connect()
-      .then(function () {
-        onlineClient.list();
-      })
+   if (hasOnlineConnection() && typeof window.OTT_PLAYHTML_CONTROL_ENDPOINT === "string") {
+     const onlineClient = bindOnlineClient();
+     onlineClient.listRooms()
+       .then(function () {
+         if (window.OTT_PLAYHTML_RUNTIME && !window.OTT_PLAYHTML_BOOTSTRAP && window.PlayhtmlBootstrap) {
+           window.OTT_PLAYHTML_BOOTSTRAP = window.PlayhtmlBootstrap.createBootstrap({
+             runtime: window.OTT_PLAYHTML_RUNTIME,
+             globalObject: window
+           });
+         }
+       })
       .catch(function () {
         setNet("off", "Ngoại tuyến");
       });

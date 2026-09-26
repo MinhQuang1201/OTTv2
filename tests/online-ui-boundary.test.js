@@ -25,8 +25,8 @@ test("keeps online mode unavailable until a connection factory is registered", (
   const game = source("game.js");
 
   assert.match(game, /function hasOnlineConnection\(\)/);
-  assert.match(game, /async function startOnline\(intent\) \{\s+if \(!hasOnlineConnection\(\)\) \{\s+setNet\("off", "Trực tuyến chưa sẵn sàng"\)/);
-  assert.match(game, /if \(hasOnlineConnection\(\)\) \{\s+const onlineClient = bindOnlineClient\(\)/);
+  assert.match(game, /async function startOnline\(intent\) \{[\s\S]*if \(!hasOnlineConnection\(\) \|\| typeof window\.OTT_PLAYHTML_CONTROL_ENDPOINT !== "string"\) \{/);
+  assert.match(game, /if \(hasOnlineConnection\(\) && typeof window\.OTT_PLAYHTML_CONTROL_ENDPOINT === "string"\) \{/);
 });
 
 test("does not introduce a browser WebSocket fallback", () => {

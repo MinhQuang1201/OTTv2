@@ -30,8 +30,11 @@ class Room {
     this.schedule = deps.schedule || setTimeout;
     this.cancel = deps.cancel || clearTimeout;
     this.onUpdate = deps.onUpdate || null;
+    this.initialClockMs = Number.isFinite(deps.initialClockMs) ? Math.max(1, Math.floor(deps.initialClockMs)) : config.TIME_CONTROL.initialMs;
+    this.reconnectGraceMs = Number.isFinite(deps.reconnectGraceMs) ? Math.max(0, Math.floor(deps.reconnectGraceMs)) : config.TIME_CONTROL.reconnectGraceMs;
     this.players = { A: null, B: null };
     this.state = rules.createInitialState();
+    this.state.clock.remainingMs = { A: this.initialClockMs, B: this.initialClockMs };
     this.status = "waiting";
     this.lastEvents = [];
     this.revision = 0;
@@ -102,6 +105,7 @@ class Room {
     if (this.players.A && this.players.B) {
       this.status = "playing";
       this.state = rules.createInitialState();
+      this.state.clock.remainingMs = { A: this.initialClockMs, B: this.initialClockMs };
       this.clockAnchorMs = this.now();
       this.scheduleClockDeadline();
     }
@@ -115,7 +119,7 @@ class Room {
     for (const seat of seats) {
       const player = this.players[seat];
       player.connected = false;
-      player.reconnectDeadlineMs = now + config.TIME_CONTROL.reconnectGraceMs;
+      player.reconnectDeadlineMs = now + this.reconnectGraceMs;
     }
     if (this.status === "playing" && this.state.clock.runningSeat) {
       this.state.clock.runningSeat = null;
@@ -140,6 +144,8 @@ class Room {
     if (timer !== undefined) this.cancel(timer);
     this.reconnectTimers.delete("A");
     this.status = "done";
+    this.state.reason = "disconnect_timeout";
+    this.state.clock.runningSeat = null;
     this.commitStateChange();
     return { ok: true, expired: true, status: this.status };
   }
@@ -233,7 +239,7 @@ class Room {
       return { seat, name: player.name, reason: this.state.reason, events: settled.events };
     }
     player.connected = false;
-    player.reconnectDeadlineMs = now + config.TIME_CONTROL.reconnectGraceMs;
+    player.reconnectDeadlineMs = now + this.reconnectGraceMs;
     if (this.state.clock.runningSeat === seat) {
       this.state.clock.runningSeat = null;
       this.clockAnchorMs = now;

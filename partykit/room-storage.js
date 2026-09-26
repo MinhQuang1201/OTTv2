@@ -66,7 +66,7 @@ function validatePersistedRoom(saved) {
   if (!Number.isInteger(saved.revision) || saved.revision < 0) invalid();
   if (!Number.isInteger(saved.nextEventId) || saved.nextEventId < 1) invalid();
   if (typeof saved.terminalBroadcasted !== "boolean") invalid();
-  validateState(saved.state, saved.status);
+  validateState(saved.state, saved.status, saved.players);
   if (!Array.isArray(saved.lastEvents)) invalid();
   let previousEventId = 0;
   for (const event of saved.lastEvents) {
@@ -77,7 +77,7 @@ function validatePersistedRoom(saved) {
   for (const seat of ["A", "B"]) validatePlayer(saved.players[seat], seat);
 }
 
-function validateState(state, status) {
+function validateState(state, status, players) {
   if (!state || typeof state !== "object" || !["A", "B"].includes(state.turn)) invalid();
   if (!(state.winner === null || state.winner === "A" || state.winner === "B")) invalid();
   const reasons = [null, "goal", "elimination", "no_moves", "timeout", "leave", "disconnect_timeout"];
@@ -99,7 +99,8 @@ function validateState(state, status) {
     ids.add(piece.id);
     occupied.add(position);
   }
-  if (status === "done" && (!state.winner || !state.reason || state.clock.runningSeat !== null)) invalid();
+  if (status === "done" && (!state.reason || state.clock.runningSeat !== null)) invalid();
+  if (status === "done" && state.winner === null && !(state.reason === "disconnect_timeout" && players.A && !players.B)) invalid();
   if (status !== "done" && (state.winner !== null || state.reason !== null)) invalid();
 }
 

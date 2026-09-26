@@ -1,9 +1,0 @@
-{
-  "name": "ottv2",
-  "main": "partykit/ott-lobby.js",
-  "parties": {
-    "lobby": "partykit/ott-lobby.js",
-    "game": "partykit/ott-room.js"
-  },
-  "compatibilityDate": "2026-09-25"
-}
