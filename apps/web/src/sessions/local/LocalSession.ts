@@ -15,7 +15,7 @@ const failed = (message = "Phiên chơi không khả dụng."): SessionErrorView
 const invalid = (message = "Nước đi không hợp lệ."): SessionErrorView => ({ code: "invalid_move", message, retryable: false });
 
 export class LocalSession implements GameSession {
-  private snapshot: GameSnapshot = normalizeCoreState({ turn: null, winner: null, reason: null, eliminatedPlayer: null, clock: { remainingMs: { A: 0, B: 0 }, runningSeat: null }, pieces: [] }, { mode: "local", connection: "offline" });
+  private snapshot: GameSnapshot = normalizeCoreState({ turn: null, winner: null, reason: null, eliminatedPlayer: null, clock: { remainingMs: { A: 0, B: 0 }, runningSeat: null }, pieces: [] }, { mode: "local", phase: "idle", connection: "offline" });
   private readonly listeners = new Set<() => void>();
   private readonly now: () => number;
   private readonly setIntervalFn: NonNullable<LocalSessionDependencies["setInterval"]>;
@@ -80,6 +80,7 @@ export class LocalSession implements GameSession {
     try { result = this.bridge.applyMove(this.state, player, from, to); } catch { return { accepted: false, error: failed() }; }
     if (!result.ok || !result.state) return { accepted: false, error: invalid(result.error ?? undefined) };
     this.state = result.state;
+    if (this.state.winner) this.clearTimer();
     const events = normalizeCoreEvents(result.events, this.nextEventId);
     this.nextEventId += events.length;
     this.boardRevision += 1;
@@ -143,7 +144,7 @@ export class LocalSession implements GameSession {
 
   private failSession(): void {
     this.clearTimer();
-    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", error: failed() });
+    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", error: Object.freeze(failed()) });
     this.publish();
   }
 
