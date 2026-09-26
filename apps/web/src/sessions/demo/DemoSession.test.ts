@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DemoScenario } from "../../shared/model/game";
 
 import { DemoSession } from "./DemoSession";
+import { freezeFixture } from "./fixtureBuilders";
 import { createScenarioFixture, DEMO_SCENARIOS } from "./scenarios";
 
 describe("DemoSession fixtures", () => {
@@ -128,7 +129,7 @@ describe("DemoSession fixtures", () => {
     expect(new DemoSession("lobby-online-unavailable").getSnapshot()).toMatchObject({ connection: "unavailable", error: { code: "online_unavailable" } });
     expect(new DemoSession("lobby-online-connecting").getSnapshot()).toMatchObject({ phase: "preparing", connection: "connecting" });
     expect(new DemoSession("game-waiting").getSnapshot()).toMatchObject({ phase: "waiting", turn: null });
-    expect(new DemoSession("game-piece-selected").getSnapshot()).toMatchObject({ pendingMove: true, turn: "A" });
+    expect(new DemoSession("game-piece-selected").getSnapshot()).toMatchObject({ pendingMove: false, turn: "A" });
     expect(new DemoSession("game-ai-thinking").getSnapshot()).toMatchObject({ aiThinking: true, turn: "A" });
     expect(new DemoSession("game-reconnecting").getSnapshot()).toMatchObject({ connection: "reconnecting", players: { B: { connected: false } } });
     expect(new DemoSession("game-clock-warning").getSnapshot().players.A?.remainingMs).toBe(35_000);
@@ -158,6 +159,26 @@ describe("DemoSession fixtures", () => {
     expect(playing.getSnapshot().events.at(-1)?.id).toBeGreaterThan(0);
     await playing.leave();
     expect(playing.getSnapshot().events.at(-1)?.id).toBeGreaterThan(1);
+  });
+
+  it("clears legal destinations after leave and dispose", async () => {
+    const session = new DemoSession("game-active-a");
+    expect(session.getLegalMoves({ x: 0, y: 2 })).toEqual([{ x: 0, y: 1 }]);
+    await session.leave();
+    expect(session.getLegalMoves({ x: 0, y: 2 })).toEqual([]);
+
+    const disposed = new DemoSession("game-active-a");
+    disposed.dispose();
+    expect(disposed.getLegalMoves({ x: 0, y: 2 })).toEqual([]);
+  });
+
+  it("freezes the scenario registry and recursively freezes shallow-frozen parents", () => {
+    expect(Object.isFrozen(DEMO_SCENARIOS)).toBe(true);
+    const child = { value: { ok: true } };
+    const parent = Object.freeze({ child });
+    freezeFixture(parent);
+    expect(Object.isFrozen(parent.child)).toBe(true);
+    expect(Object.isFrozen(parent.child.value)).toBe(true);
   });
 
   it("supports unsubscribe and dispose without further notifications", async () => {

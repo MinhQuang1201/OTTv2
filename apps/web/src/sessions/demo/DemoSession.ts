@@ -58,6 +58,7 @@ export class DemoSession implements GameSession {
   }
 
   getLegalMoves(from: Position): readonly Position[] {
+    if (this.disposed || this.snapshot.result !== null || this.snapshot.phase === "finished") return [];
     return this.allowedMoves.filter((move) => samePosition(move.from, from)).map((move) => ({ ...move.to }));
   }
 

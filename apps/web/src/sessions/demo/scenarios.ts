@@ -7,7 +7,7 @@ import type {
 } from "../../shared/model/game";
 import { freezeFixture, makeEvent, makePiece, makePlayer, makeSnapshot } from "./fixtureBuilders";
 
-export const DEMO_SCENARIOS: readonly DemoScenario[] = [
+export const DEMO_SCENARIOS = Object.freeze([
   "lobby-default",
   "lobby-online-unavailable",
   "lobby-online-connecting",
@@ -28,7 +28,7 @@ export const DEMO_SCENARIOS: readonly DemoScenario[] = [
   "result-timeout",
   "result-disconnect-timeout",
   "result-leave",
-] as const;
+] as const);
 
 export function isDemoScenario(value: unknown): value is DemoScenario {
   return typeof value === "string" && (DEMO_SCENARIOS as readonly string[]).includes(value);
@@ -166,7 +166,7 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
       B: { connected: !reconnecting },
     }),
     connection: scenario === "lobby-online-unavailable" ? "unavailable" : scenario === "lobby-online-connecting" ? "connecting" : reconnecting ? "reconnecting" : "online",
-    pendingMove: scenario === "game-piece-selected",
+    pendingMove: false,
     aiThinking: scenario === "game-ai-thinking",
     roomId: isLobby ? null : "DEMO-42",
     waitingRooms,

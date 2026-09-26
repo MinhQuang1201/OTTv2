@@ -15,6 +15,10 @@ export function freezeFixture<T>(value: T): T {
       freezeFixture(child);
     }
     Object.freeze(value);
+  } else if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      freezeFixture(child);
+    }
   }
   return value;
 }
