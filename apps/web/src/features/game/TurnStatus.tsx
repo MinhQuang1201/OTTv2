@@ -8,5 +8,5 @@ export function TurnStatus({ snapshot }: { readonly snapshot: GameSnapshot }) {
   else if (snapshot.aiThinking) message = "AI đang suy nghĩ…";
   else if (snapshot.pendingMove) message = "Đang xử lý nước đi…";
   else if (snapshot.turn) message = snapshot.turn === snapshot.viewerSeat ? "Đến lượt bạn" : "Đối thủ đang đi";
-  return <p className={styles.turnStatus} aria-live="polite" data-status={snapshot.connection}>{message}</p>;
+  return <p className={styles.turnStatus} role="status" aria-live="polite" data-status={snapshot.connection}>{message}</p>;
 }

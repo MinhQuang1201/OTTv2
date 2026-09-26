@@ -35,4 +35,30 @@ describe("GameScreen", () => {
     await user.click(screen.getByRole("button", { name: /^xác nhận rời bàn$/i }));
     expect(leave).toHaveBeenCalledTimes(1);
   });
+
+  it("renders truth-based HUD values and excludes unsupported actions", () => {
+    const session = new DemoSession("game-active-a");
+    const snapshot = {
+      ...session.getSnapshot(),
+      roomId: "room-42",
+      connection: "online" as const,
+    };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} />
+      </AppProviders>,
+    );
+
+    expect(screen.getByTestId("room-label")).toHaveTextContent("Phòng room-42");
+    expect(screen.getByText("Đã kết nối")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rời bàn/i })).toBeInTheDocument();
+
+    // Verify mockup-only unsupported actions are not rendered
+    expect(screen.queryByRole("button", { name: /xin hòa/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /2d \/ 3d/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cài đặt/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /xin lùi nước/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /đầu hàng/i })).not.toBeInTheDocument();
+  });
 });
