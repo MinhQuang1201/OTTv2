@@ -28,6 +28,12 @@ export type CommittedRoomOutcome<T = unknown> = {
   terminalReason: string | null | undefined;
 };
 
+type ProvisionalAttach = {
+  seat: "A" | "B";
+  snapshot: unknown;
+  connectedSeats: Map<"A" | "B", RoomConnection>;
+};
+
 function projectPlayer(player: any): { name: string; connected: boolean } | null {
   if (!player) return null;
   return { name: String(player.name ?? ""), connected: player.connected === true };
@@ -63,6 +69,7 @@ export class DurableRoomAdapter {
   private readonly timing: RoomTiming;
   private readonly connections = new Map<string, RoomConnection>();
   private readonly emittedTerminalReasons = new Set<string>();
+  private readonly provisionalAttaches = new Map<RoomConnection, ProvisionalAttach>();
 
   private constructor(roomId: string, storage: StorageLike, now: () => number, room: any, timing: RoomTiming = {}) {
     this.roomId = roomId;
@@ -109,6 +116,35 @@ export class DurableRoomAdapter {
   connection(id: string): RoomConnection | undefined { return this.connections.get(id); }
 
   connectionsSnapshot(): RoomConnection[] { return [...this.connections.values()]; }
+
+  /** Finalize an attach only after the Game authority has persisted connection metadata. */
+  commitAttach(connection: RoomConnection): void {
+    this.provisionalAttaches.delete(connection);
+  }
+
+  /** Restore the exact Room snapshot captured before an unauthenticated attach. */
+  async rollbackAttach(connection: RoomConnection): Promise<CommittedRoomOutcome | null> {
+    const provisional = this.provisionalAttaches.get(connection);
+    if (!provisional || this.unavailable || !this.room) return null;
+    this.room = hydrateRoom(provisional.snapshot, this.roomId, roomDependencies(this.now, this.timing));
+    this.connections.clear();
+    for (const [seat, liveConnection] of provisional.connectedSeats) {
+      const player = this.room.players[seat];
+      if (!player || !player.connected) continue;
+      player.connection = liveConnection;
+      player.reconnectDeadlineMs = null;
+      this.remember(liveConnection);
+    }
+    this.lastPayload = this.room.payload();
+    await this.storage.put(ROOM_KEY, serializeRoom(this.room));
+    await this.scheduleAlarm();
+    this.provisionalAttaches.delete(connection);
+    return {
+      result: { ok: true },
+      payload: this.lastPayload as Record<string, unknown>,
+      terminalReason: this.room.status === "done" ? this.room.state.reason || null : null,
+    };
+  }
 
   async persist(): Promise<void> {
     if (this.unavailable) throw new Error(ROOM_UNAVAILABLE);
@@ -260,6 +296,13 @@ export class DurableRoomAdapter {
   async attach(connection: RoomConnection, seat: "A" | "B", name: string | undefined, storage: StorageLike = this.storage): Promise<any> {
     const trustedName = name ?? await storage.get<string>(seat === "A" ? "creatorName" : `seat-name:${seat}`);
     if (typeof trustedName !== "string" || !trustedName.trim()) return { ok: false, error: "seat_name_unavailable" };
+    const snapshot = serializeRoom(this.room);
+    const connectedSeats = new Map<"A" | "B", RoomConnection>();
+    for (const candidate of ["A", "B"] as const) {
+      const player = this.room?.players?.[candidate];
+      const liveConnection = player?.connection as RoomConnection | undefined;
+      if (player?.connected && liveConnection) connectedSeats.set(candidate, liveConnection);
+    }
     const existing = this.room?.players?.[seat];
     let result: any;
     if (existing && !existing.connected) {
@@ -271,15 +314,23 @@ export class DurableRoomAdapter {
       // Room seat (which would silently turn B's owner into A).
       if (seat === "B" && !this.room?.players?.A) return { ok: false, error: "Ghế A chưa được khởi tạo" };
       result = (await this.mutate((room) => room.addPlayer(connection, trustedName), storage, storage === this.storage)).result;
-      if (result?.ok && result.seat !== seat) return { ok: false, error: "Sai ghế được cấp quyền" };
+      if (result?.ok && result.seat !== seat) {
+        this.provisionalAttaches.set(connection, { seat: result.seat, snapshot, connectedSeats });
+        await this.rollbackAttach(connection);
+        return { ok: false, error: "Sai ghế được cấp quyền" };
+      }
     } else {
       return { ok: false, error: "Ghế đã được sử dụng" };
     }
-    if (result?.ok) this.remember(connection);
+    if (result?.ok) {
+      this.provisionalAttaches.set(connection, { seat, snapshot, connectedSeats });
+      this.remember(connection);
+    }
     return result;
   }
 
   async reloadPersisted(): Promise<void> {
+    this.provisionalAttaches.clear();
     const saved = await this.storage.get<any>(ROOM_KEY);
     if (saved === undefined) {
       this.room = null;

@@ -312,8 +312,7 @@ export class OttGameServer extends YServer {
           if (!this.installIdentity(connection, { role: "player", seat }, capability.nonce, generation)) {
             let compensation: CommittedRoomOutcome | null = null;
             try {
-              compensation = await adapter.close(connection);
-              if (compensation?.result) await this.publishCommitted(adapter, compensation);
+              compensation = await adapter.rollbackAttach(connection);
             } catch {
               // The close lifecycle remains the final compensation path.
             }
@@ -327,6 +326,7 @@ export class OttGameServer extends YServer {
               error: "identity_install_failed",
             };
           }
+          adapter.commitAttach(connection);
           this.attachCapabilities.delete(connection);
           this.pendingIdentities.delete(connection);
         } else {
@@ -574,9 +574,10 @@ export class OttGameServer extends YServer {
     }
   }
 
-  private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined): Promise<void> {
+  private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined): Promise<boolean> {
     const count = await this.spectatorCount();
-    await Promise.all([...this.identities.keys()].map((connection) => this.sendProjection(connection, adapter, payload, count)));
+    const delivered = await Promise.all([...this.identities.keys()].map((connection) => this.sendProjection(connection, adapter, payload, count)));
+    return delivered.every(Boolean);
   }
 
   private async publishCommitted(adapter: DurableRoomAdapter, outcome: CommittedRoomOutcome): Promise<void> {
@@ -584,9 +585,13 @@ export class OttGameServer extends YServer {
       await this.broadcastState(adapter, outcome.payload);
       return;
     }
+    let projected = false;
     try {
-      await this.broadcastState(adapter, outcome.payload);
+      projected = await this.broadcastState(adapter, outcome.payload);
     } catch {
+      projected = false;
+    }
+    if (!projected) {
       await adapter.scheduleTerminalRetry(outcome.terminalReason);
       return;
     }
@@ -608,7 +613,8 @@ export class OttGameServer extends YServer {
     const spectatorCount = await this.spectatorCount();
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
     const payload = adapter.lastPayload as Record<string, unknown>;
-    await this.broadcastState(adapter, payload);
+    const projected = await this.broadcastState(adapter, payload);
+    if (!projected) return;
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
     if (!this.identities.has(connection)) return;
     return {
@@ -679,6 +685,12 @@ export class OttGameServer extends YServer {
       if (!this.isLiveGeneration(connection, generation)) return;
       if (!adapter || adapter.unavailable || !adapter.room) return;
       try {
+        let rollback: CommittedRoomOutcome | null = null;
+        try { rollback = await adapter.rollbackAttach(connection); } catch { /* retry through normal close below */ }
+        if (rollback) {
+          await this.publishCommitted(adapter, rollback);
+          return;
+        }
         const outcome = await adapter.close(connection);
         if (outcome?.result) await this.publishCommitted(adapter, outcome);
       } catch {
