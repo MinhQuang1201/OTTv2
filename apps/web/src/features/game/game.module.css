@@ -28,6 +28,7 @@
   letter-spacing: .14em;
 }
 .topBarActions { display: flex; align-items: center; gap: var(--ui-space-3); }
+.spectatorCount { color: var(--ui-text-muted); font: 700 var(--ui-text-xs)/1 var(--ui-font-mono); white-space: nowrap; }
 
 .gameLayout {
   display: grid;

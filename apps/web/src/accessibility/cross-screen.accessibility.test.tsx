@@ -92,4 +92,14 @@ describe("cross-screen accessibility contract", () => {
     expect(document.activeElement).toBe(close);
   });
 
+  it("keeps spectator board cells named and disabled", () => {
+    const session = new DemoSession("spectator-active");
+    render(<AppProviders><GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} /></AppProviders>);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole("status")).toHaveTextContent("Lượt của An");
+  });
+
 });

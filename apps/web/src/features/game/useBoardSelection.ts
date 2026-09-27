@@ -19,16 +19,20 @@ const samePosition = (a: Position, b: Position) => a.x === b.x && a.y === b.y;
 export function useBoardSelection({ session, snapshot, onMove, onError }: UseBoardSelectionOptions) {
   const [selection, setSelection] = useState<BoardSelection | null>(null);
   const pieceByPosition = useMemo<Map<string, (typeof snapshot.board)[number]>>(() => new Map(snapshot.board.map((piece) => [`${piece.position.x}:${piece.position.y}`, piece] as const)), [snapshot.board]);
-  const canInteract = snapshot.phase === "playing"
-    && snapshot.viewerSeat !== null
-    && snapshot.turn === snapshot.viewerSeat
+  const canInteract = snapshot.capabilities.canMove
+    && snapshot.phase === "playing"
+    && snapshot.viewer?.role === "player"
+    && snapshot.turn === snapshot.viewer.seat
     && !snapshot.pendingMove
     && !snapshot.aiThinking
     && snapshot.connection !== "reconnecting";
+  const viewer = snapshot.viewer;
+  const viewerRole = viewer?.role;
+  const viewerSeat = viewer && viewer.role === "player" ? viewer.seat : null;
 
   useEffect(() => {
     setSelection(null);
-  }, [snapshot.turn, snapshot.boardRevision, snapshot.connection, snapshot.pendingMove, snapshot.aiThinking, snapshot.phase]);
+  }, [canInteract, snapshot.turn, snapshot.boardRevision, snapshot.connection, snapshot.pendingMove, snapshot.aiThinking, snapshot.phase, viewerRole, viewerSeat]);
 
   const select = useCallback(async (position: Position) => {
     if (!canInteract) return;
@@ -42,13 +46,13 @@ export function useBoardSelection({ session, snapshot, onMove, onError }: UseBoa
       else onError?.(result.error);
       return;
     }
-    if (!piece || piece.seat !== snapshot.viewerSeat) {
+    if (!piece || viewerRole !== "player" || piece.seat !== viewerSeat) {
       setSelection(null);
       return;
     }
     const legalMoves = session.getLegalMoves(position);
     setSelection({ from: { ...position }, legalMoves: legalMoves.map((move) => ({ ...move })) });
-  }, [canInteract, onError, onMove, pieceByPosition, selection, session, snapshot.viewerSeat]);
+  }, [canInteract, onError, onMove, pieceByPosition, selection, session, viewerRole, viewerSeat]);
 
   return { selection, canInteract, pieceByPosition, select };
 }
