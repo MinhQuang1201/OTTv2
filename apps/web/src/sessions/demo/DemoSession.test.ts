@@ -117,6 +117,7 @@ describe("DemoSession fixtures", () => {
   });
 
   it.each([
+    "spectator-list",
     "spectator-active",
     "spectator-reconnecting",
     "spectator-finished",
@@ -132,6 +133,10 @@ describe("DemoSession fixtures", () => {
   it("provides deterministic public matches for the spectator list", () => {
     const snapshot = new DemoSession("spectator-list").getSnapshot();
 
+    expect(snapshot.viewer).toEqual({ role: "spectator" });
+    expect(snapshot.viewerSeat).toBeNull();
+    expect(snapshot.capabilities).toEqual({ canMove: false, canLeaveGame: false, canSpectate: true });
+    expect(snapshot.spectatorCount).toBe(12);
     expect(snapshot.publicMatches).toEqual([
       {
         allocationId: "DEMO-ALLOCATION-42",

@@ -6,6 +6,7 @@ import { ScenarioSwitcher } from "../demo/ScenarioSwitcher";
 import { DEFAULT_DEMO_SCENARIO, isDemoScenario, useDemoScenario } from "../demo/useDemoScenario";
 import { Panel } from "../shared/ui/Panel";
 import { Spinner } from "../shared/ui/Spinner";
+import { Button } from "../shared/ui/Button";
 import { LobbyScreen } from "../features/lobby/LobbyScreen";
 import { GameScreen } from "../features/game/GameScreen";
 import { LocalSession } from "../sessions/local/LocalSession";
@@ -223,7 +224,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
         <div className={styles.content}>
           <div className={styles.state} data-testid="app-state" data-state={appState.status}>
             <ScreenBoundary
-              error={appState.status === "error" ? appState.error : null}
+              error={appState.status === "error" && appState.error.code !== "room_unavailable" ? appState.error : null}
               resetKey={`${demo.scenario}:${appState.status}:${activeSession?.generation ?? 0}:${restartToken}`}
               onRetry={onRetry}
               onLobby={onLobby}
@@ -257,6 +258,13 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   readonly onlineAvailable: boolean;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
+  if (state.status === "error" && state.error.code === "room_unavailable") return (
+    <Panel className={styles.screen} role="alert">
+      <h1>Trận đấu không còn khả dụng</h1>
+      <p>{state.error.message}</p>
+      <Button variant="secondary" onClick={onLobby}>Về sảnh</Button>
+    </Panel>
+  );
   if (state.status === "error") return null;
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}

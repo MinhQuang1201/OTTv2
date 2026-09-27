@@ -5,6 +5,7 @@ import { ScreenBoundary } from "./ScreenBoundary";
 import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
+import type { DemoScenario } from "../shared/model/game";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -62,6 +63,7 @@ describe("App shell lifecycle", () => {
     ["spectator-active", /Bàn chơi/i, "playing"],
     ["spectator-reconnecting", /Bàn chơi/i, "playing"],
     ["spectator-finished", /Bàn chơi/i, "finished"],
+    ["spectator-room-gone", /Trận đấu không còn khả dụng/i, "error"],
   ] as const)("routes %s to the %s screen", (scenario, heading, state) => {
     render(<App initialScenario={scenario} />);
 
@@ -70,6 +72,36 @@ describe("App shell lifecycle", () => {
       "data-state",
       state,
     );
+  });
+
+  it.each([
+    ["spectator-list", "lobby", true],
+    ["spectator-active", "playing", true],
+    ["spectator-reconnecting", "playing", true],
+    ["spectator-finished", "finished", true],
+    ["spectator-room-gone", "error", false],
+  ] as const)("exposes the typed App state for %s", async (scenario: DemoScenario, status, hasSpectatorViewer) => {
+    const states: AppState[] = [];
+    render(<App initialScenario={scenario} onStateChange={(state) => states.push(state)} />);
+
+    await waitFor(() => expect(states.at(-1)?.status).toBe(status));
+    const state = states.at(-1)!;
+    if (hasSpectatorViewer) {
+      if (state.status === "lobby" || state.status === "playing" || state.status === "finished") {
+        expect(state.snapshot.viewer).toEqual({ role: "spectator" });
+        expect(state.snapshot.viewerSeat).toBeNull();
+        expect(state.snapshot.capabilities).toEqual({ canMove: false, canLeaveGame: false, canSpectate: true });
+        expect(state.snapshot.spectatorCount).toBe(12);
+      }
+    }
+    if (scenario === "spectator-list" && state.status === "lobby") {
+      expect(state.snapshot.publicMatches).toHaveLength(1);
+    }
+    if (scenario === "spectator-room-gone" && state.status === "error") {
+      expect(state.status).toBe("error");
+      expect(state.error.code).toBe("room_unavailable");
+      expect(screen.getByRole("heading", { name: "Trận đấu không còn khả dụng" })).toBeInTheDocument();
+    }
   });
 
   it("labels spectator demos and does not discover online rooms", () => {
@@ -88,7 +120,7 @@ describe("App shell lifecycle", () => {
     const user = (await import("@testing-library/user-event")).default.setup();
     render(<App initialScenario="spectator-room-gone" />);
 
-    expect(screen.getByText("Trận đấu không còn khả dụng")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Trận đấu không còn khả dụng" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
     expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
   });
