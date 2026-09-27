@@ -4,6 +4,7 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname);
 const REAL_ROOT = fs.realpathSync(ROOT);
+const PUBLIC_ROOT = path.resolve(ROOT, "apps/web/dist");
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -25,12 +26,18 @@ const DENY = new Set([
   "partykit.json"
 ]);
 const PRIVATE_DIRS = new Set(["partykit", "workers"]);
+const PRIVATE_RELATIVE_PATHS = new Set([
+  "packages\\game-core\\src\\room.js"
+]);
+const PRIVATE_RELATIVE_PREFIXES = ["apps\\worker\\", "packages\\protocol\\"];
 
 function isPrivatePath(filePath) {
   const rel = path.relative(ROOT, filePath);
+  const normalizedRel = rel.toLowerCase();
   const firstSegment = rel.split(path.sep)[0].toLowerCase();
   const base = path.basename(filePath).toLowerCase();
-  return DENY.has(base) || PRIVATE_DIRS.has(firstSegment) ||
+  return DENY.has(base) || PRIVATE_DIRS.has(firstSegment) || PRIVATE_RELATIVE_PATHS.has(normalizedRel) ||
+    PRIVATE_RELATIVE_PREFIXES.some((prefix) => normalizedRel.startsWith(prefix)) ||
     firstSegment === "node_modules" || firstSegment === "tests" || firstSegment.startsWith(".");
 }
 
@@ -41,9 +48,13 @@ function publicPath(urlPath) {
   } catch {
     return null;
   }
-  const rel = path.normalize(clean === "/" ? "index.html" : clean.replace(/^\/+/, ""));
-  const resolved = path.resolve(ROOT, rel);
-  if (resolved !== ROOT && !resolved.startsWith(ROOT + path.sep)) return null;
+  const requested = (clean === "/" ? "index.html" : clean.replace(/^\/+/, "")).replace(/\\/g, "/");
+  const requestedLower = requested.toLowerCase();
+  const deniedPrefixes = ["partykit/", "workers/", "apps/worker/", "packages/protocol/", "tests/", "node_modules/"];
+  if (requested.split("/").includes("..")) return null;
+  if (deniedPrefixes.some((prefix) => requestedLower.startsWith(prefix))) return null;
+  const resolved = path.resolve(PUBLIC_ROOT, path.normalize(requested));
+  if (resolved !== PUBLIC_ROOT && !resolved.startsWith(PUBLIC_ROOT + path.sep)) return null;
   if (isPrivatePath(resolved)) return null;
   return resolved;
 }

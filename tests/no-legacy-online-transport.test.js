@@ -16,7 +16,7 @@ test("production online configuration uses the Cloudflare Worker route only", ()
 
   assert.equal(fs.existsSync(path.join(root, "partykit.json")), false);
   assert.doesNotMatch(scripts, /partykit/i);
-  assert.match(readme, /workers[\\/]wrangler\.jsonc/);
+  assert.match(readme, /apps[\\/]worker[\\/]wrangler\.jsonc/);
   assert.match(readme, /npx wrangler (dev|deploy)/);
   assert.match(readme, /online.*BLOCKED/i);
   assert.match(readme, /PartyKit legacy.*không còn là route deploy hoặc authority online/i);
@@ -24,10 +24,11 @@ test("production online configuration uses the Cloudflare Worker route only", ()
 
 test("online browser code has no fallback or second transport", () => {
   const source = [
-    "playhtml-bootstrap.js",
-    "playhtml-game-client.js",
-    "game.js",
-    "index.html"
+    "packages/game-client/src/playhtml-bootstrap.js",
+    "packages/game-client/src/playhtml-game-client.js",
+    "apps/web/src/sessions/online/runtimeBridge.ts",
+    "apps/web/src/sessions/online/OnlineSession.ts",
+    "apps/web/static/playhtml-game.html"
   ].map(read).join("\n");
 
   assert.doesNotMatch(source, /new\s+WebSocket\s*\(|PartySocket|polling/i);

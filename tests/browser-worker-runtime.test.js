@@ -54,37 +54,37 @@ test("two isolated browser profiles create, join, attach and play a legal move o
       window.OTT_PLAYHTML_HOST = workerOrigin;
     }, { workerOrigin: fixture.workerOrigin });
     await page.goto(fixture.appOrigin, { waitUntil: "networkidle" });
-    await page.locator("#player-name").fill(name);
+    await page.getByLabel("Tên của bạn").first().fill(name);
     return page;
   }
 
   const a = await openProfile("a", "Alice");
-  await a.locator('#start-form button[value="create"]').click();
+  await a.getByRole("button", { name: "Tạo phòng" }).click();
   try {
-    await a.locator("#table").waitFor({ state: "visible", timeout: 10_000 });
+    await a.locator('[data-testid="game-screen"]').waitFor({ state: "visible", timeout: 10_000 });
   } catch {
     const diagnostics = await fixture.diagnostics();
-    const ui = await a.evaluate(() => ({ screen: document.querySelector("#app")?.dataset.screen, network: document.querySelector("#net-chip")?.textContent, factory: typeof window.OTT_PLAYHTML_CONNECTION_FACTORY, bootstrap: typeof window.OTT_PLAYHTML_BOOTSTRAP }));
-    throw new Error(`Creator did not attach. toast=${await a.locator("#toast").textContent()} ui=${JSON.stringify(ui)} pageErrors=${JSON.stringify(pageErrors.a)} consoleErrors=${JSON.stringify(consoleErrors.a)} sockets=${JSON.stringify(sockets.a)} frames=${JSON.stringify(frames.a)} worker=${JSON.stringify(diagnostics)}`);
+    const ui = await a.evaluate(() => ({ game: Boolean(document.querySelector('[data-testid="game-screen"]')), factory: typeof window.OTT_PLAYHTML_CONNECTION_FACTORY, bootstrap: typeof window.OTT_PLAYHTML_BOOTSTRAP }));
+    throw new Error(`Creator did not attach. body=${JSON.stringify((await a.locator("body").innerText()).slice(0, 500))} ui=${JSON.stringify(ui)} pageErrors=${JSON.stringify(pageErrors.a)} consoleErrors=${JSON.stringify(consoleErrors.a)} sockets=${JSON.stringify(sockets.a)} frames=${JSON.stringify(frames.a)} worker=${JSON.stringify(diagnostics)}`);
   }
-  await a.waitForFunction(() => document.querySelectorAll("#board .cell").length === 81);
-  const roomLabel = await a.locator("#room-chip").textContent();
+  await a.waitForFunction(() => document.querySelectorAll('[data-testid^="board-cell-"]').length === 81);
+  const roomLabel = await a.locator('[data-testid="room-label"]').textContent();
   assert.ok(roomLabel && /ott-[0-9a-f-]+/.test(roomLabel), "creator should be attached to its canonical Worker room");
 
   const b = await openProfile("b", "Bob");
   await b.reload({ waitUntil: "networkidle" });
-  const roomButton = b.locator("#room-list button").first();
+  const roomButton = b.locator('[data-testid="room-list"] button').first();
   await roomButton.waitFor({ state: "visible" });
   await roomButton.click();
-  await b.locator("#table").waitFor({ state: "visible" });
-  await b.waitForFunction(() => document.querySelectorAll("#board .cell").length === 81);
+  await b.locator('[data-testid="game-screen"]').waitFor({ state: "visible" });
+  await b.waitForFunction(() => document.querySelectorAll('[data-testid^="board-cell-"]').length === 81);
 
   // The Worker intentionally rate-limits each socket to one OTT command per 40 ms.
   // Leave ample room after B's attach and between the two UI clicks.
   await a.waitForTimeout(500);
-  const source = a.locator('#board .cell[data-x="0"][data-y="2"]');
+  const source = a.locator('[data-testid="board-cell-A3"]');
   await source.click();
-  const target = a.locator("#board .cell.is-legal").first();
+  const target = a.locator('[data-testid^="board-cell-"][aria-label*="nước hợp lệ"]').first();
   await target.waitFor({ state: "visible" });
   const destination = await target.evaluate((cell) => ({ x: cell.dataset.x, y: cell.dataset.y }));
   await a.waitForTimeout(100);
@@ -92,13 +92,13 @@ test("two isolated browser profiles create, join, attach and play a legal move o
 
   try {
     await b.waitForFunction(({ x, y }) => {
-      const from = document.querySelector('#board .cell[data-x="0"][data-y="2"]');
-      const to = document.querySelector(`#board .cell[data-x="${x}"][data-y="${y}"]`);
-      return from && to && !from.classList.contains("has-piece") && to.classList.contains("has-piece");
+      const from = document.querySelector('[data-testid="board-cell-A3"]');
+      const to = document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+      return from && to && from.getAttribute("aria-label")?.includes("trống") && !to.getAttribute("aria-label")?.includes("trống");
     }, destination, { timeout: 10_000 });
   } catch {
     const diagnostics = await fixture.diagnostics();
-    const ui = await Promise.all([a, b].map((page) => page.evaluate(() => ({ screen: document.querySelector("#app")?.dataset.screen, network: document.querySelector("#net-chip")?.textContent, pieces: [...document.querySelectorAll("#board .has-piece")].map((cell) => [cell.dataset.x, cell.dataset.y, cell.textContent]) }))));
+    const ui = await Promise.all([a, b].map((page) => page.evaluate(() => ({ game: Boolean(document.querySelector('[data-testid="game-screen"]')), pieces: [...document.querySelectorAll('[data-testid^="board-cell-"]')].filter((cell) => !cell.getAttribute("aria-label")?.includes("trống")).map((cell) => cell.getAttribute("aria-label")) }))));
     throw new Error(`Move did not propagate. destination=${JSON.stringify(destination)} ui=${JSON.stringify(ui)} frames=${JSON.stringify(frames)} sockets=${JSON.stringify(sockets)} worker=${JSON.stringify(diagnostics)}`);
   }
   for (const key of ["a", "b"]) {
