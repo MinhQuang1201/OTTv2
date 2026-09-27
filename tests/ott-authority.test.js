@@ -1120,6 +1120,56 @@ test("real adapter attach rollback restores persistence and permits a later A at
   assert.deepEqual(fixture.server.identities.get(validPlayer), { role: "player", seat: "A" });
 });
 
+test("real adapter B attach rollback restores a live A and permits a later B attach", async () => {
+  const { OttGameServer } = await gameModule();
+  const { DurableRoomAdapter, ROOM_KEY } = await roomStorageModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.values.set("creatorName", "Alice");
+  fixture.values.set("seat-name:B", "Bob");
+  const adapter = await DurableRoomAdapter.create("ott-room-task6", fixture.storage, () => 100);
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const playerA = connection("real-adapter-live-A");
+  const attachA = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "real-adapter-live-A-attach-01",
+  });
+
+  await fixture.server.dispatchOttMessage(playerA, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: attachA,
+  }));
+  const beforeAttachB = structuredClone(await fixture.storage.get(ROOM_KEY));
+
+  const failedPlayerB = {
+    id: "real-adapter-failed-B",
+    serializeAttachment() { throw new Error("B attachment serialization failed"); },
+    close() {},
+  };
+  const failedAttachB = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "B", nonce: "real-adapter-failed-B-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(failedPlayerB, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: failedAttachB,
+  }));
+
+  assert.equal(adapter.room.players.A.connected, true);
+  assert.equal(adapter.room.players.A.connection, playerA);
+  assert.equal(adapter.room.players.B, null);
+  assert.deepEqual(adapter.connectionsSnapshot(), [playerA]);
+  assert.deepEqual(await fixture.storage.get(ROOM_KEY), beforeAttachB);
+
+  const playerB = connection("real-adapter-valid-B");
+  const attachB = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "B", nonce: "real-adapter-valid-B-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(playerB, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: attachB,
+  }));
+
+  assert.equal(adapter.room.players.A.connection, playerA);
+  assert.equal(adapter.room.players.B.connection, playerB);
+  assert.deepEqual(adapter.connectionsSnapshot(), [playerA, playerB]);
+});
+
 test("room operations serialize move, leave, and alarm payload revisions", async () => {
   const { OttGameServer } = await gameModule();
   const fixture = gameFixture(OttGameServer.prototype);

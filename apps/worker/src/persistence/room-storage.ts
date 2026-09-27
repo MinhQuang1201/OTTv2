@@ -29,9 +29,8 @@ export type CommittedRoomOutcome<T = unknown> = {
 };
 
 type ProvisionalAttach = {
-  seat: "A" | "B";
   snapshot: unknown;
-  connectedSeats: Map<"A" | "B", RoomConnection>;
+  liveConnections: Map<"A" | "B", RoomConnection>;
 };
 
 function projectPlayer(player: any): { name: string; connected: boolean } | null {
@@ -128,9 +127,10 @@ export class DurableRoomAdapter {
     if (!provisional || this.unavailable || !this.room) return null;
     this.room = hydrateRoom(provisional.snapshot, this.roomId, roomDependencies(this.now, this.timing));
     this.connections.clear();
-    for (const [seat, liveConnection] of provisional.connectedSeats) {
+    for (const [seat, liveConnection] of provisional.liveConnections) {
       const player = this.room.players[seat];
-      if (!player || !player.connected) continue;
+      if (!player) continue;
+      player.connected = true;
       player.connection = liveConnection;
       player.reconnectDeadlineMs = null;
       this.remember(liveConnection);
@@ -297,11 +297,11 @@ export class DurableRoomAdapter {
     const trustedName = name ?? await storage.get<string>(seat === "A" ? "creatorName" : `seat-name:${seat}`);
     if (typeof trustedName !== "string" || !trustedName.trim()) return { ok: false, error: "seat_name_unavailable" };
     const snapshot = serializeRoom(this.room);
-    const connectedSeats = new Map<"A" | "B", RoomConnection>();
+    const liveConnections = new Map<"A" | "B", RoomConnection>();
     for (const candidate of ["A", "B"] as const) {
       const player = this.room?.players?.[candidate];
       const liveConnection = player?.connection as RoomConnection | undefined;
-      if (player?.connected && liveConnection) connectedSeats.set(candidate, liveConnection);
+      if (player?.connected && liveConnection) liveConnections.set(candidate, liveConnection);
     }
     const existing = this.room?.players?.[seat];
     let result: any;
@@ -315,7 +315,7 @@ export class DurableRoomAdapter {
       if (seat === "B" && !this.room?.players?.A) return { ok: false, error: "Ghế A chưa được khởi tạo" };
       result = (await this.mutate((room) => room.addPlayer(connection, trustedName), storage, storage === this.storage)).result;
       if (result?.ok && result.seat !== seat) {
-        this.provisionalAttaches.set(connection, { seat: result.seat, snapshot, connectedSeats });
+        this.provisionalAttaches.set(connection, { snapshot, liveConnections });
         await this.rollbackAttach(connection);
         return { ok: false, error: "Sai ghế được cấp quyền" };
       }
@@ -323,7 +323,7 @@ export class DurableRoomAdapter {
       return { ok: false, error: "Ghế đã được sử dụng" };
     }
     if (result?.ok) {
-      this.provisionalAttaches.set(connection, { seat, snapshot, connectedSeats });
+      this.provisionalAttaches.set(connection, { snapshot, liveConnections });
       this.remember(connection);
     }
     return result;
