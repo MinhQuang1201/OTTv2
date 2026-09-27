@@ -21,9 +21,23 @@ export type OttCommand =
   | { __ott: true; roomId: string; type: "ott:leave" };
 
 export type Coordinate = { x: number; y: number };
+export type Seat = "A" | "B";
+
+export type PublicPlayerView = {
+  readonly name: string;
+  readonly connected: boolean;
+  readonly remainingMs?: number;
+};
+
+export type PublicPlayers = Readonly<Record<Seat, PublicPlayerView | null>>;
+
+// Game-core owns the evolving state/event schema; protocol validation keeps these payloads opaque.
+export type OpaqueGameState = Readonly<Record<string, unknown>>;
+export type OpaqueGameEvent = Readonly<Record<string, unknown>>;
+export type OttStatePayload = OpaqueGameState | SpectatorProjection;
 
 export type ViewerIdentity =
-  | { readonly role: "player"; readonly seat: "A" | "B" }
+  | { readonly role: "player"; readonly seat: Seat }
   | { readonly role: "spectator" };
 
 export type SpectatorProjection = {
@@ -31,9 +45,9 @@ export type SpectatorProjection = {
   readonly status: "playing" | "finished";
   readonly revision: number;
   readonly serverNow: number;
-  readonly players: unknown;
-  readonly state: unknown;
-  readonly events: readonly unknown[];
+  readonly players: PublicPlayers;
+  readonly state: OpaqueGameState;
+  readonly events: readonly OpaqueGameEvent[];
   readonly viewer: { readonly role: "spectator" };
   readonly spectatorCount: number;
 };
@@ -41,7 +55,7 @@ export type SpectatorProjection = {
 export type OttResponse =
   | { __ott: true; roomId: string; revision: number; type: "ott:ack"; ok: true }
   | { __ott: true; roomId: string; revision: number; type: "ott:error"; error: string }
-  | { __ott: true; roomId: string; revision: number; type: "ott:state"; state: unknown };
+  | { __ott: true; roomId: string; revision: number; type: "ott:state"; state: OttStatePayload };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -99,8 +113,8 @@ export function parseOttResponse(value: string): ParseResult<OttResponse> {
   const parsed = parseJson(value);
   if (!parsed.ok) return parsed;
   const object = parsed.value;
-  if (object.__ott !== true || typeof object.roomId !== "string" ||
-      !Number.isInteger(object.revision) || typeof object.type !== "string") {
+  if (object.__ott !== true || typeof object.roomId !== "string" || object.roomId.length === 0 ||
+      !Number.isInteger(object.revision) || object.revision < 0 || typeof object.type !== "string") {
     return { ok: false, error: "invalid_response" };
   }
   const keys = RESPONSE_KEYS[object.type as keyof typeof RESPONSE_KEYS];

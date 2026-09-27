@@ -111,6 +111,14 @@ test("canonical capability round-trips and parallel verification commits one mut
   assert.equal(store.values.get("attach-nonce:" + claims.nonce), claims.now + claims.ttlMs);
 });
 
+test("capability types preserve player and spectator payload narrowing", () => {
+  assert.match(auth, /export type CapabilityPayload = PlayerCapability/);
+  assert.match(auth, /TransactionalPlayerCapabilityVerification/);
+  assert.match(auth, /TransactionalSpectatorCapabilityVerification/);
+  assert.match(auth, /Promise<TransactionalPlayerCapabilityVerification<T>>/);
+  assert.match(auth, /Promise<TransactionalSpectatorCapabilityVerification<T>>/);
+});
+
 test("spectator v2 capabilities are seatless, variant-bound, and replay-safe", async () => {
   const { issueCapability, verifyCapability, verifyCapabilityTransaction } = await authModule();
   const allocationId = "allocation-spectator-1";

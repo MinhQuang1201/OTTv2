@@ -27,7 +27,9 @@ export type SpectatorCapability = CapabilityBase & {
   role: "spectator";
 };
 
-export type CapabilityPayload = PlayerCapability | SpectatorCapability;
+/** Compatibility alias for existing player-only consumers of CapabilityPayload["seat"]. */
+export type CapabilityPayload = PlayerCapability;
+export type CapabilityPayloadVariant = PlayerCapability | SpectatorCapability;
 
 export interface CapabilityTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -68,8 +70,15 @@ export type CapabilityVerification =
   | SpectatorCapabilityVerification
   | { ok: false; reason: CapabilityFailureReason };
 
-export type TransactionalCapabilityVerification<T> =
-  | { ok: true; payload: CapabilityPayload; value: T }
+export type TransactionalCapabilityFailure = CapabilityFailureReason | "mutation-rejected" | "transaction-failed";
+export type TransactionalPlayerCapabilityVerification<T> =
+  | { ok: true; payload: PlayerCapability; value: T }
+  | { ok: false; reason: TransactionalCapabilityFailure; value?: T };
+export type TransactionalSpectatorCapabilityVerification<T> =
+  | { ok: true; payload: SpectatorCapability; value: T }
+  | { ok: false; reason: TransactionalCapabilityFailure; value?: T };
+export type TransactionalCapabilityVerification<T, P extends CapabilityPayloadVariant = CapabilityPayloadVariant> =
+  | { ok: true; payload: P; value: T }
   | { ok: false; reason: CapabilityFailureReason | "mutation-rejected" | "transaction-failed"; value?: T };
 
 function base64url(bytes: Uint8Array): string {
@@ -83,7 +92,7 @@ function fromBase64url(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function canonical(payload: CapabilityPayload): string {
+function canonical(payload: CapabilityPayloadVariant): string {
   if (payload.v === SPECTATOR_CAPABILITY_VERSION) {
     return JSON.stringify([
       payload.v, payload.allocationId, payload.roomId, payload.purpose,
@@ -317,29 +326,38 @@ export async function retryRecoverableInitialization<T>(
   return request();
 }
 
-function parseCanonical(value: string): CapabilityPayload {
+function isPlayerPurpose(value: unknown): value is PlayerCapability["purpose"] {
+  return ["game-init", "attach", "seat-update", "lifecycle"].includes(value as string);
+}
+
+function isPlayerSeat(value: unknown): value is PlayerCapability["seat"] {
+  return value === "A" || value === "B";
+}
+
+function parseCanonical(value: string): CapabilityPayloadVariant {
   const fields: unknown = JSON.parse(value);
   if (!Array.isArray(fields)) throw new Error("Invalid capability payload");
   if (fields[0] === SPECTATOR_CAPABILITY_VERSION) {
     if (fields.length !== 8) throw new Error("Invalid spectator capability payload");
-    const [v, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce] = fields;
+    const [, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce] = fields;
     if (typeof allocationId !== "string" || typeof roomId !== "string" || purpose !== "spectate" ||
-        role !== "spectator" || !Number.isInteger(issuedAt) || !Number.isInteger(expiresAt) ||
+        role !== "spectator" || typeof issuedAt !== "number" || !Number.isInteger(issuedAt) ||
+        typeof expiresAt !== "number" || !Number.isInteger(expiresAt) ||
         typeof nonce !== "string") throw new Error("Invalid spectator capability payload");
-    return { v, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce };
+    return { v: SPECTATOR_CAPABILITY_VERSION, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce };
   }
   if (fields[0] !== PLAYER_CAPABILITY_VERSION || (fields.length !== 8 && fields.length !== 9)) {
     throw new Error("Invalid player capability payload");
   }
-  const [v, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, revision] = fields;
+  const [, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, revision] = fields;
   if (typeof allocationId !== "string" || typeof roomId !== "string" ||
-      !["game-init", "attach", "seat-update", "lifecycle"].includes(purpose as string) ||
-      !["A", "B"].includes(seat as string) || !Number.isInteger(issuedAt) ||
-      !Number.isInteger(expiresAt) || typeof nonce !== "string" ||
+      !isPlayerPurpose(purpose) || !isPlayerSeat(seat) || typeof issuedAt !== "number" ||
+      !Number.isInteger(issuedAt) || typeof expiresAt !== "number" || !Number.isInteger(expiresAt) ||
+      typeof nonce !== "string" ||
       (revision !== undefined && !Number.isInteger(revision))) {
     throw new Error("Invalid player capability payload");
   }
-  return { v, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, ...(revision === undefined ? {} : { revision }) } as PlayerCapability;
+  return { v: PLAYER_CAPABILITY_VERSION, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, ...(revision === undefined ? {} : { revision }) };
 }
 
 async function keyFor(secret: string): Promise<CryptoKey> {
@@ -359,7 +377,7 @@ export async function issueCapability(
   input: (Omit<PlayerCapability, "v" | "issuedAt" | "expiresAt" | "nonce"> | Omit<SpectatorCapability, "v" | "issuedAt" | "expiresAt" | "nonce">) & { now?: number; ttlMs?: number; nonce?: string },
 ): Promise<string> {
   const issuedAt = input.now ?? Date.now();
-  const payload: CapabilityPayload = input.purpose === "spectate"
+  const payload: CapabilityPayloadVariant = input.purpose === "spectate"
     ? {
       v: SPECTATOR_CAPABILITY_VERSION,
       allocationId: input.allocationId,
@@ -403,7 +421,7 @@ export async function verifyCapability(
   token: string,
   expected: CapabilityExpectations,
   now = Date.now(),
-): Promise<CapabilityPayload | null> {
+): Promise<CapabilityPayloadVariant | null> {
   const result = await verifyCapabilityDetailed(secret, token, expected, now);
   return result.ok ? result.payload : null;
 }
@@ -484,7 +502,7 @@ export async function verifyCapabilityTransaction<T>(
   transaction: CapabilityTransactionRunner,
   mutate: (payload: PlayerCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options: { now?: number; noncePrefix?: string } = {},
-): Promise<TransactionalCapabilityVerification<T>>;
+): Promise<TransactionalPlayerCapabilityVerification<T>>;
 export async function verifyCapabilityTransaction<T>(
   secret: string,
   token: string,
@@ -492,13 +510,13 @@ export async function verifyCapabilityTransaction<T>(
   transaction: CapabilityTransactionRunner,
   mutate: (payload: SpectatorCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options?: { now?: number; noncePrefix?: string },
-): Promise<TransactionalCapabilityVerification<T>>;
+): Promise<TransactionalSpectatorCapabilityVerification<T>>;
 export async function verifyCapabilityTransaction<T>(
   secret: string,
   token: string,
   expected: CapabilityExpectations,
   transaction: CapabilityTransactionRunner,
-  mutate: (payload: CapabilityPayload, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  mutate: (payload: CapabilityPayloadVariant, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options: { now?: number; noncePrefix?: string } = {},
 ): Promise<TransactionalCapabilityVerification<T>> {
   const verification = await verifyCapabilityDetailed(secret, token, expected, options.now ?? Date.now());
@@ -529,7 +547,7 @@ export async function verifyPlayerCapabilityTransaction<T>(
   transaction: CapabilityTransactionRunner,
   mutate: (payload: PlayerCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options: { now?: number; noncePrefix?: string } = {},
-): Promise<TransactionalCapabilityVerification<T>> {
+): Promise<TransactionalPlayerCapabilityVerification<T>> {
   return verifyCapabilityTransaction(secret, token, expected, transaction, mutate, options);
 }
 
@@ -540,7 +558,7 @@ export async function verifySpectatorCapabilityTransaction<T>(
   transaction: CapabilityTransactionRunner,
   mutate: (payload: SpectatorCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options: { now?: number; noncePrefix?: string } = {},
-): Promise<TransactionalCapabilityVerification<T>> {
+): Promise<TransactionalSpectatorCapabilityVerification<T>> {
   return verifyCapabilityTransaction(secret, token, expected, transaction, mutate, options);
 }
 
@@ -559,7 +577,7 @@ export async function attachWithCapabilityRecovery<C, T extends { ok?: boolean }
   transaction: CapabilityTransactionRunner,
   adapter: AttachRecoveryAdapter<C, T>,
   connection: C,
-): Promise<TransactionalCapabilityVerification<T>> {
+): Promise<TransactionalPlayerCapabilityVerification<T>> {
   const result = await verifyCapabilityTransaction(secret, token, expected, transaction, async (payload, storage) => {
     const attached = await adapter.attach(connection, payload.seat, undefined, storage);
     if (attached?.ok === true) await adapter.scheduleAlarm(storage);

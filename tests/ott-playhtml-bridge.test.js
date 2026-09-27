@@ -66,6 +66,26 @@ test("compiled protocol parses the exact spectator command and rejects near miss
   }
 });
 
+test("compiled protocol validates response room and revision symmetrically", async () => {
+  const { parseOttResponse } = await protocolModule();
+  assert.deepEqual(parseOttResponse(JSON.stringify({
+    __ott: true,
+    roomId: "room-1",
+    revision: 0,
+    type: "ott:state",
+    state: { opaque: true },
+  })), {
+    ok: true,
+    value: { __ott: true, roomId: "room-1", revision: 0, type: "ott:state", state: { opaque: true } },
+  });
+  for (const response of [
+    { __ott: true, roomId: "", revision: 0, type: "ott:ack", ok: true },
+    { __ott: true, roomId: "room-1", revision: -1, type: "ott:ack", ok: true },
+  ]) {
+    assert.equal(parseOttResponse(JSON.stringify(response)).ok, false);
+  }
+});
+
 test("custom-message bridge is implemented at YServer boundary without super dispatch", () => {
   const source = fs.readFileSync(path.join(root, "apps", "worker", "src", "game", "ott-game-server.ts"), "utf8");
   assert.match(source, /override\s+onCustomMessage\s*\(/);
