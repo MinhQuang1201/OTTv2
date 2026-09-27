@@ -17,8 +17,6 @@ export type StorageLike = {
 };
 
 export type RoomTiming = { initialClockMs?: number; reconnectGraceMs?: number; alarmRetryMs?: number };
-export type TerminalizeAllocation = (reason: string) => Promise<void>;
-
 export type RoomConnection = { id?: string; send?: (value: string) => void; readyState?: number; open?: boolean };
 export type RoomViewer =
   | { readonly role: "player"; readonly seat: "A" | "B" }
@@ -63,25 +61,23 @@ export class DurableRoomAdapter {
   private readonly storage: StorageLike;
   private readonly now: () => number;
   private readonly timing: RoomTiming;
-  private readonly terminalizeAllocation?: TerminalizeAllocation;
   private readonly connections = new Map<string, RoomConnection>();
   private readonly emittedTerminalReasons = new Set<string>();
 
-  private constructor(roomId: string, storage: StorageLike, now: () => number, room: any, timing: RoomTiming = {}, terminalizeAllocation?: TerminalizeAllocation) {
+  private constructor(roomId: string, storage: StorageLike, now: () => number, room: any, timing: RoomTiming = {}) {
     this.roomId = roomId;
     this.storage = storage;
     this.now = now;
     this.timing = timing;
-    this.terminalizeAllocation = terminalizeAllocation;
     this.room = room;
   }
 
-  static async load(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}, terminalizeAllocation?: TerminalizeAllocation): Promise<DurableRoomAdapter | null> {
+  static async load(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}): Promise<DurableRoomAdapter | null> {
     const saved = await storage.get<any>(ROOM_KEY);
     if (saved === undefined) return null;
     try {
       const room = hydrateRoom(saved, roomId, roomDependencies(now, timing));
-      const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing, terminalizeAllocation);
+      const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
       if (await storage.get("allocationTerminalReason")) adapter.unavailable = true;
       const reconciliation = room.reconcileHydration(now());
       if (reconciliation.seats.length || room.status === "waiting") await adapter.persist();
@@ -94,9 +90,9 @@ export class DurableRoomAdapter {
     }
   }
 
-  static async create(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}, terminalizeAllocation?: TerminalizeAllocation): Promise<DurableRoomAdapter> {
+  static async create(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}): Promise<DurableRoomAdapter> {
     const room = new Room(roomId, roomDependencies(now, timing));
-    const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing, terminalizeAllocation);
+    const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
     await adapter.persist();
     await adapter.scheduleAlarm();
     return adapter;
@@ -160,27 +156,12 @@ export class DurableRoomAdapter {
       await storage.put(ROOM_KEY, serializeRoom(this.room));
       if (schedule) {
         const terminalReason = this.room.status === "done" ? this.room.state.reason : null;
-        if (terminalReason && this.terminalizeAllocation && !(await storage.get("allocationTerminalReason"))) {
-          // A terminal mutation may remove the only outstanding alarm (for example,
-          // when the creator leaves). Notify Lobby synchronously after the durable
-          // Room write so an alarm-storage failure cannot strand the allocation.
-          try {
-            await this.terminalizeAllocation(terminalReason);
-            await storage.put("allocationTerminalReason", terminalReason);
-            await storage.deleteAlarm?.();
-            this.unavailable = true;
-          } catch {
-            // If Lobby is temporarily unavailable, retain the durable terminal Room
-            // and arm the normal terminal retry instead of losing the allocation
-            // cleanup after the previous alarm has been cleared.
-            await this.scheduleAlarm(storage);
-          }
-        } else {
-          try {
-            await this.scheduleAlarm(storage);
-          } catch (error) {
-            if (!terminalReason || this.terminalizeAllocation) throw error;
-          }
+        try {
+          await this.scheduleAlarm(storage);
+        } catch (error) {
+          // A terminal Room is already durably committed. The server receives the
+          // outcome and owns Lobby cleanup/retry, even when alarm storage is down.
+          if (!terminalReason) throw error;
         }
       }
     } catch (error) {
@@ -202,6 +183,7 @@ export class DurableRoomAdapter {
   }
 
   async scheduleTerminalRetry(reason: string, storage: StorageLike = this.storage): Promise<void> {
+    this.emittedTerminalReasons.delete(reason);
     await storage.put("terminalRetryReason", reason);
     try {
       await this.scheduleAlarm(storage);
@@ -214,20 +196,20 @@ export class DurableRoomAdapter {
     if (this.unavailable || !this.room) return null;
     const retryReason = await this.storage.get<string>("terminalRetryReason");
     if (retryReason) {
-      return { result: null, payload: this.lastPayload as Record<string, unknown>, terminalReason: retryReason };
+      if (this.emittedTerminalReasons.has(retryReason)) return null;
+      const payload = this.room.payload();
+      this.lastPayload = payload;
+      this.emittedTerminalReasons.add(retryReason);
+      return { result: null, payload, terminalReason: retryReason };
     }
-    if (this.emittedTerminalReasons.size) return null;
     if (this.room.status === "done") {
       const reason = this.room.state.reason;
       if (!reason || await this.storage.get("allocationTerminalReason") || this.emittedTerminalReasons.has(reason)) return null;
-      if (this.terminalizeAllocation) {
-        await this.terminalizeAllocation(reason);
-        await this.markTerminalized(reason);
-      } else {
-        await this.storage.deleteAlarm?.();
-        this.emittedTerminalReasons.add(reason);
-      }
-      return { result: null, payload: this.lastPayload as Record<string, unknown>, terminalReason: reason };
+      const payload = this.room.payload();
+      this.lastPayload = payload;
+      await this.scheduleTerminalRetry(reason);
+      this.emittedTerminalReasons.add(reason);
+      return { result: null, payload, terminalReason: reason };
     }
     const now = this.now();
     const creatorDeadline = await this.storage.get<number>("creatorAttachDeadlineMs");
@@ -238,13 +220,8 @@ export class DurableRoomAdapter {
       const payload = this.room.payload();
       this.lastPayload = payload;
       await this.persist();
-      if (this.terminalizeAllocation) {
-        await this.terminalizeAllocation("creator_attach_timeout");
-        await this.markTerminalized("creator_attach_timeout");
-      } else {
-        await this.storage.deleteAlarm?.();
-        this.emittedTerminalReasons.add("creator_attach_timeout");
-      }
+      await this.scheduleTerminalRetry("creator_attach_timeout");
+      this.emittedTerminalReasons.add("creator_attach_timeout");
       return { result: null, payload, terminalReason: "creator_attach_timeout" };
     }
     const clock = this.room.settleClock(now);
@@ -256,16 +233,13 @@ export class DurableRoomAdapter {
       await this.persist();
     }
     if (terminalReason) {
-      if (this.terminalizeAllocation) {
-        await this.terminalizeAllocation(terminalReason);
-        await this.markTerminalized(terminalReason);
-      } else {
-        await this.storage.deleteAlarm?.();
-        this.emittedTerminalReasons.add(terminalReason);
-      }
+      const payload = this.lastPayload ?? this.room.payload();
+      this.lastPayload = payload;
+      await this.scheduleTerminalRetry(terminalReason);
+      this.emittedTerminalReasons.add(terminalReason);
       return {
         result: { clock, waiting, reconnect },
-        payload: this.lastPayload as Record<string, unknown>,
+        payload: payload as Record<string, unknown>,
         terminalReason,
         clock,
         waiting,
@@ -275,7 +249,7 @@ export class DurableRoomAdapter {
     await this.scheduleAlarm();
     return {
       result: { clock, waiting, reconnect },
-      payload: this.lastPayload as Record<string, unknown>,
+      payload: (this.lastPayload ?? this.room.payload()) as Record<string, unknown>,
       terminalReason: undefined,
       clock,
       waiting,

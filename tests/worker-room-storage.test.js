@@ -40,12 +40,11 @@ function fakeStorage(initial = {}) {
   };
 }
 
-test("creator-never-attaches deadline is scheduled and terminalized once", async () => {
+test("creator-never-attaches deadline returns an explicit terminal outcome", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
-  const terminalReasons = [];
   const storage = fakeStorage({ creatorAttachDeadlineMs: 500 });
-  const adapter = await DurableRoomAdapter.create("ott-deadline-create", storage, () => now, {}, async (reason) => terminalReasons.push(reason));
+  const adapter = await DurableRoomAdapter.create("ott-deadline-create", storage, () => now);
 
   assert.equal(storage.values.get("alarm"), 500);
   now = 500;
@@ -55,18 +54,17 @@ test("creator-never-attaches deadline is scheduled and terminalized once", async
   assert.equal(first.terminalReason, "creator_attach_timeout");
   assert.equal(repeated, null);
   assert.equal(storage.values.get("creatorAttachDeadlineConsumed"), true);
-  assert.equal(storage.values.get("alarm"), null);
-  assert.deepEqual(terminalReasons, ["creator_attach_timeout"]);
+  assert.equal(storage.values.get("terminalRetryReason"), "creator_attach_timeout");
+  assert.ok(first.payload);
 });
 
 test("waiting disconnect deadline uses the reconnect deadline and expires once", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
   const storage = fakeStorage({ creatorAttachDeadlineMs: 900 });
-  const terminalReasons = [];
   const adapter = await DurableRoomAdapter.create("ott-deadline-disconnect", storage, () => now, {
     reconnectGraceMs: 100,
-  }, async (reason) => terminalReasons.push(reason));
+  });
   const connection = { id: "creator", open: true, send() {} };
   assert.equal((await adapter.attach(connection, "A", "Alice")).ok, true);
   now = 200;
@@ -79,7 +77,7 @@ test("waiting disconnect deadline uses the reconnect deadline and expires once",
   assert.equal(expired.waiting.expired, true);
   assert.equal(adapter.room.status, "done");
   assert.equal(stale, null);
-  assert.deepEqual(terminalReasons, ["disconnect_timeout"]);
+  assert.equal(storage.values.get("terminalRetryReason"), "disconnect_timeout");
 });
 
 test("earliest clock, reconnect, and creator deadline wins", async () => {
@@ -124,7 +122,7 @@ test("stale alarm does not expire or duplicate lifecycle terminalization", async
   assert.equal(await adapter.onAlarm(), null);
 });
 
-test("terminal Room alarm is removed", async () => {
+test("terminal Room alarm schedules cleanup retry", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
   const storage = fakeStorage({ creatorName: "Alice" });
@@ -136,15 +134,14 @@ test("terminal Room alarm is removed", async () => {
 
   assert.equal(storage.values.get("alarm"), 1_100);
   await adapter.onAlarm();
-  assert.equal(storage.values.get("alarm"), null);
+  assert.equal(storage.values.get("terminalRetryReason"), "leave");
 });
 
-test("terminal leave completes Lobby cleanup even when alarm scheduling fails", async () => {
+test("terminal leave remains a durable outcome when alarm scheduling fails", async () => {
   const { DurableRoomAdapter, ROOM_KEY } = await roomStorageModule();
   let now = 100;
-  const reasons = [];
   const storage = fakeStorage({ creatorName: "Alice" });
-  const adapter = await DurableRoomAdapter.create("ott-deadline-alarm-failure", storage, () => now, {}, async (reason) => reasons.push(reason));
+  const adapter = await DurableRoomAdapter.create("ott-deadline-alarm-failure", storage, () => now);
   const connection = { id: "creator", open: true, send() {} };
   await adapter.attach(connection, "A");
 
@@ -154,20 +151,15 @@ test("terminal leave completes Lobby cleanup even when alarm scheduling fails", 
   assert.equal(left.result.ok, true);
   assert.equal(adapter.room.status, "done");
   assert.equal(storage.values.get(ROOM_KEY).status, "done");
-  assert.equal(storage.values.get("allocationTerminalReason"), "leave");
-  assert.deepEqual(reasons, ["leave"]);
+  assert.equal(storage.values.get("allocationTerminalReason"), undefined);
+  assert.equal(left.terminalReason, "leave");
 });
 
-test("terminal leave schedules an alarm retry when Lobby cleanup temporarily fails", async () => {
+test("terminal leave schedules an alarm retry without calling Lobby", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
-  let failTerminalize = true;
-  const reasons = [];
   const storage = fakeStorage({ creatorName: "Alice" });
-  const adapter = await DurableRoomAdapter.create("ott-deadline-lobby-retry", storage, () => now, {}, async (reason) => {
-    if (failTerminalize) throw new Error("Lobby unavailable");
-    reasons.push(reason);
-  });
+  const adapter = await DurableRoomAdapter.create("ott-deadline-lobby-retry", storage, () => now);
   const connection = { id: "creator", open: true, send() {} };
   await adapter.attach(connection, "A");
 
@@ -177,19 +169,16 @@ test("terminal leave schedules an alarm retry when Lobby cleanup temporarily fai
   assert.equal(storage.values.get("alarm"), 1_100);
   assert.equal(adapter.unavailable, false);
 
-  failTerminalize = false;
   now = 1_100;
   assert.equal((await adapter.onAlarm()).terminalReason, "leave");
-  assert.equal(storage.values.get("allocationTerminalReason"), "leave");
-  assert.deepEqual(reasons, ["leave"]);
+  assert.equal(storage.values.get("terminalRetryReason"), "leave");
 });
 
-test("clock timeout terminalizes the allocation once and removes its alarm", async () => {
+test("clock timeout returns one durable terminal outcome", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
-  const reasons = [];
   const storage = fakeStorage({ creatorName: "Alice", "seat-name:B": "Bob" });
-  const adapter = await DurableRoomAdapter.create("ott-deadline-timeout", storage, () => now, {}, async (reason) => reasons.push(reason));
+  const adapter = await DurableRoomAdapter.create("ott-deadline-timeout", storage, () => now);
   await adapter.attach({ id: "a", open: true, send() {} }, "A");
   await adapter.attach({ id: "b", open: true, send() {} }, "B");
   adapter.room.state.clock.remainingMs.A = 10;
@@ -200,9 +189,23 @@ test("clock timeout terminalizes the allocation once and removes its alarm", asy
   const expired = await adapter.onAlarm();
   assert.equal(expired.terminalReason, "timeout");
   assert.equal(adapter.room.status, "done");
-  assert.equal(storage.values.get("alarm"), null);
-  assert.deepEqual(reasons, ["timeout"]);
+  assert.equal(storage.values.get("terminalRetryReason"), "timeout");
   assert.equal(await adapter.onAlarm(), null);
+});
+
+test("hydrated terminal alarm materializes its payload", async () => {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  let now = 100;
+  const storage = fakeStorage({ creatorName: "Alice" });
+  const adapter = await DurableRoomAdapter.create("ott-deadline-hydrated-terminal", storage, () => now);
+  await adapter.attach({ id: "creator", open: true, send() {} }, "A");
+  await adapter.leave({ id: "creator", open: true, send() {} });
+
+  const hydrated = await DurableRoomAdapter.load("ott-deadline-hydrated-terminal", storage, () => now);
+  assert.ok(hydrated);
+  const outcome = await hydrated.onAlarm();
+  assert.equal(outcome.terminalReason, "leave");
+  assert.deepEqual(outcome.payload, hydrated.room.payload());
 });
 
 test("hydration reconciles alarm from the original absolute creator deadline", async () => {

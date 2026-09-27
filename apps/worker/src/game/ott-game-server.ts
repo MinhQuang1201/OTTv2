@@ -414,7 +414,8 @@ export class OttGameServer extends YServer {
         ...(identity.role === "player" ? { seat: identity.seat } : {}),
         nonce,
       };
-      connection.serializeAttachment?.({ ottViewer: attachment });
+      if (typeof connection.serializeAttachment !== "function") throw new Error("connection attachment serialization unavailable");
+      connection.serializeAttachment({ ottViewer: attachment });
       this.identityNonces.set(connection, nonce);
       return true;
     } catch {
@@ -444,29 +445,31 @@ export class OttGameServer extends YServer {
     return count;
   }
 
-  private async sendProjection(connection: Connection, adapter: DurableRoomAdapter, spectatorCount: number): Promise<void> {
+  private async sendProjection(connection: Connection, adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined, spectatorCount: number): Promise<boolean> {
     const viewer = this.identities.get(connection);
-    if (!viewer || !adapter.lastPayload) return;
+    if (!viewer || !payload) return false;
     try {
       this.sendCustomMessage(connection, JSON.stringify({
         __ott: true,
         roomId: adapter.roomId,
         revision: adapter.room.revision,
         type: "ott:state",
-        state: projectRoomPayload(adapter.lastPayload, viewer, spectatorCount),
+        state: projectRoomPayload(payload, viewer, spectatorCount),
       }));
+      return true;
     } catch {
       // Keep the authenticated identity until the close lifecycle proves it is gone.
+      return false;
     }
   }
 
-  private async broadcastState(adapter: DurableRoomAdapter): Promise<void> {
+  private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined): Promise<void> {
     const count = await this.spectatorCount();
-    await Promise.all([...this.identities.keys()].map((connection) => this.sendProjection(connection, adapter, count)));
+    await Promise.all([...this.identities.keys()].map((connection) => this.sendProjection(connection, adapter, payload, count)));
   }
 
   private async publishCommitted(adapter: DurableRoomAdapter, outcome: CommittedRoomOutcome): Promise<void> {
-    await this.broadcastState(adapter);
+    await this.broadcastState(adapter, outcome.payload);
     if (!outcome.terminalReason) return;
     try {
       await this.terminalizeAllocation(outcome.terminalReason);
@@ -483,7 +486,8 @@ export class OttGameServer extends YServer {
       await this.clearAttachment(connection);
       return { type: "ott:error", revision: 0, error: ROOM_UNAVAILABLE };
     }
-    await this.broadcastState(adapter);
+    const delivered = await this.sendProjection(connection, adapter, adapter.lastPayload as Record<string, unknown> | null | undefined, await this.spectatorCount());
+    if (!delivered) return;
     return {
       type: "ott:state",
       revision: adapter.room.revision,
