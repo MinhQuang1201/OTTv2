@@ -1,6 +1,6 @@
 import type { GameSession, MoveResult, StartGameOptions } from "../contract";
 import type { GameEventView, GameSnapshot, Position, Seat, SessionErrorView } from "../../shared/model/game";
-import { getGameCoreBridge, type CoreState, type GameCoreBridge } from "../core/gameCoreBridge";
+import { getGameCoreBridge, type CoreMove, type CoreMoveChooser, type CoreState, type GameCoreBridge } from "../core/gameCoreBridge";
 import { normalizeCoreEvents, normalizeCoreState } from "../core/normalizeCoreState";
 
 export interface LocalSessionDependencies {
@@ -68,6 +68,12 @@ export class LocalSession implements GameSession {
     const piece = this.state.pieces.find((candidate) => candidate.x === from.x && candidate.y === from.y && candidate.player === this.state?.turn);
     if (!piece) return [];
     try { return this.bridge.getLegalMoves(this.state, piece.id); } catch { return []; }
+  }
+
+  /** Selects a move using an injected canonical-core strategy without exposing core state. */
+  chooseMove(player: Seat, chooser: CoreMoveChooser = this.bridge.ai.chooseMove): CoreMove | null {
+    if (this.disposed || !this.state || this.snapshot.phase !== "playing" || this.state.turn !== player || this.state.winner) return null;
+    try { return chooser(this.state, player); } catch { return null; }
   }
 
   async move(from: Position, to: Position): Promise<MoveResult> {

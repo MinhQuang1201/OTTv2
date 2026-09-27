@@ -4,6 +4,7 @@ import { App, createDemoSession, safeSessionError, type AppState, type SessionFa
 import { ScreenBoundary } from "./ScreenBoundary";
 import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
+import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -73,6 +74,41 @@ describe("App shell lifecycle", () => {
     expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/không khả dụng/i);
     expect(screen.queryByRole("heading", { name: /Đã xảy ra sự cố/i })).not.toBeInTheDocument();
+  });
+
+  it("starts same-device play through LocalSession", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="lobby-default" />);
+
+    await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+    expect(screen.getByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument();
+  });
+
+  it("starts AI play through AiSession", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="lobby-default" />);
+
+    await user.click(screen.getByRole("button", { name: /Đánh với AI/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+    expect(screen.getByText("Máy")).toBeInTheDocument();
+    expect(screen.getByText(/Đến lượt bạn/i)).toBeInTheDocument();
+  });
+
+  it("delegates online create to an OnlineSession instead of switching demo scenarios", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSession = fakeSession();
+    const onlineSessionFactory = vi.fn(() => onlineSession.session);
+    render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby");
+    expect(gateway.listRooms).toHaveBeenCalledTimes(1);
   });
 
   it("shows a safe retryable error and recovers to the lobby", async () => {

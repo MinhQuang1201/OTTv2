@@ -10,9 +10,13 @@ import { LobbyScreen } from "../features/lobby/LobbyScreen";
 import { GameScreen } from "../features/game/GameScreen";
 import { LocalSession } from "../sessions/local/LocalSession";
 import { AiSession } from "../sessions/ai/AiSession";
+import { OnlineSession } from "../sessions/online/OnlineSession";
+import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import styles from "./app.module.css";
+
+const defaultOnlineGateway = new OnlineLobbyGateway();
 
 export type AppState =
   | { readonly status: "boot"; readonly generation: number }
@@ -23,6 +27,7 @@ export type AppState =
   | { readonly status: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly error: SessionErrorView; readonly scenario: DemoScenario };
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
+export type OnlineSessionFactory = () => GameSession;
 
 export function createDemoSession(scenario: DemoScenario): GameSession {
   return new DemoSession(isDemoScenario(scenario) ? scenario : DEFAULT_DEMO_SCENARIO);
@@ -77,21 +82,40 @@ function appStateReducer(_state: AppState, action: LifecycleAction): AppState {
 export interface AppProps {
   readonly initialScenario?: unknown;
   readonly sessionFactory?: SessionFactory;
+  readonly onlineGateway?: OnlineLobbyGateway;
+  readonly onlineSessionFactory?: OnlineSessionFactory;
   readonly onStateChange?: (state: AppState) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onStateChange }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, onStateChange }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
   const sessionFactoryRef = useRef<SessionFactory>(sessionFactory);
   const generationRef = useRef(0);
   const [activeSession, setActiveSession] = useState<{ readonly session: GameSession; readonly scenario: DemoScenario; readonly generation: number } | null>(null);
+  const [waitingRooms, setWaitingRooms] = useState<{ status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string }>({ status: "loading" });
+  const createOnlineSession = onlineSessionFactory ?? (() => new OnlineSession({ gateway: onlineGateway }));
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
 
   useEffect(() => {
     sessionFactoryRef.current = sessionFactory;
   }, [sessionFactory]);
+
+  useEffect(() => {
+    if (!onlineGateway.available) {
+      setWaitingRooms({ status: "unavailable", message: "Online hiện không khả dụng." });
+      return;
+    }
+    let active = true;
+    setWaitingRooms({ status: "loading" });
+    void onlineGateway.listRooms().then((result) => {
+      if (active) setWaitingRooms({ status: "ready", rooms: result.rooms });
+    }).catch(() => {
+      if (active) setWaitingRooms({ status: "error", message: "Không thể tải danh sách phòng." });
+    });
+    return () => { active = false; };
+  }, [onlineGateway]);
 
   useEffect(() => {
     onStateChange?.(appState);
@@ -171,6 +195,18 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
       dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-ai-thinking" });
     });
   };
+  const startOnline = (options: Extract<import("../sessions/contract").StartGameOptions, { mode: "online" }>) => {
+    activeSession?.session.dispose();
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    const session = createOnlineSession();
+    dispatch({ type: "boot", generation });
+    setActiveSession({ session, scenario: "game-waiting", generation });
+    void session.start(options).catch((error: unknown) => {
+      if (generationRef.current !== generation) return;
+      dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-waiting" });
+    });
+  };
 
   return (
     <AppProviders>
@@ -192,8 +228,10 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
                 onLobby={onLobby}
                 onStartLocal={onStartLocal}
                 onStartAi={onStartAi}
-                onCreateOnline={() => demo.setScenario("game-waiting")}
-                onJoinOnline={() => demo.setScenario("game-active-a")}
+                onCreateOnline={(name) => startOnline({ mode: "online", intent: "create", playerName: name })}
+                onJoinOnline={(name, roomId) => startOnline({ mode: "online", intent: "join", playerName: name, roomId })}
+                waitingRooms={waitingRooms}
+                onlineAvailable={onlineGateway.available}
               />
             </ScreenBoundary>
           </div>
@@ -203,27 +241,29 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onSta
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, onlineAvailable }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
   readonly onStartAi: (name: string) => void;
   readonly onCreateOnline: (name: string) => void;
   readonly onJoinOnline: (name: string, roomId: string) => void;
+  readonly waitingRooms: { status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string };
+  readonly onlineAvailable: boolean;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error") return null;
   if (state.status === "preparing") return <LobbyScreen
-    onlineAvailability="connecting"
-    waitingRooms={{ status: "loading" }}
+    onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
+    waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
   />;
   if (state.status === "lobby") return <LobbyScreen
-    onlineAvailability={state.snapshot.connection === "unavailable" ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
-    waitingRooms={state.snapshot.connection === "unavailable" ? { status: "unavailable", message: "Online hiện không khả dụng." } : { status: "ready", rooms: state.snapshot.waitingRooms ?? [] }}
+    onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
+    waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}

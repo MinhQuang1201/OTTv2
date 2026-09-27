@@ -74,7 +74,7 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
         <PlayerPanel player={activeSnapshot.players.A} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} />
       </div>
        <main className={styles.boardColumn} aria-labelledby="game-title">
-        <h1 id="game-title">Bàn chơi <span className={styles.visuallyHidden}>BÃ n chÆ¡i</span></h1>
+         <h1 id="game-title">Bàn chơi</h1>
         <TurnStatus snapshot={activeSnapshot} />
         <div className={effectEventId !== null ? styles.effects : undefined} data-event-id={effectEventId ?? undefined}><Board session={session} snapshot={activeSnapshot} onError={onError} /></div>
       </main>
