@@ -33,6 +33,18 @@ describe("LocalSession", () => {
     expect(snapshot.board.some((piece) => piece.position.x === 8 && piece.position.y === 0)).toBe(false);
   });
 
+  it("uses safe explicit viewer defaults before and after a session error", async () => {
+    const session = new LocalSession();
+    expect(session.getSnapshot()).toMatchObject({
+      phase: "idle",
+      viewer: null,
+      viewerSeat: null,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+    });
+    await session.start({ mode: "local", playerNames: ["An", "Bình"] });
+    expect(session.getSnapshot().viewer).toEqual({ role: "player", seat: "A" });
+  });
+
   it("previews legal moves, accepts moves, changes turn, and emits monotonic events", async () => {
     const time = clock();
     const session = new LocalSession(time);

@@ -23,4 +23,14 @@ describe("normalizeCoreState", () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.board)).toBe(true);
   });
+
+  it("uses an explicit player contract only when a viewer seat is supplied", () => {
+    const bridge = getGameCoreBridge();
+    const state = bridge.createInitialState();
+    const idle = normalizeCoreState(state, { mode: "local", phase: "idle" });
+    const player = normalizeCoreState(state, { mode: "local", phase: "playing", viewerSeat: "A" });
+
+    expect(idle).toMatchObject({ viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, spectatorCount: 0 });
+    expect(player).toMatchObject({ viewer: { role: "player", seat: "A" }, viewerSeat: "A", capabilities: { canMove: true, canLeaveGame: false, canSpectate: false }, spectatorCount: 0 });
+  });
 });

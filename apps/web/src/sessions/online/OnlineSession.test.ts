@@ -4,6 +4,7 @@ import "../../../../../packages/game-core/src/ai.js";
 
 import { describe, expect, it, vi } from "vitest";
 import { OnlineSession } from "./OnlineSession";
+import { normalizeOnlineState } from "./normalizeOnlineState";
 import type { OnlineLobbyGateway } from "./OnlineLobbyGateway";
 import type { PlayhtmlAllocation, PlayhtmlGameClientLike } from "./globals";
 
@@ -38,6 +39,11 @@ function sessionWith(client: FakeClient, now = () => 0) {
 }
 
 describe("OnlineSession", () => {
+  it("rejects an online snapshot with an invalid viewer seat", () => {
+    const normalized = normalizeOnlineState({ ...state(1), you: "invalid" as never });
+    expect(normalized).toBeNull();
+  });
+
   it("maps public lifecycle events and delegates create/join without owning transport state", async () => {
     const client = new FakeClient();
     const session = sessionWith(client);
@@ -51,6 +57,15 @@ describe("OnlineSession", () => {
     client.emit("resumed");
     expect(session.getSnapshot().connection).toBe("online");
     expect(client.attachAllocation).toHaveBeenCalledWith(allocation);
+  });
+
+  it("uses safe explicit defaults while preparing and after an error", async () => {
+    const client = new FakeClient();
+    const session = sessionWith(client);
+    await session.start({ mode: "online", intent: "create", playerName: "An" });
+    expect(session.getSnapshot()).toMatchObject({ phase: "preparing", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, spectatorCount: 0 });
+    client.emit("error", { message: "not available" });
+    expect(session.getSnapshot()).toMatchObject({ phase: "error", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false } });
   });
 
   it("filters stale revisions and duplicate event IDs, and changes the board only from newer state", async () => {

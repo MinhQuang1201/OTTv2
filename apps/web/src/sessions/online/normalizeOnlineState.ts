@@ -118,6 +118,7 @@ export function normalizeOnlineState(message: OnlineStateMessage, receivedAt = D
   if (!Number.isInteger(message.revision) || message.revision < 0) return null;
   const state = parseOnlineRawState(message.state);
   if (!state) return null;
+  if (message.you !== undefined && !isSeat(message.you)) return null;
   const phase = message.status === "waiting" ? "waiting" : message.status === "done" || state.winner ? "finished" : "playing";
   const events = normalizeOnlineEvents(message.events);
   const players = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { GameSession, GameSnapshot, StartGameOptions } from "./contract";
+import type { GameSession, GameSnapshot, PlayerView, PublicMatchView, StartGameOptions } from "./contract";
 
 const emptySnapshot = null as unknown as GameSnapshot;
 
@@ -20,6 +20,19 @@ const spectatorStart: StartGameOptions = {
   mode: "spectator",
   allocationId: "allocation-a",
   roomId: "room-a",
+};
+
+const publicMatchFixture: PublicMatchView = {
+  allocationId: "allocation-a",
+  roomId: "room-a",
+  status: "playing",
+  players: {
+    A: { seat: "A", name: "An", connected: true, remainingMs: 600_000 },
+    B: { seat: "B", name: "Bình", connected: true, remainingMs: 600_000 },
+  } satisfies Readonly<Record<"A" | "B", Pick<PlayerView, "seat" | "name" | "connected" | "remainingMs">>>,
+  spectatorCount: 3,
+  serverNow: 1_000,
+  runningSeat: "A",
 };
 
 describe("GameSession contract", () => {
@@ -42,5 +55,6 @@ describe("GameSession contract", () => {
     expect(player).toEqual({ role: "player", seat: "A" });
     expect(spectator).toEqual({ role: "spectator" });
     expect(spectatorStart.mode).toBe("spectator");
+    expect(publicMatchFixture.players.A.name).toBe("An");
   });
 });
