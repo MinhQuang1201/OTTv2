@@ -10,7 +10,7 @@ import {
   withJoinReservationRollback,
   withInitializationRollback,
   retrySeatUpdateRequest,
-} from "./internal-auth.js";
+} from "../auth/internal-auth.js";
 
 type Allocation = {
   id: string;

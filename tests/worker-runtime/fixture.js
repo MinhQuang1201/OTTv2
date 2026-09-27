@@ -91,6 +91,7 @@ function workerReady(workerOrigin) {
 
 async function createBrowserDemoFixture() {
   await ensurePortFree(APP_PORT);
+  if (!fs.existsSync(path.join(ROOT, "apps", "web", "dist", "index.html"))) throw new Error("Browser fixture requires the built React app; run npm run build:web first");
   const workerPort = await availablePort();
   const workerOrigin = `https://127.0.0.1:${workerPort}`;
   const envFile = path.join(ROOT, ".dev.vars");
@@ -99,7 +100,7 @@ async function createBrowserDemoFixture() {
   const workerRuns = [];
   function startWorker() {
     const current = startProcess("npx", [
-      "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "workers/wrangler.jsonc", "--env", "demo",
+      "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "demo",
       "--local", "--local-protocol", "https", "--env-file", envFile, "--persist-to", persistTo,
       "--ip", "127.0.0.1", "--port", String(workerPort), "--show-interactive-dev-session=false",
     ], process.env);

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const PlayhtmlGameClient = require("../playhtml-game-client");
+const PlayhtmlGameClient = require("../packages/game-client/src/playhtml-game-client");
 
 function fakeConnection() {
   const handlers = {};

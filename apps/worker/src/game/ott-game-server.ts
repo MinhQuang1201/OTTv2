@@ -2,14 +2,14 @@ import { YServer } from "y-partyserver";
 import type {
   Connection,
   WSMessage,
-} from "../node_modules/playhtml/node_modules/partyserver/dist/index.js";
+} from "../../../../node_modules/playhtml/node_modules/partyserver/dist/index.js";
 import {
   MIN_OTT_PACKET_INTERVAL_MS,
   parseOttMessage,
   type OttCommand,
-} from "./protocol.js";
-import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, verifyCapability, verifyCapabilityTransaction } from "./internal-auth.js";
-import { DurableRoomAdapter, projectRoomPayload, ROOM_UNAVAILABLE } from "./room-storage.js";
+} from "../../../../packages/protocol/src/index.js";
+import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
+import { DurableRoomAdapter, projectRoomPayload, ROOM_UNAVAILABLE } from "../persistence/room-storage.js";
 
 export interface OttCommandHandler {
   handle(connection: Connection, command: OttCommand): OttHandlerResult | void | Promise<OttHandlerResult | void>;

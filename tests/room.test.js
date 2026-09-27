@@ -1,9 +1,9 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { Room } = require("../room");
+const { Room } = require("../packages/game-core/src/room");
 const { connectionAdapter } = require("../partykit/connection");
-const rules = require("../rules");
-const config = require("../config");
+const rules = require("../packages/game-core/src/rules");
+const config = require("../packages/game-core/src/config");
 
 let nextConnectionId = 1;
 

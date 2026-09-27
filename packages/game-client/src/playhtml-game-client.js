@@ -1,5 +1,5 @@
 (function (global, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(global);
+  if (typeof process === "object" && process && process.versions && process.versions.node && typeof module === "object" && module && module.exports) module.exports = factory(global);
   else global.PlayhtmlGameClient = factory(global);
 })(typeof globalThis !== "undefined" ? globalThis : this, function (global) {
   const EVENT_TYPES = new Set([

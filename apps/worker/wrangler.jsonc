@@ -1,7 +1,7 @@
 {
-  "$schema": "../node_modules/playhtml/node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/playhtml/node_modules/wrangler/config-schema.json",
   "name": "ottv2-minimal",
-  "main": "ott-worker.ts",
+  "main": "src/entry/ott-worker.ts",
   "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,

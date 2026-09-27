@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const config = require("../config");
+const config = require("../packages/game-core/src/config");
 const { OttLobby } = require("../partykit/ott-lobby");
 const { PartyKitOttRoom } = require("../partykit/ott-room");
 

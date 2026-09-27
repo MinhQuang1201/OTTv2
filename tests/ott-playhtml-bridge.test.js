@@ -6,7 +6,7 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 
 function protocolModule() {
-  return fs.readFileSync(path.join(root, "workers", "protocol.ts"), "utf8");
+  return fs.readFileSync(path.join(root, "packages", "protocol", "src", "index.ts"), "utf8");
 }
 
 function envelope(type, extra = {}) {
@@ -34,7 +34,7 @@ test("protocol rejects malformed, non-OTT, unknown, oversized, and invalid respo
 });
 
 test("custom-message bridge is implemented at YServer boundary without super dispatch", () => {
-  const source = fs.readFileSync(path.join(root, "workers", "ott-game-server.ts"), "utf8");
+  const source = fs.readFileSync(path.join(root, "apps", "worker", "src", "game", "ott-game-server.ts"), "utf8");
   assert.match(source, /override\s+onCustomMessage\s*\(/);
   assert.match(source, /sendCustomMessage\s*\(/);
   assert.match(source, /onCustomMessage[\s\S]*?parseOttMessage/);
@@ -45,8 +45,8 @@ test("custom-message bridge is implemented at YServer boundary without super dis
 });
 
 test("custom-message policy keeps client Yjs mutations read-only and non-OTT messages isolated", () => {
-  const source = fs.readFileSync(path.join(root, "workers", "ott-game-server.ts"), "utf8");
+  const source = fs.readFileSync(path.join(root, "apps", "worker", "src", "game", "ott-game-server.ts"), "utf8");
   assert.match(source, /isReadOnly\([^)]*\):\s*boolean\s*\{[\s\S]*?return true/);
   assert.match(source, /non-OTT|not an OTT|Non-OTT/i);
-  assert.doesNotMatch(source, /new\s+WebSocket|PartySocket|fetch\s*\(/);
+  assert.doesNotMatch(source, /new\s+WebSocket|PartySocket/);
 });

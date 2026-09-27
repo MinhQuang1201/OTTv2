@@ -11,13 +11,13 @@ async function roomStorageModule() {
     const { buildSync } = require("esbuild");
     const Module = require("node:module");
     const { outputFiles } = buildSync({
-      entryPoints: [path.join(root, "workers", "room-storage.ts")],
+      entryPoints: [path.join(root, "apps", "worker", "src", "persistence", "room-storage.ts")],
       bundle: true,
       platform: "node",
       format: "cjs",
       write: false,
     });
-    const filename = path.join(root, "workers", "room-storage-deadline-test.cjs");
+    const filename = path.join(root, "apps", "worker", "src", "persistence", "room-storage-deadline-test.cjs");
     const bundledModule = new Module(filename, module);
     bundledModule.filename = filename;
     bundledModule.paths = Module._nodeModulePaths(root);

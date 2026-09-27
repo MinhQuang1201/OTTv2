@@ -1,6 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { Room } = require("../room");
+const { Room } = require("../packages/game-core/src/room");
 const { serializeRoom, hydrateRoom } = require("../partykit/room-storage");
 
 function savedRoom() {

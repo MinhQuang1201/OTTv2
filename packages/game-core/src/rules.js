@@ -1,10 +1,10 @@
 (function (global, factory) {
   const config =
-    typeof module === "object" && module.exports
+    typeof require === "function"
       ? require("./config")
       : global.OTT_CONFIG;
   const api = factory(config);
-  if (typeof module === "object" && module.exports) module.exports = api;
+  if (typeof module === "object" && module && module.exports) module.exports = api;
   global.OTT_RULES = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (config) {
   const { SIZE, FILES, BEATS, GOAL, A_SETUP, DELTAS, TIME_CONTROL } = config;

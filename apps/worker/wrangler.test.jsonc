@@ -1,7 +1,7 @@
 {
-  "$schema": "../node_modules/playhtml/node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/playhtml/node_modules/wrangler/config-schema.json",
   "name": "ottv2-test-harness",
-  "main": "ott-test-worker.ts",
+  "main": "src/entry/ott-test-worker.ts",
   "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {

@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 test("blocked bootstrap never registers a factory or opens a fallback connection", () => {
-  const bootstrapPath = require.resolve("../playhtml-bootstrap");
+  const bootstrapPath = require.resolve("../packages/game-client/src/playhtml-bootstrap");
   const originalWebSocket = globalThis.WebSocket;
   const originalFactory = globalThis.OTT_PLAYHTML_CONNECTION_FACTORY;
   let connections = 0;
@@ -16,7 +16,7 @@ test("blocked bootstrap never registers a factory or opens a fallback connection
     delete globalThis.OTT_PLAYHTML_CONNECTION_FACTORY;
     delete require.cache[bootstrapPath];
 
-    const { createUnavailableBootstrap } = require("../playhtml-bootstrap");
+    const { createUnavailableBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
     const bootstrap = createUnavailableBootstrap();
 
     assert.throws(() => bootstrap({ host: "https://playhtml.example" }), /unavailable/);
@@ -31,21 +31,14 @@ test("blocked bootstrap never registers a factory or opens a fallback connection
   }
 });
 
-test("browser pages load the reviewed runtime before the PlayHTML bootstrap", () => {
-  for (const pageName of ["index.html", "playhtml-game.html"]) {
-    const html = fs.readFileSync(path.join(__dirname, "..", pageName), "utf8");
-    const runtimeAt = html.indexOf('src="vendor/playhtml-minimal/browser/runtime.js"');
-    const bootstrapAt = html.indexOf('src="playhtml-bootstrap.js"');
-    const clientAt = html.indexOf('src="playhtml-game-client.js"');
-
-    assert.ok(runtimeAt >= 0, `${pageName} must load the browser runtime`);
-    assert.ok(bootstrapAt > runtimeAt, `${pageName} must load runtime before bootstrap`);
-    assert.ok(clientAt > bootstrapAt, `${pageName} must load bootstrap before the client`);
-  }
+test("the adapter diagnostic page does not add a transport", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "apps", "web", "static", "playhtml-game.html"), "utf8");
+  assert.match(html, /PlayHTML game adapter/);
+  assert.doesNotMatch(html, /<script|WebSocket|PartySocket|polling/i);
 });
 
 test("verified bootstrap initializes PlayHTML once and registers a channel factory after ready", async () => {
-  const bootstrapPath = require.resolve("../playhtml-bootstrap");
+  const bootstrapPath = require.resolve("../packages/game-client/src/playhtml-bootstrap");
   const originalFactory = globalThis.OTT_PLAYHTML_CONNECTION_FACTORY;
   const calls = [];
   let resolveReady;
@@ -58,7 +51,7 @@ test("verified bootstrap initializes PlayHTML once and registers a channel facto
   try {
     delete globalThis.OTT_PLAYHTML_CONNECTION_FACTORY;
     delete require.cache[bootstrapPath];
-    const { createBootstrap } = require("../playhtml-bootstrap");
+    const { createBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
     const bootstrap = createBootstrap({ runtime, globalObject: globalThis });
     const pending = bootstrap({ host: "https://worker.example", room: "ott-room" });
     await Promise.resolve();
@@ -86,7 +79,7 @@ test("bootstrap rejects reuse of an initialized provider for a different room", 
     configure() {},
     init() { return { ready: Promise.resolve(), createCustomMessageChannel() { return { send() {}, subscribe() { return () => {}; }, close() {} }; } }; },
   };
-  const bootstrap = require("../playhtml-bootstrap").createBootstrap({ runtime, globalObject: {} });
+  const bootstrap = require("../packages/game-client/src/playhtml-bootstrap").createBootstrap({ runtime, globalObject: {} });
   await bootstrap({ host: "https://worker.example", room: "ott-123e4567-e89b-12d3-a456-426614174000" });
   await assert.rejects(
     bootstrap({ host: "https://worker.example", room: "ott-123e4567-e89b-12d3-a456-426614174001" }),

@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const rules = require("../rules");
-const config = require("../config");
+const rules = require("../packages/game-core/src/rules");
+const config = require("../packages/game-core/src/config");
 
 function sq(name) {
   return rules.parseSquare(name);

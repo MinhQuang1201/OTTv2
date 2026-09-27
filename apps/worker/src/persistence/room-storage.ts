@@ -1,9 +1,9 @@
 // The JavaScript Room remains the single source of rule and lifecycle authority.
 // This adapter supplies Durable Object persistence and deliberately inert timer hooks.
 // @ts-ignore The application modules are CommonJS and are bundled by Wrangler.
-import { Room } from "../room.js";
+import { Room } from "../../../../packages/game-core/src/room.js";
 // @ts-ignore See the note above.
-import { hydrateRoom, serializeRoom } from "../partykit/room-storage.js";
+import { hydrateRoom, serializeRoom } from "../../../../partykit/room-storage.js";
 
 export const ROOM_KEY = "room";
 export const ROOM_UNAVAILABLE = "Phòng không khả dụng";

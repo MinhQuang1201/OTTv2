@@ -1,5 +1,5 @@
-const config = require("../config");
-const { Room } = require("../room");
+const config = require("../packages/game-core/src/config");
+const { Room } = require("../packages/game-core/src/room");
 const { connectionAdapter } = require("./connection");
 const { serializeRoom, hydrateRoom } = require("./room-storage");
 const { parseClientMessage, createRateLimiter } = require("./protocol");

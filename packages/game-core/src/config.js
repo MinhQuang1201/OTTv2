@@ -1,6 +1,6 @@
 (function (global, factory) {
   const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
+  if (typeof module === "object" && module && module.exports) module.exports = api;
   global.OTT_CONFIG = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   const SIZE = 9;

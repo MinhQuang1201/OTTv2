@@ -13,7 +13,7 @@ const WRANGLER_VERSION = "4.141.0";
 
 function startHarness(persistTo) {
   const command = [
-    "npx", "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "workers/wrangler.test.jsonc", "--local",
+    "npx", "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "apps/worker/wrangler.test.jsonc", "--local",
     "--persist-to", persistTo, "--ip", "127.0.0.1", "--port", String(port), "--show-interactive-dev-session=false",
   ];
   const child = process.platform === "win32"

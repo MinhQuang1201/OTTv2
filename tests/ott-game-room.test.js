@@ -11,7 +11,7 @@ let loadedRoomStorage;
 async function authModule() {
   if (!loadedAuth) {
     const { transformSync } = require("esbuild");
-    const { code } = transformSync(read("workers/internal-auth.ts"), { loader: "ts", format: "esm" });
+    const { code } = transformSync(read("apps/worker/src/auth/internal-auth.ts"), { loader: "ts", format: "esm" });
     loadedAuth = import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
   }
   return loadedAuth;
@@ -22,13 +22,13 @@ async function roomStorageModule() {
     const { buildSync } = require("esbuild");
     const Module = require("node:module");
     const { outputFiles } = buildSync({
-      entryPoints: [path.join(root, "workers", "room-storage.ts")],
+      entryPoints: [path.join(root, "apps", "worker", "src", "persistence", "room-storage.ts")],
       bundle: true,
       platform: "node",
       format: "cjs",
       write: false,
     });
-    const filename = path.join(root, "workers", "room-storage-task4-test.cjs");
+    const filename = path.join(root, "apps", "worker", "src", "persistence", "room-storage-task4-test.cjs");
     const bundledModule = new Module(filename, module);
     bundledModule.filename = filename;
     bundledModule.paths = Module._nodeModulePaths(root);

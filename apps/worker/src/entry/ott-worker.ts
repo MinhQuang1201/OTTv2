@@ -1,6 +1,6 @@
 import { routePartykitRequest } from "partyserver";
-export { OttGameServer } from "./ott-game-server.js";
-export { OttLobbyServer } from "./ott-lobby-server.js";
+export { OttGameServer } from "../game/ott-game-server.js";
+export { OttLobbyServer } from "../lobby/ott-lobby-server.js";
 
 const PUBLIC_ROOM_PATH = /^\/parties\/main\/(ott-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 

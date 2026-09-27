@@ -5,18 +5,18 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const auth = read("workers/internal-auth.ts");
-const lobby = read("workers/ott-lobby-server.ts");
-const game = read("workers/ott-game-server.ts");
-const worker = read("workers/ott-worker.ts");
-const wrangler = read("workers/wrangler.jsonc");
+const auth = read("apps/worker/src/auth/internal-auth.ts");
+const lobby = read("apps/worker/src/lobby/ott-lobby-server.ts");
+const game = read("apps/worker/src/game/ott-game-server.ts");
+const worker = read("apps/worker/src/entry/ott-worker.ts");
+const wrangler = read("apps/worker/wrangler.jsonc");
 
 let loadedAuth;
 let loadedRoomStorage;
 async function authModule() {
   if (!loadedAuth) {
     const { transformSync } = require("esbuild");
-    const { code } = transformSync(read("workers/internal-auth.ts"), { loader: "ts", format: "esm" });
+    const { code } = transformSync(read("apps/worker/src/auth/internal-auth.ts"), { loader: "ts", format: "esm" });
     loadedAuth = import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
   }
   return loadedAuth;
@@ -26,13 +26,13 @@ async function roomStorageModule() {
     const { buildSync } = require("esbuild");
     const Module = require("node:module");
     const { outputFiles } = buildSync({
-      entryPoints: [path.join(root, "workers", "room-storage.ts")],
+      entryPoints: [path.join(root, "apps", "worker", "src", "persistence", "room-storage.ts")],
       bundle: true,
       platform: "node",
       format: "cjs",
       write: false,
     });
-    const filename = path.join(root, "workers", "room-storage-test-bundle.cjs");
+    const filename = path.join(root, "apps", "worker", "src", "persistence", "room-storage-test-bundle.cjs");
     const bundledModule = new Module(filename, module);
     bundledModule.filename = filename;
     bundledModule.paths = Module._nodeModulePaths(root);
@@ -660,7 +660,7 @@ test("Worker uses separate Lobby and Game DO bindings without a process registry
   assert.match(worker, /OTT_LOBBY/);
   assert.match(wrangler, /"class_name"\s*:\s*"OttLobbyServer"/);
   assert.match(wrangler, /"class_name"\s*:\s*"OttGameServer"/);
-  assert.match(read("workers/worker-configuration.d.ts"), /OTT_INTERNAL_SECRET/);
+  assert.match(read("apps/worker/worker-configuration.d.ts"), /OTT_INTERNAL_SECRET/);
   assert.doesNotMatch(worker, /new Map|process\./);
   assert.doesNotMatch(lobby, /new Map|process\./);
 });

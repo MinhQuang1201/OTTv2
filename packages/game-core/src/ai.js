@@ -1,14 +1,14 @@
 (function (global, factory) {
   const rules =
-    typeof module === "object" && module.exports
+    typeof require === "function"
       ? require("./rules")
       : global.OTT_RULES;
   const config =
-    typeof module === "object" && module.exports
+    typeof require === "function"
       ? require("./config")
       : global.OTT_CONFIG;
   const api = factory(rules, config);
-  if (typeof module === "object" && module.exports) module.exports = api;
+  if (typeof module === "object" && module && module.exports) module.exports = api;
   global.OTT_AI = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (rules, config) {
   const GOAL = config.GOAL;

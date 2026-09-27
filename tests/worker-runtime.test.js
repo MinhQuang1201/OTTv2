@@ -5,7 +5,7 @@ const net = require("node:net");
 const { spawn } = require("node:child_process");
 const WebSocket = require("ws");
 const test = require("node:test");
-const rules = require("../rules");
+const rules = require("../packages/game-core/src/rules");
 
 const root = path.resolve(__dirname, "..");
 const port = Number(process.env.OTT_WORKER_PORT || 8787);
@@ -54,7 +54,7 @@ function startWorker() {
   fs.mkdirSync(path.join(root, ".wrangler"), { recursive: true });
   const persistTo = fs.mkdtempSync(path.join(root, ".wrangler", "worker-runtime-"));
   const command = [
-    "npx", "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "workers/wrangler.jsonc", "--env", "test", "--local",
+    "npx", "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "test", "--local",
     "--env-file", envFile, "--persist-to", persistTo, "--ip", "127.0.0.1", "--port", String(port), "--show-interactive-dev-session=false",
   ];
   runtimeLog(`spawn: ${command.join(" ")}`);

@@ -1,5 +1,5 @@
-import { internalRequest, issueCapability } from "./internal-auth.js";
-export { OttTestGameServer } from "./ott-test-game-server.js";
+import { internalRequest, issueCapability } from "../auth/internal-auth.js";
+export { OttTestGameServer } from "../game/ott-test-game-server.js";
 
 type TestEnv = Env & { OTT_TEST_PROBE_SECRET: string };
 
