@@ -313,3 +313,54 @@ in `tests/worker-runtime/fixture.js`. The dedicated browser command passes;
 the separate legacy Worker suite still skips its manual-acceptance placeholder
 because human Task 10 acceptance has not been performed. Earlier “browser NOT
 RUN” statements above are historical and superseded by this result.
+
+## Task 7 spectator presence runtime gate (2026-09-27)
+
+**Result: BLOCKED for hibernating presence runtime gate. Spectator production rollout remains DISABLED.**
+
+### Findings on pinned runtime and eviction controls
+
+The spike investigated whether pinned Wrangler `4.141.0`, workerd `1.20240718.0`,
+and PartyServer `0.5.10` expose a supported, deterministic same-socket hibernation
+trigger or eviction control:
+
+1. **Wrangler CLI:** `wrangler dev` exposes no command, flag, or inspector
+   endpoint to trigger Durable Object eviction or simulate cold hibernation.
+2. **Workerd runtime:** Inspected `node_modules/workerd/workerd.capnp` and binary
+   options. Workerd defines `preventEviction @3 :Bool;` with default eviction
+   after 10 seconds of inactivity. It provides no RPC, control-fd message, or
+   test command to force same-socket eviction on demand.
+3. **Runtime API (`state.abort()`):** Calling `this.ctx.abort()` was evaluated
+   via an authenticated test probe (`POST /__test/evict`). In workerd,
+   `state.abort()` immediately terminates execution with an unhandled error and
+   abruptly closes all open client WebSockets with code `1006`. It does not keep
+   the underlying sockets open across instance eviction.
+4. **PartyServer:** PartyServer `0.5.10` provides `HibernatingConnectionManager`
+   and serializes attachments to Cloudflare WebSocket attachments, but exposes no
+   eviction hook.
+5. **Background inactivity:** While workerd eventually unloads an idle DO after
+   its 10-second background inactivity period (leaving sockets attached at the
+   C++ proxy level), this is an uncontrolled background timer rather than an
+   exposed test hook or deterministic trigger. Relying on an uncontrolled timer
+   or treating process restart with new reconnects as hibernation is prohibited
+   by the project safety specification.
+
+### Attempted commands and evidence
+
+- Evaluation command: `rtk node --test tests/worker-test-harness-runtime.test.js`
+- Test probe: `POST /__test/evict` invoking `this.ctx.abort()`
+  Observed result: `WS1 CLOSED: 1006`, `WS2 CLOSED: 1006`, HTTP 500 error.
+  Original sockets were terminated rather than hibernated.
+
+### Gate decision and status
+
+Because the pinned runtime exposes no supported deterministic eviction hook
+that evicts the Game DO while keeping original client sockets open:
+
+- Task 7 spectator presence gate status is recorded as **BLOCKED**.
+- `OTT_SPECTATOR_ENABLED` remains absent/off in all environments.
+- Incomplete production presence reconstruction wiring was reverted.
+- Independently valid authority, protocol, and exact rollback snapshot
+  protections from Tasks 5-6 and UI/demos from Tasks 1-4 are retained.
+- Implementation stops before Tasks 8-11 as mandated by the project gate.
+

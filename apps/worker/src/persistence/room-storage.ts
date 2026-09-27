@@ -85,6 +85,7 @@ export class DurableRoomAdapter {
     try {
       const room = hydrateRoom(saved, roomId, roomDependencies(now, timing));
       const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
+      adapter.lastPayload = room.payload();
       if (await storage.get("allocationTerminalReason")) adapter.unavailable = true;
       const reconciliation = room.reconcileHydration(now());
       if (reconciliation.seats.length || room.status === "waiting") await adapter.persist();
@@ -100,6 +101,7 @@ export class DurableRoomAdapter {
   static async create(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}): Promise<DurableRoomAdapter> {
     const room = new Room(roomId, roomDependencies(now, timing));
     const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
+    adapter.lastPayload = room.payload();
     await adapter.persist();
     await adapter.scheduleAlarm();
     return adapter;
