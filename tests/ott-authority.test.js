@@ -119,6 +119,8 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
   server.lastOttPacketMs = new Map();
   server.identities = new Map();
   server.pendingIdentities = new Map();
+  server.roleReservations = new Map();
+  server.connectionGenerations = new Map();
   server.identityNonces = new Map();
   server.attachCapabilities = new Map();
   server.sendCustomMessage = (_connection, message) => messages.push(JSON.parse(message));
@@ -133,6 +135,12 @@ function connection(id) {
     deserializeAttachment() { return attachment; },
     close() {},
   };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((finish) => { resolve = finish; });
+  return { promise, resolve };
 }
 
 test("capability format is canonical, expiring, room-bound, and nonce-backed", () => {
@@ -922,6 +930,96 @@ test("spectator role is immutable, read-only, nonce-safe, and counted from authe
   assert.equal(adapter.closeCalls, 0);
   assert.equal(fixture.server.identities.has(first), false);
   assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+});
+
+test("role reservation rejects a mixed spectator command before delayed player validation completes", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const validationStarted = deferred();
+  const releaseValidation = deferred();
+  fixture.server.authority = {
+    async validateAttach() {
+      validationStarted.resolve();
+      await releaseValidation.promise;
+      fixture.server.attachCapabilities.set(player, {
+        seat: "A", nonce: "role-reservation-player-01", expiresAt: Date.now() + 60_000, token: playerToken,
+      });
+      return { seat: "A" };
+    },
+  };
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+    async attach() { return { ok: true, seat: "A" }; },
+    async scheduleAlarm() {},
+    forget() {},
+    async reloadPersisted() {},
+  });
+  const player = connection("role-reservation-player");
+  const playerToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "role-reservation-player-01",
+  });
+  const spectatorToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "role-reservation-spectator-01",
+  });
+
+  const playerAttach = fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: playerToken,
+  }));
+  await validationStarted.promise;
+  fixture.server.lastOttPacketMs.delete(player);
+  await fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: spectatorToken,
+  }));
+
+  assert.equal(fixture.values.has("spectate-nonce:role-reservation-spectator-01"), false);
+  assert.equal(fixture.messages.at(-1).error, "connection_role_already_fixed");
+
+  releaseValidation.resolve();
+  await playerAttach;
+  assert.deepEqual(fixture.server.identities.get(player), { role: "player", seat: "A" });
+});
+
+test("close invalidates a delayed spectator promotion before transaction completion", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const transactionStarted = deferred();
+  const releaseTransaction = deferred();
+  const closeFinished = deferred();
+  const originalTransaction = fixture.storage.transaction.bind(fixture.storage);
+  fixture.storage.transaction = async (callback) => {
+    transactionStarted.resolve();
+    await releaseTransaction.promise;
+    return originalTransaction(callback);
+  };
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  fixture.server.broadcastState = async () => { closeFinished.resolve(); };
+  const spectator = connection("close-during-spectator-attach");
+  const nonce = "close-during-spectator-attach-01";
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce,
+  });
+
+  const attach = fixture.server.dispatchOttMessage(spectator, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+  await transactionStarted.promise;
+  fixture.server.onClose(spectator, 1000, "closed", true);
+  assert.equal(fixture.server.identities.has(spectator), false);
+  assert.equal(fixture.server.roleReservations.has(spectator), false);
+
+  releaseTransaction.resolve();
+  await attach;
+  await closeFinished.promise;
+  assert.equal(fixture.server.identities.has(spectator), false);
+  assert.equal(fixture.server.pendingIdentities.has(spectator), false);
+  assert.equal(fixture.values.has("live-attachment:close-during-spectator-attach"), false);
+  assert.equal(fixture.values.has(`spectate-nonce:${nonce}`), true);
 });
 
 test("spectator promotion requires attachment serialization and cannot reuse a failed role", async () => {
