@@ -149,7 +149,12 @@ export type DemoScenario =
   | "result-no-moves"
   | "result-timeout"
   | "result-disconnect-timeout"
-  | "result-leave";
+  | "result-leave"
+  | "spectator-list"
+  | "spectator-active"
+  | "spectator-reconnecting"
+  | "spectator-finished"
+  | "spectator-room-gone";
 
 export interface GameSnapshot {
   readonly mode: SessionMode;

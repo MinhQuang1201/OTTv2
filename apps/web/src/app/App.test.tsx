@@ -58,6 +58,10 @@ describe("App shell lifecycle", () => {
     ["lobby-online-unavailable", /OTTv2/i, "lobby"],
     ["game-active-a", /Bàn chơi/i, "playing"],
     ["result-goal", /Kết quả/i, "finished"],
+    ["spectator-list", /OTTv2/i, "lobby"],
+    ["spectator-active", /Bàn chơi/i, "playing"],
+    ["spectator-reconnecting", /Bàn chơi/i, "playing"],
+    ["spectator-finished", /Bàn chơi/i, "finished"],
   ] as const)("routes %s to the %s screen", (scenario, heading, state) => {
     render(<App initialScenario={scenario} />);
 
@@ -66,6 +70,43 @@ describe("App shell lifecycle", () => {
       "data-state",
       state,
     );
+  });
+
+  it("labels spectator demos and does not discover online rooms", () => {
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+
+    render(<App initialScenario="spectator-list" onlineGateway={gateway} />);
+
+    expect(screen.getByText("Demo")).toBeInTheDocument();
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+  });
+
+  it("shows a room-unavailable spectator message with a direct lobby path", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="spectator-room-gone" />);
+
+    expect(screen.getByText("Trận đấu không còn khả dụng")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+  });
+
+  it("refreshes spectator fixtures locally when switching scenarios", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSessionFactory = vi.fn();
+    render(<App initialScenario="spectator-list" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "spectator-active");
+
+    expect(await screen.findByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument();
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+    expect(onlineSessionFactory).not.toHaveBeenCalled();
   });
 
   it("keeps an unavailable online lobby usable instead of showing the error boundary", () => {
@@ -108,7 +149,7 @@ describe("App shell lifecycle", () => {
     await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
     expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby");
-    expect(gateway.listRooms).toHaveBeenCalledTimes(1);
+    expect(gateway.listRooms).not.toHaveBeenCalled();
   });
 
   it("shows a safe retryable error and recovers to the lobby", async () => {

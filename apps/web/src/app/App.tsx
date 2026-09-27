@@ -103,6 +103,10 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   }, [sessionFactory]);
 
   useEffect(() => {
+    if (demo.enabled) {
+      setWaitingRooms({ status: "ready", rooms: [] });
+      return;
+    }
     if (!onlineGateway.available) {
       setWaitingRooms({ status: "unavailable", message: "Online hiện không khả dụng." });
       return;
@@ -115,7 +119,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       if (active) setWaitingRooms({ status: "error", message: "Không thể tải danh sách phòng." });
     });
     return () => { active = false; };
-  }, [onlineGateway]);
+  }, [demo.enabled, demo.scenario, onlineGateway]);
 
   useEffect(() => {
     onStateChange?.(appState);
@@ -213,6 +217,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       <main className={styles.app} aria-label="OTTv2">
         <header className={styles.header}>
           <p className={styles.brand}>OTTv2</p>
+          {demo.enabled ? <span aria-label="Demo">Demo</span> : null}
           {demo.enabled ? <div className={styles.demoTools}><ScenarioSwitcher scenario={demo.scenario} onScenarioChange={demo.setScenario} /></div> : null}
         </header>
         <div className={styles.content}>

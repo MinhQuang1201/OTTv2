@@ -116,6 +116,53 @@ describe("DemoSession fixtures", () => {
     expect(new DemoSession("lobby-default").getSnapshot().waitingRooms).toEqual([]);
   });
 
+  it.each([
+    "spectator-active",
+    "spectator-reconnecting",
+    "spectator-finished",
+  ] as const)("builds the read-only spectator contract for %s", (scenario) => {
+    const snapshot = new DemoSession(scenario).getSnapshot();
+
+    expect(snapshot.viewer).toEqual({ role: "spectator" });
+    expect(snapshot.viewerSeat).toBeNull();
+    expect(snapshot.capabilities).toEqual({ canMove: false, canLeaveGame: false, canSpectate: true });
+    expect(snapshot.spectatorCount).toBe(12);
+  });
+
+  it("provides deterministic public matches for the spectator list", () => {
+    const snapshot = new DemoSession("spectator-list").getSnapshot();
+
+    expect(snapshot.publicMatches).toEqual([
+      {
+        allocationId: "DEMO-ALLOCATION-42",
+        roomId: "DEMO-42",
+        status: "playing",
+        players: {
+          A: { seat: "A", name: "An", connected: true, remainingMs: 540_000 },
+          B: { seat: "B", name: "Bình", connected: true, remainingMs: 510_000 },
+        },
+        spectatorCount: 12,
+        serverNow: 1_790_000_000_000,
+        runningSeat: "A",
+      },
+    ]);
+  });
+
+  it("keeps the finished spectator result neutral", () => {
+    const snapshot = new DemoSession("spectator-finished").getSnapshot();
+
+    expect(snapshot.phase).toBe("finished");
+    expect(snapshot.result).toEqual({ winner: null, reason: "goal" });
+    expect(snapshot.viewer).toEqual({ role: "spectator" });
+  });
+
+  it("models a missing spectator room as a typed unavailable error", () => {
+    expect(new DemoSession("spectator-room-gone").getSnapshot()).toMatchObject({
+      phase: "error",
+      error: { code: "room_unavailable", retryable: false },
+    });
+  });
+
   it("freezes the complete fixture graph and validates scenario keys", () => {
     const fixture = createScenarioFixture("game-move-rejected");
     expect(Object.isFrozen(fixture)).toBe(true);
