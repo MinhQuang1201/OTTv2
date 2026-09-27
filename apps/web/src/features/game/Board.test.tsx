@@ -63,6 +63,53 @@ describe("Board", () => {
     expect(getLegalMoves).not.toHaveBeenCalled();
   });
 
+  it("keeps a player viewer read-only when move capability is disabled", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
+    const move = vi.spyOn(session, "move");
+    const snapshot = session.getSnapshot();
+    const restrictedSnapshot = {
+      ...snapshot,
+      viewer: { role: "player" as const, seat: "A" as const },
+      viewerSeat: "A" as const,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+    };
+    render(<Board session={session} snapshot={restrictedSnapshot} />);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(screen.getByTestId("board-cell-A3"));
+    await user.keyboard("{Enter}");
+    expect(getLegalMoves).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it("keeps a null-viewer error board disabled without crashing", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
+    const move = vi.spyOn(session, "move");
+    const snapshot = session.getSnapshot();
+    const errorSnapshot = {
+      ...snapshot,
+      phase: "error" as const,
+      viewer: null,
+      viewerSeat: null,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+      error: { code: "session_failed" as const, message: "Không thể đồng bộ ván đấu.", retryable: true },
+    };
+    render(<Board session={session} snapshot={errorSnapshot} />);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(screen.getByTestId("board-cell-A3"));
+    expect(getLegalMoves).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+
   it("clears a player selection when move capability is revoked", async () => {
     const user = userEvent.setup();
     const session = new DemoSession("game-active-a");
