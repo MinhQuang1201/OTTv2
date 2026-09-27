@@ -116,6 +116,24 @@ describe("App shell lifecycle", () => {
     expect(gateway.listRooms).not.toHaveBeenCalled();
   });
 
+  it("renders the spectator-list active match section from the demo snapshot", () => {
+    render(<App initialScenario="spectator-list" />);
+
+    expect(screen.getByRole("heading", { name: "Trận đang diễn ra" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Phòng đang chờ" })).toBeInTheDocument();
+  });
+
+  it("passes only the selected public match identity to the watch callback", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onWatchMatch = vi.fn();
+    render(<App initialScenario="spectator-list" onWatchMatch={onWatchMatch} />);
+
+    await user.click(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i }));
+
+    expect(onWatchMatch).toHaveBeenCalledWith({ allocationId: "DEMO-ALLOCATION-42", roomId: "DEMO-42" });
+  });
+
   it("shows a room-unavailable spectator message with a direct lobby path", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
     render(<App initialScenario="spectator-room-gone" />);

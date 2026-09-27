@@ -263,6 +263,10 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.matchList {
+  margin-top: var(--ui-space-6);
+}
+
 .sectionHeading {
   display: flex;
   align-items: center;
@@ -299,6 +303,99 @@
   padding: 0;
   margin: var(--ui-space-3) 0 0;
   list-style: none;
+}
+
+.matchItems {
+  display: grid;
+  gap: var(--ui-space-3);
+  padding: 0;
+  margin: var(--ui-space-3) 0 0;
+  list-style: none;
+}
+
+.matchItem {
+  display: grid;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-radius: var(--ui-radius-control);
+  background: linear-gradient(135deg, rgba(13, 27, 48, 0.95), rgba(13, 20, 36, 0.86));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 18px rgba(0, 240, 255, 0.06);
+}
+
+.matchPlayers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.matchPlayer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  min-width: 0;
+}
+
+.matchPlayerIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.matchSeat {
+  display: grid;
+  flex: 0 0 22px;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--ui-line);
+  border-radius: 50%;
+  color: var(--ui-seat-b);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.matchPlayerIdentity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+  font-size: var(--ui-text-xs);
+}
+
+.matchPlayerIdentity span {
+  color: var(--ui-text-subtle);
+  font-size: 11px;
+}
+
+.matchClock {
+  flex: 0 0 auto;
+  color: var(--ui-seat-b);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  font-weight: 700;
+}
+
+.matchVersus {
+  color: var(--ui-text-subtle);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.matchFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.matchFooter .button {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: var(--ui-text-xs);
 }
 
 .roomItem {

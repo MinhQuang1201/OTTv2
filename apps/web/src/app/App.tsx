@@ -16,6 +16,7 @@ import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import styles from "./app.module.css";
+import type { PublicMatchIdentity, PublicMatchListState } from "../features/spectator/PublicMatchList";
 
 const defaultOnlineGateway = new OnlineLobbyGateway();
 
@@ -86,9 +87,10 @@ export interface AppProps {
   readonly onlineGateway?: OnlineLobbyGateway;
   readonly onlineSessionFactory?: OnlineSessionFactory;
   readonly onStateChange?: (state: AppState) => void;
+  readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, onStateChange }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
@@ -238,6 +240,8 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onJoinOnline={(name, roomId) => startOnline({ mode: "online", intent: "join", playerName: name, roomId })}
                 waitingRooms={waitingRooms}
                 onlineAvailable={onlineGateway.available}
+                demoEnabled={demo.enabled}
+                onWatchMatch={onWatchMatch}
               />
             </ScreenBoundary>
           </div>
@@ -247,7 +251,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, onlineAvailable }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, onlineAvailable, demoEnabled, onWatchMatch }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -256,6 +260,8 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   readonly onJoinOnline: (name: string, roomId: string) => void;
   readonly waitingRooms: { status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string };
   readonly onlineAvailable: boolean;
+  readonly demoEnabled: boolean;
+  readonly onWatchMatch: (identity: PublicMatchIdentity) => void;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error" && state.error.code === "room_unavailable" && state.snapshot?.viewer?.role === "spectator") return (
@@ -269,21 +275,30 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled)}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
+    onWatchMatch={onWatchMatch}
   />;
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled)}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
+    onWatchMatch={onWatchMatch}
   />;
   if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
+}
+
+function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean): PublicMatchListState {
+  if (demoEnabled || snapshot.publicMatches !== undefined) return { status: "ready", matches: snapshot.publicMatches ?? [] };
+  return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 
 function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" }> }) {

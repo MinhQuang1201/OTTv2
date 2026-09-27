@@ -6,18 +6,21 @@ import { ModeCard } from "./ModeCard";
 import { OnlineRoomPanel, type OnlineAvailability } from "./OnlineRoomPanel";
 import { readPlayerName, writePlayerName } from "./playerNameStorage";
 import { type WaitingRoomState } from "./WaitingRoomList";
+import type { PublicMatchIdentity, PublicMatchListState } from "../spectator/PublicMatchList";
 import styles from "./lobby.module.css";
 
 export interface LobbyScreenProps {
   readonly onlineAvailability: OnlineAvailability;
   readonly waitingRooms: WaitingRoomState;
+  readonly publicMatches?: PublicMatchListState;
   readonly onStartLocal: (names: [string, string]) => void;
   readonly onStartAi: (playerName: string) => void;
   readonly onCreateOnline: (playerName: string) => void;
   readonly onJoinOnline: (playerName: string, roomId: string) => void;
+  readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function LobbyScreen({ onlineAvailability, waitingRooms, onStartLocal, onStartAi, onCreateOnline, onJoinOnline }: LobbyScreenProps) {
+export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, onWatchMatch }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   useEffect(() => setPlayerName(readPlayerName()), []);
   const updateName = (value: string) => {
@@ -48,7 +51,7 @@ export function LobbyScreen({ onlineAvailability, waitingRooms, onStartLocal, on
             <ModeCard title="Đấu với AI" description="Bạn đi trước, AI phản hồi sau mỗi nước hợp lệ." actionLabel="Đánh với AI" variant="primary" onSelect={() => onStartAi(normalizedName)} />
           </div>
         </Panel>
-        <OnlineRoomPanel availability={onlineAvailability} waitingRooms={waitingRooms} playerName={playerName} onPlayerNameChange={updateName} showNameField={false} onCreate={onCreateOnline} onJoin={onJoinOnline} />
+        <OnlineRoomPanel availability={onlineAvailability} waitingRooms={waitingRooms} publicMatches={publicMatches} playerName={playerName} onPlayerNameChange={updateName} showNameField={false} onCreate={onCreateOnline} onJoin={onJoinOnline} onWatch={onWatchMatch} />
       </div>
     </section>
   );
