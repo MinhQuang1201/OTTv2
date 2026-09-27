@@ -6,3 +6,4 @@ node_modules/
 Thumbs.db
 .dev.vars
 .wrangler/
+apps/web/dist/

@@ -1,0 +1,15 @@
+.app { min-height: 100dvh; padding: var(--ui-space-6); color: var(--ui-text); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-4); max-width: 1100px; margin: 0 auto var(--ui-space-6); }
+.brand { margin: 0; font-size: var(--ui-text-xl); }
+.demoTools { display: flex; align-items: center; gap: var(--ui-space-2); color: var(--ui-text-muted); font-size: var(--ui-text-sm); }
+.demoTools select { margin-left: var(--ui-space-2); }
+.content { display: grid; place-items: center; max-width: 1100px; margin: 0 auto; }
+.screen { width: min(100%, 720px); }
+.screen h1 { margin-top: 0; }
+.screen dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--ui-space-2) var(--ui-space-4); margin: 0; }
+.screen dt { color: var(--ui-text-muted); }
+.screen dd { margin: 0; }
+.state { width: 100%; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-3); margin-top: var(--ui-space-5); }
+.errorScreen { width: min(100%, 520px); padding: var(--ui-space-6); border: 1px solid var(--ui-danger); border-radius: var(--ui-radius-panel); background: var(--ui-surface-1); }
+.errorScreen h1 { margin-top: 0; }
