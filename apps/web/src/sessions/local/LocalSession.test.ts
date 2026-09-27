@@ -21,6 +21,9 @@ describe("LocalSession", () => {
     const snapshot = session.getSnapshot();
     expect(snapshot.mode).toBe("local");
     expect(snapshot.phase).toBe("playing");
+    expect(snapshot.viewer).toEqual({ role: "player", seat: "A" });
+    expect(snapshot.capabilities).toEqual({ canMove: true, canLeaveGame: false, canSpectate: false });
+    expect(snapshot.spectatorCount).toBe(0);
     expect(snapshot.board).toHaveLength(18);
     expect(snapshot.turn).toBe("A");
     expect(snapshot.players.A?.name).toBe("An");
@@ -40,6 +43,7 @@ describe("LocalSession", () => {
     const result = await session.move({ x: 0, y: 2 }, { x: 0, y: 1 });
     expect(result).toEqual({ accepted: true });
     expect(session.getSnapshot().turn).toBe("B");
+    expect(session.getSnapshot().viewer).toEqual({ role: "player", seat: "B" });
     expect(session.getSnapshot().viewerSeat).toBe("B");
     expect(session.getSnapshot().events.at(-1)).toMatchObject({ id: 1, type: "move" });
     expect(listener).toHaveBeenCalledTimes(2);

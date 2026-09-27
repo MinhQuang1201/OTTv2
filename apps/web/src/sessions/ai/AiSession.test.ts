@@ -48,7 +48,7 @@ describe("AiSession", () => {
     const session = new AiSession(deps);
     await session.start({ mode: "ai", playerName: "An", humanSeat: "A" });
 
-    expect(session.getSnapshot()).toMatchObject({ mode: "ai", viewerSeat: "A", aiThinking: false, turn: "A" });
+    expect(session.getSnapshot()).toMatchObject({ mode: "ai", viewer: { role: "player", seat: "A" }, viewerSeat: "A", capabilities: { canMove: true, canLeaveGame: false, canSpectate: false }, spectatorCount: 0, aiThinking: false, turn: "A" });
     expect(session.getLegalMoves({ x: 8, y: 6 })).toEqual([]);
     expect((await session.move({ x: 8, y: 6 }, { x: 8, y: 5 })).accepted).toBe(false);
     expect((await session.move({ x: 0, y: 2 }, { x: 0, y: 1 })).accepted).toBe(true);

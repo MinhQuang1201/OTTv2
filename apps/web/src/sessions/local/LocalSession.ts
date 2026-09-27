@@ -150,7 +150,7 @@ export class LocalSession implements GameSession {
 
   private failSession(): void {
     this.clearTimer();
-    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", error: Object.freeze(failed()) });
+    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, error: Object.freeze(failed()) });
     this.publish();
   }
 

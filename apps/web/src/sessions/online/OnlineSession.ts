@@ -19,7 +19,7 @@ export interface OnlineSessionDependencies {
 }
 
 const initialSnapshot: GameSnapshot = Object.freeze({
-  mode: "online", phase: "idle", boardRevision: 0, viewerSeat: null, turn: null, board: [], players: {}, connection: "unavailable", pendingMove: false, aiThinking: false, roomId: null, waitingRooms: [], result: null, events: [], error: null,
+  mode: "online", phase: "idle", boardRevision: 0, viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, spectatorCount: 0, turn: null, board: [], players: {}, connection: "unavailable", pendingMove: false, aiThinking: false, roomId: null, waitingRooms: [], publicMatches: [], result: null, events: [], error: null,
 });
 
 const error = (code: SessionErrorView["code"], message: string, retryable = false): SessionErrorView => ({ code, message, retryable });
@@ -156,7 +156,7 @@ export class OnlineSession implements GameSession {
     bind("resumed", () => this.setConnection("online"));
     bind("joined", (payload) => {
       const message = payload as Record<string, unknown> | undefined;
-      this.snapshot = Object.freeze({ ...this.snapshot, phase: "waiting", connection: "online", roomId: typeof message?.roomId === "string" ? message.roomId : this.allocation?.room ?? null, viewerSeat: message?.you === "A" || message?.you === "B" ? message.you : this.allocation?.seat ?? null, error: null });
+      this.snapshot = Object.freeze({ ...this.snapshot, phase: "waiting", connection: "online", roomId: typeof message?.roomId === "string" ? message.roomId : this.allocation?.room ?? null, viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, error: null });
       this.publish();
     });
     bind("state", (payload) => this.applyState(payload));
@@ -222,7 +222,7 @@ export class OnlineSession implements GameSession {
 
   private fail(sessionError: SessionErrorView): void {
     if (this.disposed) return;
-    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", connection: "unavailable", error: sessionError, pendingMove: false });
+    this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", connection: "unavailable", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, error: sessionError, pendingMove: false });
     this.publish();
   }
 

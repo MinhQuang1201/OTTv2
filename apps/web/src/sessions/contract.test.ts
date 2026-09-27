@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { GameSession, GameSnapshot } from "./contract";
+import type { GameSession, GameSnapshot, StartGameOptions } from "./contract";
 
 const emptySnapshot = null as unknown as GameSnapshot;
 
@@ -16,6 +16,12 @@ const sessionFixture: GameSession = {
   dispose: () => undefined,
 };
 
+const spectatorStart: StartGameOptions = {
+  mode: "spectator",
+  allocationId: "allocation-a",
+  roomId: "room-a",
+};
+
 describe("GameSession contract", () => {
   it("exposes the complete external-store and command surface", () => {
     expect(Object.keys(sessionFixture)).toEqual([
@@ -27,5 +33,14 @@ describe("GameSession contract", () => {
       "leave",
       "dispose",
     ]);
+  });
+
+  it("defines explicit viewer contracts for player and spectator snapshots", () => {
+    const player: GameSnapshot["viewer"] = { role: "player", seat: "A" };
+    const spectator: GameSnapshot["viewer"] = { role: "spectator" };
+
+    expect(player).toEqual({ role: "player", seat: "A" });
+    expect(spectator).toEqual({ role: "spectator" });
+    expect(spectatorStart.mode).toBe("spectator");
   });
 });

@@ -16,12 +16,15 @@ export type {
   PieceView,
   PlayerView,
   Position,
+  PublicMatchView,
   ResultReason,
   Seat,
   SessionErrorCode,
   SessionErrorView,
   SessionMode,
   SessionPhase,
+  ViewerCapabilities,
+  ViewerIdentity,
   WaitingRoomView,
 } from "../shared/model/game";
 
@@ -35,7 +38,8 @@ export type StartGameOptions =
       readonly intent: "join";
       readonly playerName: string;
       readonly roomId: string;
-    };
+     }
+  | { readonly mode: "spectator"; readonly allocationId: string; readonly roomId: string };
 
 export type MoveResult =
   | { readonly accepted: true }

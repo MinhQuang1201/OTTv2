@@ -38,7 +38,27 @@ export interface GameResultView {
   readonly reason: ResultReason;
 }
 
-export type SessionMode = "demo" | "local" | "ai" | "online";
+export type ViewerIdentity =
+  | { readonly role: "player"; readonly seat: Seat }
+  | { readonly role: "spectator" };
+
+export interface ViewerCapabilities {
+  readonly canMove: boolean;
+  readonly canLeaveGame: boolean;
+  readonly canSpectate: boolean;
+}
+
+export interface PublicMatchView {
+  readonly allocationId: string;
+  readonly roomId: string;
+  readonly status: "playing";
+  readonly players: Readonly<Record<Seat, Pick<PlayerView, "seat" | "name" | "connected" | "remainingMs">>>;
+  readonly spectatorCount: number;
+  readonly serverNow: number;
+  readonly runningSeat: Seat | null;
+}
+
+export type SessionMode = "demo" | "local" | "ai" | "online" | "spectator";
 
 export type SessionPhase =
   | "idle"
@@ -136,7 +156,10 @@ export interface GameSnapshot {
   readonly phase: SessionPhase;
   /** Increments only when board occupancy, turn, or terminal state changes. */
   readonly boardRevision: number;
+  readonly viewer: ViewerIdentity | null;
   readonly viewerSeat: Seat | null;
+  readonly capabilities: ViewerCapabilities;
+  readonly spectatorCount: number;
   readonly turn: Seat | null;
   readonly board: readonly PieceView[];
   readonly players: Partial<Record<Seat, PlayerView>>;
@@ -145,6 +168,7 @@ export interface GameSnapshot {
   readonly aiThinking: boolean;
   readonly roomId: string | null;
   readonly waitingRooms?: readonly WaitingRoomView[];
+  readonly publicMatches?: readonly PublicMatchView[];
   readonly result: GameResultView | null;
   readonly events: readonly GameEventView[];
   readonly error: SessionErrorView | null;

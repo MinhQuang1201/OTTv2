@@ -43,9 +43,9 @@ describe("OnlineSession", () => {
     const session = sessionWith(client);
     await session.start({ mode: "online", intent: "create", playerName: "An" });
     client.emit("joined", { roomId: "room-a", you: "A" });
-    expect(session.getSnapshot()).toMatchObject({ phase: "waiting", roomId: "room-a", viewerSeat: "A", connection: "online" });
+    expect(session.getSnapshot()).toMatchObject({ phase: "waiting", roomId: "room-a", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, spectatorCount: 0, connection: "online" });
     client.emit("state", state(1));
-    expect(session.getSnapshot()).toMatchObject({ phase: "playing", board: [{ id: "a-dam", position: { x: 0, y: 2 } }] });
+    expect(session.getSnapshot()).toMatchObject({ phase: "playing", viewer: { role: "player", seat: "A" }, viewerSeat: "A", capabilities: { canMove: true, canLeaveGame: true, canSpectate: false }, spectatorCount: 0, board: [{ id: "a-dam", position: { x: 0, y: 2 } }] });
     client.emit("reconnecting");
     expect(session.getSnapshot().connection).toBe("reconnecting");
     client.emit("resumed");
