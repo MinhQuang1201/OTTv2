@@ -119,6 +119,12 @@ test("capability types preserve player and spectator payload narrowing", () => {
   assert.match(auth, /Promise<TransactionalSpectatorCapabilityVerification<T>>/);
 });
 
+test("capability overloads expose the union-typed compatibility path", () => {
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?now\?: number,[\s\S]*?\): Promise<CapabilityPayloadVariant \| null>;/);
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?\): Promise<CapabilityVerification>;/);
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?mutate: \(payload: CapabilityPayloadVariant,[\s\S]*?\): Promise<TransactionalCapabilityVerification<T>>;/);
+});
+
 test("spectator v2 capabilities are seatless, variant-bound, and replay-safe", async () => {
   const { issueCapability, verifyCapability, verifyCapabilityTransaction } = await authModule();
   const allocationId = "allocation-spectator-1";

@@ -420,6 +420,12 @@ export async function verifyCapability(
   secret: string,
   token: string,
   expected: CapabilityExpectations,
+  now?: number,
+): Promise<CapabilityPayloadVariant | null>;
+export async function verifyCapability(
+  secret: string,
+  token: string,
+  expected: CapabilityExpectations,
   now = Date.now(),
 ): Promise<CapabilityPayloadVariant | null> {
   const result = await verifyCapabilityDetailed(secret, token, expected, now);
@@ -456,6 +462,12 @@ export async function verifyCapabilityDetailed(
   expected: SpectatorCapabilityExpectations,
   now?: number,
 ): Promise<SpectatorCapabilityVerification>;
+export async function verifyCapabilityDetailed(
+  secret: string,
+  token: string,
+  expected: CapabilityExpectations,
+  now?: number,
+): Promise<CapabilityVerification>;
 export async function verifyCapabilityDetailed(
   secret: string,
   token: string,
@@ -511,6 +523,14 @@ export async function verifyCapabilityTransaction<T>(
   mutate: (payload: SpectatorCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options?: { now?: number; noncePrefix?: string },
 ): Promise<TransactionalSpectatorCapabilityVerification<T>>;
+export async function verifyCapabilityTransaction<T>(
+  secret: string,
+  token: string,
+  expected: CapabilityExpectations,
+  transaction: CapabilityTransactionRunner,
+  mutate: (payload: CapabilityPayloadVariant, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  options?: { now?: number; noncePrefix?: string },
+): Promise<TransactionalCapabilityVerification<T>>;
 export async function verifyCapabilityTransaction<T>(
   secret: string,
   token: string,

@@ -121,6 +121,6 @@ export function parseOttResponse(value: string): ParseResult<OttResponse> {
   if (!keys || !hasExactKeys(object, keys)) return { ok: false, error: "invalid_response" };
   if (object.type === "ott:ack" && object.ok === true) return { ok: true, value: object as OttResponse };
   if (object.type === "ott:error" && typeof object.error === "string") return { ok: true, value: object as OttResponse };
-  if (object.type === "ott:state" && "state" in object) return { ok: true, value: object as OttResponse };
+  if (object.type === "ott:state" && isRecord(object.state)) return { ok: true, value: object as OttResponse };
   return { ok: false, error: "invalid_response" };
 }

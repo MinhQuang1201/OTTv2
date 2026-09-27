@@ -81,6 +81,10 @@ test("compiled protocol validates response room and revision symmetrically", asy
   for (const response of [
     { __ott: true, roomId: "", revision: 0, type: "ott:ack", ok: true },
     { __ott: true, roomId: "room-1", revision: -1, type: "ott:ack", ok: true },
+    { __ott: true, roomId: "room-1", revision: 0, type: "ott:state", state: null },
+    { __ott: true, roomId: "room-1", revision: 0, type: "ott:state", state: [] },
+    { __ott: true, roomId: "room-1", revision: 0, type: "ott:state", state: "opaque" },
+    { __ott: true, roomId: "room-1", revision: 0, type: "ott:state", state: 42 },
   ]) {
     assert.equal(parseOttResponse(JSON.stringify(response)).ok, false);
   }
