@@ -13,6 +13,7 @@ const wrangler = read("apps/worker/wrangler.jsonc");
 
 let loadedAuth;
 let loadedRoomStorage;
+let loadedGame;
 async function authModule() {
   if (!loadedAuth) {
     const { transformSync } = require("esbuild");
@@ -40,6 +41,87 @@ async function roomStorageModule() {
     loadedRoomStorage = Promise.resolve(bundledModule.exports);
   }
   return loadedRoomStorage;
+}
+
+async function gameModule() {
+  if (!loadedGame) {
+    const { build } = require("esbuild");
+    const Module = require("node:module");
+    const { outputFiles } = await build({
+      entryPoints: [path.join(root, "apps", "worker", "src", "game", "ott-game-server.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      plugins: [{
+        name: "task6-yserver-test-double",
+        setup(build) {
+          build.onResolve({ filter: /^y-partyserver$/ }, () => ({ path: "task6-yserver-test-double", namespace: "task6" }));
+          build.onLoad({ filter: /.*/, namespace: "task6" }, () => ({ contents: `
+            export class YServer {
+              constructor(ctx, env) { this.ctx = ctx; this.env = env; }
+              onConnect() {}
+              onMessage() {}
+              onClose() {}
+              sendCustomMessage(connection, message) { connection.send?.(message); }
+              fetch() { return Promise.resolve(new Response("Not found", { status: 404 })); }
+            }
+          `, loader: "js" }));
+        },
+      }],
+      write: false,
+    });
+    const filename = path.join(root, "apps", "worker", "src", "game", "ott-game-server-task6-test.cjs");
+    const bundledModule = new Module(filename, module);
+    bundledModule.filename = filename;
+    bundledModule.paths = Module._nodeModulePaths(root);
+    bundledModule._compile(outputFiles[0].text, filename);
+    loadedGame = bundledModule.exports;
+  }
+  return loadedGame;
+}
+
+function gameFixture(prototype, roomId = "ott-room-task6") {
+  const values = new Map([
+    ["allocationId", "allocation-task6"],
+    ["roomId", roomId],
+  ]);
+  const messages = [];
+  const storage = {
+    async get(key) { return values.get(key); },
+    async put(key, value) { values.set(key, value); },
+    async delete(key) { values.delete(key); },
+    async transaction(callback) {
+      const pending = new Map(values);
+      const result = await callback({
+        get: async (key) => pending.get(key),
+        put: async (key, value) => pending.set(key, value),
+        delete: async (key) => pending.delete(key),
+      });
+      values.clear();
+      for (const [key, value] of pending) values.set(key, value);
+      return result;
+    },
+  };
+  const server = Object.create(prototype);
+  server.ctx = { storage };
+  server.ottEnv = { OTT_INTERNAL_SECRET: "test-secret" };
+  server.lastOttPacketMs = new Map();
+  server.identities = new Map();
+  server.pendingIdentities = new Map();
+  server.identityNonces = new Map();
+  server.attachCapabilities = new Map();
+  server.sendCustomMessage = (_connection, message) => messages.push(JSON.parse(message));
+  return { values, storage, server, messages };
+}
+
+function connection(id) {
+  let attachment = null;
+  return {
+    id,
+    serializeAttachment(value) { attachment = value; },
+    deserializeAttachment() { return attachment; },
+    close() {},
+  };
 }
 
 test("capability format is canonical, expiring, room-bound, and nonce-backed", () => {
@@ -733,7 +815,147 @@ test("Game rejects browser control bypass and validates attach through authority
   assert.match(game, /attach-nonce/);
   assert.match(game, /OTT_INTERNAL_SECRET/);
   assert.match(game, /purpose: "attach"/);
-  assert.match(game, /this\.attached\.has\(connection\)/);
+  assert.match(game, /this\.identities\.get\(connection\)/);
+});
+
+test("Game uses one immutable role identity and checks it before capability verification", () => {
+  assert.match(game, /identit(?:y|ies)/);
+  assert.match(game, /pending.*role|role.*pending/);
+  assert.match(game, /spectate-nonce/);
+  assert.match(game, /existingIdentity[\s\S]*?verifyCapabilityTransaction/);
+  assert.match(game, /role: "spectator"/);
+  assert.match(game, /role: "player"/);
+  assert.doesNotMatch(game, /this\.attached\.has\(connection\)/);
+});
+
+test("Game terminal handling sends committed state before Lobby terminalization", () => {
+  assert.match(game, /terminalReason/);
+  assert.match(game, /broadcastState[\s\S]*?terminalizeAllocation/);
+  assert.match(game, /markTerminalized/);
+  assert.doesNotMatch(game, /DurableRoomAdapter\.(load|create)\([^;]*terminalizeAllocation/);
+});
+
+test("spectator role is immutable, read-only, nonce-safe, and counted from authenticated live identity", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4, status: "playing", state: {} },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    moveCalls: 0,
+    leaveCalls: 0,
+    closeCalls: 0,
+    async move() { this.moveCalls += 1; throw new Error("spectator move reached adapter"); },
+    async leave() { this.leaveCalls += 1; throw new Error("spectator leave reached adapter"); },
+    async close() { this.closeCalls += 1; throw new Error("spectator close reached adapter"); },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const first = connection("spectator-1");
+  const firstNonce = "spectator-role-first-nonce-001";
+  const firstToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: firstNonce,
+  });
+
+  await fixture.server.dispatchOttMessage(first, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: firstToken }));
+  assert.deepEqual(fixture.server.identities.get(first), { role: "spectator" });
+  assert.equal(fixture.values.get(`spectate-nonce:${firstNonce}`) > 0, true);
+  assert.deepEqual(fixture.messages.at(-1).state.viewer, { role: "spectator" });
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+
+  const secondNonce = "spectator-role-second-nonce-01";
+  const secondToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: secondNonce,
+  });
+  fixture.server.lastOttPacketMs.delete(first);
+  await fixture.server.dispatchOttMessage(first, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: secondToken }));
+  assert.equal(fixture.values.has(`spectate-nonce:${secondNonce}`), false, "duplicate spectate must not consume another nonce");
+  assert.equal(fixture.messages.at(-1).error, "connection_role_already_fixed");
+
+  for (const command of [
+    { __ott: true, roomId: "ott-room-task6", type: "ott:move", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } },
+    { __ott: true, roomId: "ott-room-task6", type: "ott:leave" },
+  ]) {
+    fixture.server.lastOttPacketMs.delete(first);
+    await fixture.server.dispatchOttMessage(first, JSON.stringify(command));
+    assert.equal(fixture.messages.at(-1).error, "spectator_read_only");
+  }
+  assert.equal(adapter.moveCalls, 0);
+  assert.equal(adapter.leaveCalls, 0);
+  assert.equal(adapter.room.revision, 4);
+
+  const second = connection("spectator-2");
+  const secondAttachToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-role-third-nonce-1",
+  });
+  await fixture.server.dispatchOttMessage(second, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: secondAttachToken }));
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2);
+
+  fixture.server.sendCustomMessage = () => { throw new Error("send failed"); };
+  await fixture.server.broadcastState(adapter);
+  assert.deepEqual(fixture.server.identities.get(first), { role: "spectator" }, "send failure must not revoke presence");
+  fixture.server.sendCustomMessage = (_connection, message) => fixture.messages.push(JSON.parse(message));
+
+  await fixture.server.handleClose(first, { role: "spectator" });
+  assert.equal(adapter.closeCalls, 0);
+  assert.equal(fixture.server.identities.has(first), false);
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+});
+
+test("committed terminal projection is sent before Lobby cleanup and marker persistence", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const spectator = connection("terminal-spectator");
+  const order = [];
+  fixture.server.identities.set(spectator, { role: "spectator" });
+  fixture.server.identityNonces.set(spectator, "terminal-spectator-nonce-01");
+  fixture.values.set("spectate-nonce:terminal-spectator-nonce-01", Date.now() + 10_000);
+  fixture.server.sendCustomMessage = (_connection, message) => {
+    order.push(JSON.parse(message).type);
+  };
+  fixture.server.terminalizeAllocation = async () => order.push("lobby-terminalize");
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 9 },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "finished", serverNow: 100, revision: 9,
+      players: { A: null, B: null }, state: { winner: "A" }, events: [],
+    },
+    async markTerminalized() { order.push("terminal-marker"); },
+    async scheduleAlarm() { order.push("retry-alarm"); },
+  };
+
+  await fixture.server.publishCommitted(adapter, {
+    result: { ok: true },
+    payload: adapter.lastPayload,
+    terminalReason: "goal",
+  });
+  assert.deepEqual(order, ["ott:state", "lobby-terminalize", "terminal-marker"]);
+
+  const retryOrder = [];
+  fixture.server.sendCustomMessage = () => retryOrder.push("ott:state");
+  fixture.server.terminalizeAllocation = async () => { retryOrder.push("lobby-terminalize"); throw new Error("Lobby unavailable"); };
+  const retryAdapter = {
+    ...adapter,
+    async markTerminalized() { retryOrder.push("terminal-marker"); },
+    async scheduleTerminalRetry(reason) {
+      retryOrder.push("retry-alarm");
+      fixture.values.set("terminalRetryReason", reason);
+    },
+  };
+  await fixture.server.publishCommitted(retryAdapter, {
+    result: { ok: true },
+    payload: retryAdapter.lastPayload,
+    terminalReason: "goal",
+  });
+  assert.deepEqual(retryOrder, ["ott:state", "lobby-terminalize", "retry-alarm"]);
+  assert.equal(fixture.values.get("terminalRetryReason"), "goal");
 });
 
 test("Worker uses separate Lobby and Game DO bindings without a process registry", () => {

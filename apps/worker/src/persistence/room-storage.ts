@@ -11,6 +11,7 @@ export const ROOM_UNAVAILABLE = "Phòng không khả dụng";
 export type StorageLike = {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+  delete?(key: string): Promise<void>;
   setAlarm?(deadline: number): Promise<void>;
   deleteAlarm?(): Promise<void>;
 };
@@ -19,6 +20,15 @@ export type RoomTiming = { initialClockMs?: number; reconnectGraceMs?: number; a
 export type TerminalizeAllocation = (reason: string) => Promise<void>;
 
 export type RoomConnection = { id?: string; send?: (value: string) => void; readyState?: number; open?: boolean };
+export type RoomViewer =
+  | { readonly role: "player"; readonly seat: "A" | "B" }
+  | { readonly role: "spectator" };
+
+export type CommittedRoomOutcome<T = unknown> = {
+  result: T;
+  payload: Record<string, unknown>;
+  terminalReason: string | null | undefined;
+};
 
 function projectPlayer(player: any): { name: string; connected: boolean } | null {
   if (!player) return null;
@@ -26,10 +36,10 @@ function projectPlayer(player: any): { name: string; connected: boolean } | null
 }
 
 /** Build a recipient-specific public room view without serializing Room internals. */
-export function projectRoomPayload(payload: any, seat: "A" | "B"): Record<string, unknown> {
-  return {
+export function projectRoomPayload(payload: any, viewer: RoomViewer, spectatorCount = 0): Record<string, unknown> {
+  const projection: Record<string, unknown> = {
     roomId: payload.roomId,
-    status: payload.status,
+    status: payload.status === "done" ? "finished" : payload.status,
     serverNow: payload.serverNow,
     revision: payload.revision,
     players: {
@@ -38,8 +48,11 @@ export function projectRoomPayload(payload: any, seat: "A" | "B"): Record<string
     },
     state: payload.state,
     events: Array.isArray(payload.events) ? payload.events : [],
-    you: seat,
   };
+  if (viewer.role === "spectator") {
+    return { ...projection, viewer, spectatorCount };
+  }
+  return { ...projection, viewer, you: viewer.seat };
 }
 
 export class DurableRoomAdapter {
@@ -52,6 +65,7 @@ export class DurableRoomAdapter {
   private readonly timing: RoomTiming;
   private readonly terminalizeAllocation?: TerminalizeAllocation;
   private readonly connections = new Map<string, RoomConnection>();
+  private readonly emittedTerminalReasons = new Set<string>();
 
   private constructor(roomId: string, storage: StorageLike, now: () => number, room: any, timing: RoomTiming = {}, terminalizeAllocation?: TerminalizeAllocation) {
     this.roomId = roomId;
@@ -137,7 +151,7 @@ export class DurableRoomAdapter {
     else await storage.deleteAlarm?.();
   }
 
-  async mutate(action: (room: any) => unknown, storage: StorageLike = this.storage, schedule = true): Promise<unknown> {
+  async mutate(action: (room: any) => unknown, storage: StorageLike = this.storage, schedule = true): Promise<CommittedRoomOutcome> {
     if (this.unavailable || !this.room) throw new Error(ROOM_UNAVAILABLE);
     const result = action(this.room);
     try {
@@ -162,38 +176,76 @@ export class DurableRoomAdapter {
             await this.scheduleAlarm(storage);
           }
         } else {
-          await this.scheduleAlarm(storage);
+          try {
+            await this.scheduleAlarm(storage);
+          } catch (error) {
+            if (!terminalReason || this.terminalizeAllocation) throw error;
+          }
         }
       }
     } catch (error) {
       this.unavailable = true;
       throw error;
     }
-    return result;
+    return {
+      result,
+      payload: this.lastPayload as Record<string, unknown>,
+      terminalReason: this.room.status === "done" ? this.room.state.reason || null : null,
+    };
   }
 
-  async onAlarm(): Promise<unknown> {
+  async markTerminalized(reason: string, storage: StorageLike = this.storage): Promise<void> {
+    await storage.put("allocationTerminalReason", reason);
+    await storage.delete?.("terminalRetryReason");
+    this.unavailable = true;
+    await storage.deleteAlarm?.();
+  }
+
+  async scheduleTerminalRetry(reason: string, storage: StorageLike = this.storage): Promise<void> {
+    await storage.put("terminalRetryReason", reason);
+    try {
+      await this.scheduleAlarm(storage);
+    } catch {
+      await storage.put("terminalRetryReason", reason);
+    }
+  }
+
+  async onAlarm(): Promise<CommittedRoomOutcome | null> {
     if (this.unavailable || !this.room) return null;
+    const retryReason = await this.storage.get<string>("terminalRetryReason");
+    if (retryReason) {
+      return { result: null, payload: this.lastPayload as Record<string, unknown>, terminalReason: retryReason };
+    }
+    if (this.emittedTerminalReasons.size) return null;
     if (this.room.status === "done") {
       const reason = this.room.state.reason;
-      if (!reason || await this.storage.get("allocationTerminalReason")) return null;
-      if (this.terminalizeAllocation) await this.terminalizeAllocation(reason);
-      await this.storage.put("allocationTerminalReason", reason);
-      this.unavailable = true;
-      await this.storage.deleteAlarm?.();
-      return { terminalReason: reason };
+      if (!reason || await this.storage.get("allocationTerminalReason") || this.emittedTerminalReasons.has(reason)) return null;
+      if (this.terminalizeAllocation) {
+        await this.terminalizeAllocation(reason);
+        await this.markTerminalized(reason);
+      } else {
+        await this.storage.deleteAlarm?.();
+        this.emittedTerminalReasons.add(reason);
+      }
+      return { result: null, payload: this.lastPayload as Record<string, unknown>, terminalReason: reason };
     }
     const now = this.now();
     const creatorDeadline = await this.storage.get<number>("creatorAttachDeadlineMs");
     const creatorExpired = this.room.status === "waiting" && !this.room.players.A &&
       !(await this.storage.get("creatorAttachDeadlineConsumed")) && typeof creatorDeadline === "number" && creatorDeadline <= now;
     if (creatorExpired) {
-      if (this.terminalizeAllocation) await this.terminalizeAllocation("creator_attach_timeout");
       await this.storage.put("creatorAttachDeadlineConsumed", true);
-      await this.storage.put("allocationTerminalReason", "creator_attach_timeout");
-      this.unavailable = true;
-      await this.storage.deleteAlarm?.();
-      return { terminalReason: "creator_attach_timeout" };
+      const payload = this.room.payload();
+      this.lastPayload = payload;
+      await this.persist();
+      if (this.terminalizeAllocation) {
+        await this.terminalizeAllocation("creator_attach_timeout");
+        await this.markTerminalized("creator_attach_timeout");
+      } else {
+        await this.storage.deleteAlarm?.();
+        this.emittedTerminalReasons.add("creator_attach_timeout");
+      }
+      return { result: null, payload, terminalReason: "creator_attach_timeout" };
     }
     const clock = this.room.settleClock(now);
     const waiting = this.room.expireWaitingCreator(now);
@@ -204,14 +256,31 @@ export class DurableRoomAdapter {
       await this.persist();
     }
     if (terminalReason) {
-      if (this.terminalizeAllocation) await this.terminalizeAllocation(terminalReason);
-      await this.storage.put("allocationTerminalReason", terminalReason);
-      this.unavailable = true;
-      await this.storage.deleteAlarm?.();
-      return { clock, waiting, reconnect, terminalReason };
+      if (this.terminalizeAllocation) {
+        await this.terminalizeAllocation(terminalReason);
+        await this.markTerminalized(terminalReason);
+      } else {
+        await this.storage.deleteAlarm?.();
+        this.emittedTerminalReasons.add(terminalReason);
+      }
+      return {
+        result: { clock, waiting, reconnect },
+        payload: this.lastPayload as Record<string, unknown>,
+        terminalReason,
+        clock,
+        waiting,
+        reconnect,
+      } as CommittedRoomOutcome & { clock: unknown; waiting: unknown; reconnect: unknown };
     }
     await this.scheduleAlarm();
-    return { clock, waiting, reconnect };
+    return {
+      result: { clock, waiting, reconnect },
+      payload: this.lastPayload as Record<string, unknown>,
+      terminalReason: undefined,
+      clock,
+      waiting,
+      reconnect,
+    } as CommittedRoomOutcome & { clock: unknown; waiting: unknown; reconnect: unknown };
   }
 
   async attach(connection: RoomConnection, seat: "A" | "B", name: string | undefined, storage: StorageLike = this.storage): Promise<any> {
@@ -222,12 +291,12 @@ export class DurableRoomAdapter {
     if (existing && !existing.connected) {
       // The attach capability is issued by the lobby for this seat; Room still owns
       // the seat's opaque resume token and grace deadline.
-      result = await this.mutate((room) => room.resumePlayer(connection, existing.resumeToken), storage, storage === this.storage);
+      result = (await this.mutate((room) => room.resumePlayer(connection, existing.resumeToken), storage, storage === this.storage)).result;
     } else if (!existing) {
       // A B-seat capability must never be allowed to fill the first available
       // Room seat (which would silently turn B's owner into A).
       if (seat === "B" && !this.room?.players?.A) return { ok: false, error: "Ghế A chưa được khởi tạo" };
-      result = await this.mutate((room) => room.addPlayer(connection, trustedName), storage, storage === this.storage);
+      result = (await this.mutate((room) => room.addPlayer(connection, trustedName), storage, storage === this.storage)).result;
       if (result?.ok && result.seat !== seat) return { ok: false, error: "Sai ghế được cấp quyền" };
     } else {
       return { ok: false, error: "Ghế đã được sử dụng" };
@@ -269,15 +338,16 @@ export class DurableRoomAdapter {
   }
 
   async leave(connection: RoomConnection): Promise<any> {
-    const result = await this.mutate((room) => room.leavePlayer(connection));
+    const outcome = await this.mutate((room) => room.leavePlayer(connection));
     this.forget(connection);
-    return result;
+    const roomResult: any = outcome.result;
+    return { ...outcome, result: roomResult?.result ?? roomResult };
   }
 
   async close(connection: RoomConnection): Promise<any> {
-    const result = await this.mutate((room) => room.disconnectPlayer(connection));
+    const outcome = await this.mutate((room) => room.disconnectPlayer(connection));
     this.forget(connection);
-    return result;
+    return outcome;
   }
 }
 

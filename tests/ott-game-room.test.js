@@ -103,7 +103,7 @@ test("lifecycle revision receiver rejects stale and future updates and cleans bo
   assert.equal(values.has(`owner-ticket:${allocationId}:B`), false);
 });
 
-test("recipient projection selects its own seat and whitelists public room fields", async () => {
+test("recipient projection emits immutable player and spectator views without private Room fields", async () => {
   const { projectRoomPayload } = await roomStorageModule();
   const payload = {
     roomId: "ott-room-game-3",
@@ -120,16 +120,25 @@ test("recipient projection selects its own seat and whitelists public room field
     resumeCredential: "owner-secret",
   };
 
-  const forA = projectRoomPayload(payload, "A");
-  const forB = projectRoomPayload(payload, "B");
+  const forA = projectRoomPayload(payload, { role: "player", seat: "A" }, 4);
+  const forB = projectRoomPayload(payload, { role: "player", seat: "B" }, 4);
+  const forSpectator = projectRoomPayload(payload, { role: "spectator" }, 4);
   assert.equal(forA.you, "A");
   assert.equal(forB.you, "B");
+  assert.deepEqual(forA.viewer, { role: "player", seat: "A" });
+  assert.deepEqual(forB.viewer, { role: "player", seat: "B" });
+  assert.deepEqual(forSpectator.viewer, { role: "spectator" });
+  assert.equal(forSpectator.spectatorCount, 4);
+  assert.equal(forSpectator.you, undefined);
   assert.deepEqual(forA.players.A, { name: "Alice", connected: true });
   assert.deepEqual(forA.players.B, { name: "Bob", connected: true });
-  assert.equal(JSON.stringify([forA, forB]).includes("private-A"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("private-B"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("owner-secret"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("internal-capability"), false);
+  const serialized = JSON.stringify([forA, forB, forSpectator]);
+  assert.equal(serialized.includes("private-A"), false);
+  assert.equal(serialized.includes("private-B"), false);
+  assert.equal(serialized.includes("owner-secret"), false);
+  assert.equal(serialized.includes("internal-capability"), false);
+  assert.equal(serialized.includes("connection"), false);
+  assert.equal(serialized.includes("storage"), false);
 });
 
 test("DurableRoomAdapter attaches using Lobby-persisted names rather than a browser-supplied value", async () => {
