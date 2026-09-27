@@ -98,7 +98,14 @@ test("custom-message bridge is implemented at YServer boundary without super dis
   assert.doesNotMatch(source, /super\.onCustomMessage/);
   assert.match(source, /lastOttPacketMs/);
   assert.match(source, /MIN_OTT_PACKET_INTERVAL_MS/);
-  assert.match(source, /onClose[\s\S]*?delete/);
+  const invalidateStart = source.indexOf("private invalidateConnection");
+  const closeStart = source.indexOf("override onClose");
+  assert.ok(invalidateStart >= 0 && invalidateStart < closeStart);
+  const invalidation = source.slice(invalidateStart, closeStart);
+  assert.match(invalidation, /this\.lastOttPacketMs\.delete\(connection\)/);
+  assert.match(invalidation, /this\.identities\.delete\(connection\)/);
+  assert.match(invalidation, /this\.pendingIdentities\.delete\(connection\)/);
+  assert.match(invalidation, /this\.roleReservations\.delete\(connection\)/);
 });
 
 test("custom-message policy keeps client Yjs mutations read-only and non-OTT messages isolated", () => {

@@ -105,6 +105,38 @@ test("earliest clock, reconnect, and creator deadline wins", async () => {
   assert.equal(storage.values.get("alarm"), 250);
 });
 
+test("attach rollback restores the exact persisted snapshot without settling elapsed clock time", async () => {
+  const { DurableRoomAdapter, ROOM_KEY } = await roomStorageModule();
+  let now = 100;
+  const storage = fakeStorage({ creatorName: "Alice", "seat-name:B": "Bob" });
+  const adapter = await DurableRoomAdapter.create("ott-rollback-clock", storage, () => now);
+  const playerA = { id: "rollback-clock-A", open: true, send() {} };
+  const playerB = { id: "rollback-clock-B", open: true, send() {} };
+  assert.equal((await adapter.attach(playerA, "A")).ok, true);
+  adapter.commitAttach(playerA);
+  assert.equal((await adapter.attach(playerB, "B")).ok, true);
+  adapter.commitAttach(playerB);
+
+  now = 200;
+  await adapter.close(playerB);
+  const beforeAttach = structuredClone(storage.values.get(ROOM_KEY));
+  const beforePayload = structuredClone(adapter.lastPayload);
+
+  now = 1_200;
+  const retryB = { id: "rollback-clock-B-retry", open: true, send() {} };
+  assert.equal((await adapter.attach(retryB, "B")).ok, true);
+  await adapter.rollbackAttach(retryB);
+
+  assert.deepEqual(storage.values.get(ROOM_KEY), beforeAttach);
+  assert.deepEqual(adapter.lastPayload, beforePayload);
+  assert.equal(adapter.room.revision, beforeAttach.revision);
+  assert.equal(adapter.room.clockAnchorMs, beforeAttach.clockAnchorMs);
+  assert.equal(adapter.room.nextEventId, beforeAttach.nextEventId);
+  assert.equal(adapter.room.players.A.connection, playerA);
+  assert.equal(adapter.room.players.B.connected, false);
+  assert.deepEqual(adapter.connectionsSnapshot(), [playerA]);
+});
+
 test("stale alarm does not expire or duplicate lifecycle terminalization", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   let now = 100;
