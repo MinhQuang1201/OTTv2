@@ -275,7 +275,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
@@ -285,7 +285,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
@@ -296,8 +296,8 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
 }
 
-function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean): PublicMatchListState {
-  if (demoEnabled || snapshot.publicMatches !== undefined) return { status: "ready", matches: snapshot.publicMatches ?? [] };
+function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario): PublicMatchListState {
+  if (demoEnabled && scenario === "spectator-list") return { status: "ready", matches: snapshot.publicMatches ?? [] };
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 

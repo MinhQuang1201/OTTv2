@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PublicMatchView } from "../../shared/model/game";
+import styles from "../lobby/lobby.module.css";
 import { PublicMatchList, type PublicMatchListState } from "./PublicMatchList";
 
 afterEach(() => cleanup());
@@ -43,6 +44,44 @@ describe("PublicMatchList", () => {
 
     expect(onWatch).toHaveBeenCalledWith({ allocationId: "allocation-7", roomId: "room-7" });
     expect(onWatch).not.toHaveBeenCalledWith(expect.objectContaining({ playerName: expect.anything() }));
+  });
+
+  it("filters malformed and duplicate runtime matches into a safe empty state", () => {
+    const malformed = [
+      { allocationId: "missing-players", roomId: "room-1", status: "playing" },
+      { allocationId: "negative-viewers", roomId: "room-2", status: "playing", players: {}, spectatorCount: -1 },
+      { allocationId: "not-playing", roomId: "room-3", status: "finished", players: {}, spectatorCount: 0 },
+    ];
+
+    render(<PublicMatchList state={{ status: "ready", matches: malformed as unknown as readonly PublicMatchView[] }} onWatch={vi.fn()} />);
+
+    expect(screen.getByText("Chưa có trận đang diễn ra.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Xem trận/i })).not.toBeInTheDocument();
+  });
+
+  it("deduplicates valid matches by allocation and room identity", () => {
+    const duplicateAllocation = { ...matches[0], roomId: "room-8" };
+    const duplicateRoom = { ...matches[0], allocationId: "allocation-8" };
+    render(<PublicMatchList state={{ status: "ready", matches: [matches[0]!, duplicateAllocation, duplicateRoom] }} onWatch={vi.fn()} />);
+
+    expect(screen.getAllByRole("button", { name: /Xem trận/i })).toHaveLength(1);
+  });
+
+  it("uses a working match-button class and unique heading ids per instance", () => {
+    render(
+      <>
+        <PublicMatchList state={{ status: "ready", matches }} onWatch={vi.fn()} />
+        <PublicMatchList state={{ status: "ready", matches }} onWatch={vi.fn()} />
+      </>,
+    );
+
+    const sections = screen.getAllByTestId("public-match-list");
+    const headings = screen.getAllByRole("heading", { name: "Trận đang diễn ra" });
+    expect(headings[0]).toHaveAttribute("id");
+    expect(headings[0]!.id).not.toBe(headings[1]!.id);
+    expect(sections[0]).toHaveAttribute("aria-labelledby", headings[0]!.id);
+    expect(sections[1]).toHaveAttribute("aria-labelledby", headings[1]!.id);
+    expect(screen.getAllByRole("button", { name: /Xem trận/i })[0]).toHaveClass(styles.matchWatchButton);
   });
 
   it.each([

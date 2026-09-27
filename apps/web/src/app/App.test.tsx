@@ -124,10 +124,23 @@ describe("App shell lifecycle", () => {
     expect(screen.getByRole("heading", { name: "Phòng đang chờ" })).toBeInTheDocument();
   });
 
+  it("keeps active-match discovery unavailable for blocked production lobby state", () => {
+    render(<App initialScenario="lobby-default" onlineGateway={{ available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway} />);
+
+    expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Xem trận/i })).not.toBeInTheDocument();
+  });
+
+  it("disables the demo watch action when online is unavailable", () => {
+    render(<App initialScenario="spectator-list" />);
+
+    expect(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i })).toBeDisabled();
+  });
+
   it("passes only the selected public match identity to the watch callback", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
     const onWatchMatch = vi.fn();
-    render(<App initialScenario="spectator-list" onWatchMatch={onWatchMatch} />);
+    render(<App initialScenario="spectator-list" onWatchMatch={onWatchMatch} onlineGateway={{ available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway} />);
 
     await user.click(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i }));
 

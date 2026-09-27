@@ -79,7 +79,7 @@ export function OnlineRoomPanel({
         disabled={!isReady}
         onSelectRoom={(selectedRoomId) => { setRoomId(selectedRoomId); setRoomError(null); onJoin(name.trim(), selectedRoomId); }}
       />
-      <PublicMatchList state={publicMatches} disabled={publicMatches.status !== "ready" && !isReady} onWatch={onWatch} />
+      <PublicMatchList state={publicMatches} disabled={!isReady} onWatch={onWatch} />
     </Panel>
   );
 }

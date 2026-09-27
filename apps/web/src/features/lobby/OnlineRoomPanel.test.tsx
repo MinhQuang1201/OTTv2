@@ -39,12 +39,29 @@ describe("OnlineRoomPanel", () => {
       status: "ready",
       rooms: [{ roomId: "allocation-7", hostName: "Host", playerCount: 1, maxPlayers: 2 }],
     };
-    render(<OnlineRoomPanel availability="unavailable" waitingRooms={waitingRooms} onCreate={vi.fn()} onJoin={onJoin} />);
+    render(<OnlineRoomPanel availability="unavailable" waitingRooms={waitingRooms} publicMatches={{ status: "ready", matches: [] }} onCreate={vi.fn()} onJoin={onJoin} />);
 
     const roomButton = screen.getByRole("button", { name: /allocation-7/i });
     expect(roomButton).toBeDisabled();
     await user.click(roomButton);
     expect(onJoin).not.toHaveBeenCalled();
+  });
+
+  it("disables active-match watching while online is unavailable", () => {
+    render(<OnlineRoomPanel availability="unavailable" publicMatches={{ status: "ready", matches: [{
+      allocationId: "allocation-7",
+      roomId: "room-7",
+      status: "playing",
+      players: {
+        A: { seat: "A", name: "An", connected: true, remainingMs: 540_000 },
+        B: { seat: "B", name: "Bình", connected: true, remainingMs: 510_000 },
+      },
+      spectatorCount: 3,
+      serverNow: 1_790_000_000_000,
+      runningSeat: "A",
+    }] }} onWatch={vi.fn()} onCreate={vi.fn()} onJoin={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i })).toBeDisabled();
   });
 
   it("keeps active matches separate and watches without submitting the player name", async () => {

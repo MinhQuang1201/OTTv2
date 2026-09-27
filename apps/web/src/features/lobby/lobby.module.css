@@ -392,7 +392,7 @@
   gap: var(--ui-space-3);
 }
 
-.matchFooter .button {
+.matchWatchButton {
   min-height: 36px;
   padding: 6px 12px;
   font-size: var(--ui-text-xs);
