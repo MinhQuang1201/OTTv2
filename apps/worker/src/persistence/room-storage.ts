@@ -50,7 +50,7 @@ export function projectRoomPayload(payload: any, viewer: RoomViewer, spectatorCo
   if (viewer.role === "spectator") {
     return { ...projection, viewer, spectatorCount };
   }
-  return { ...projection, viewer, you: viewer.seat };
+  return { ...projection, viewer, spectatorCount, you: viewer.seat };
 }
 
 export class DurableRoomAdapter {

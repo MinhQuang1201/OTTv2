@@ -67,9 +67,11 @@ export class OttGameServer extends YServer {
   private readonly pendingIdentities = new Map<Connection, RoomViewer>();
   private readonly roleReservations = new Map<Connection, RoleReservation>();
   private readonly connectionGenerations = new Map<Connection, number>();
+  private readonly closedConnections = new WeakSet<Connection>();
   private readonly authority?: GameAuthority;
   private roomAdapter?: DurableRoomAdapter | null;
   private roomLoad?: Promise<DurableRoomAdapter | null>;
+  private roomOperationTail: Promise<void> = Promise.resolve();
   private readonly attachCapabilities = new Map<Connection, { seat: "A" | "B"; nonce: string; expiresAt: number; token: string }>();
 
   constructor(state: DurableObjectState, env: Env, ottCommandHandler: OttCommandHandler = rejectingHandler, authority?: GameAuthority) {
@@ -188,6 +190,10 @@ export class OttGameServer extends YServer {
   }
 
   override async onAlarm(): Promise<void> {
+    await this.enqueueRoomOperation(() => this.processAlarm());
+  }
+
+  private async processAlarm(): Promise<void> {
     const adapter = await this.loadRoom();
     if (!adapter || adapter.unavailable) return;
     const result = await adapter.onAlarm();
@@ -200,12 +206,13 @@ export class OttGameServer extends YServer {
   }
 
   override onConnect(connection: Connection, context: Request): void {
+    this.closedConnections.delete(connection);
     this.ensureConnectionGeneration(connection);
     super.onConnect(connection, context);
   }
 
   override onCustomMessage(connection: Connection, message: string): void {
-    void this.dispatchOttMessage(connection, message);
+    void this.dispatchOttMessage(connection, message).catch(() => undefined);
   }
 
   private async dispatchOttMessage(connection: Connection, message: string): Promise<void> {
@@ -228,6 +235,10 @@ export class OttGameServer extends YServer {
       this.sendError(connection, command.roomId, "connection_role_already_fixed");
       return;
     }
+    await this.enqueueRoomOperation(() => this.processOttCommand(connection, command, reservation));
+  }
+
+  private async processOttCommand(connection: Connection, command: OttCommand, reservation: RoleReservation | null): Promise<void> {
     try {
       const roomId = await this.ctx.storage.get<string>("roomId");
       if (!roomId || command.roomId !== roomId || (reservation && !this.isCurrentReservation(connection, reservation))) return;
@@ -266,6 +277,12 @@ export class OttGameServer extends YServer {
     }
   }
 
+  private enqueueRoomOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.roomOperationTail.then(operation, operation);
+    this.roomOperationTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
   private async handleAuthoritativeCommand(connection: Connection, command: OttCommand, generation?: number): Promise<OttHandlerResult | void> {
     const adapter = await this.loadRoom();
     if (!adapter || adapter.unavailable || !adapter.room) {
@@ -292,11 +309,26 @@ export class OttGameServer extends YServer {
         result = consumed.ok ? consumed.value : { ok: false, error: consumed.reason === "replay" ? "attach_replayed" : "attach_rejected" };
         if (consumed.ok) {
           if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
+          if (!this.installIdentity(connection, { role: "player", seat }, capability.nonce, generation)) {
+            let compensation: CommittedRoomOutcome | null = null;
+            try {
+              compensation = await adapter.close(connection);
+              if (compensation?.result) await this.publishCommitted(adapter, compensation);
+            } catch {
+              // The close lifecycle remains the final compensation path.
+            }
+            if (generation === undefined || this.isLiveGeneration(connection, generation)) {
+              this.attachCapabilities.delete(connection);
+              this.pendingIdentities.delete(connection);
+            }
+            return {
+              type: "ott:error",
+              revision: (compensation?.payload.revision as number | undefined) ?? adapter.room.revision,
+              error: "identity_install_failed",
+            };
+          }
           this.attachCapabilities.delete(connection);
           this.pendingIdentities.delete(connection);
-          if (!this.installIdentity(connection, { role: "player", seat }, capability.nonce, generation)) {
-            return { type: "ott:error", revision: adapter.room.revision, error: "identity_install_failed" };
-          }
         } else {
           this.pendingIdentities.delete(connection);
         }
@@ -310,7 +342,7 @@ export class OttGameServer extends YServer {
       if (!result || result.ok === false) {
         if (committed) await this.publishCommitted(adapter, committed);
         if (command.type === "ott:attach") this.pendingIdentities.delete(connection);
-        return { type: "ott:error", revision: adapter.room.revision, error: result?.error || "invalid_command" };
+        return { type: "ott:error", revision: (committed?.payload.revision as number | undefined) ?? adapter.room.revision, error: result?.error || "invalid_command" };
       }
       if (command.type === "ott:attach") {
         committed = {
@@ -322,11 +354,13 @@ export class OttGameServer extends YServer {
       if (committed) await this.publishCommitted(adapter, committed);
       const identity = this.identities.get(connection);
       const viewer = identity ?? { role: "player", seat: "A" } as const;
+      const payload = (committed?.payload ?? adapter.lastPayload) as Record<string, unknown> | null | undefined;
+      if (!payload) return { type: "ott:error", revision: adapter.room.revision, error: ROOM_UNAVAILABLE };
       return {
         type: "ott:state",
-        revision: adapter.room.revision,
+        revision: payload.revision as number,
         ok: true,
-        state: projectRoomPayload(adapter.lastPayload, viewer, await this.spectatorCount()),
+        state: projectRoomPayload(payload, viewer, await this.spectatorCount()),
         delivered: true,
       };
     } catch {
@@ -379,7 +413,7 @@ export class OttGameServer extends YServer {
   }
 
   private reserveRole(connection: Connection, role: "player" | "spectator"): RoleReservation | null {
-    if (this.identities.has(connection) || this.pendingIdentities.has(connection) || this.roleReservations.has(connection)) return null;
+    if (this.closedConnections.has(connection) || this.identities.has(connection) || this.pendingIdentities.has(connection) || this.roleReservations.has(connection)) return null;
     let resolve!: () => void;
     const completed = new Promise<void>((finish) => { resolve = finish; });
     const reservation = { role, generation: this.ensureConnectionGeneration(connection), completed, resolve };
@@ -412,7 +446,12 @@ export class OttGameServer extends YServer {
     this.pendingIdentities.delete(connection);
     this.attachCapabilities.delete(connection);
     this.roleReservations.delete(connection);
+    this.closedConnections.add(connection);
     return generation;
+  }
+
+  private forgetConnectionGeneration(connection: Connection, generation: number): void {
+    if (this.isLiveGeneration(connection, generation)) this.connectionGenerations.delete(connection);
   }
 
   private async attachSpectator(connection: Connection, command: Extract<OttCommand, { type: "ott:spectate" }>, generation?: number): Promise<boolean> {
@@ -524,7 +563,7 @@ export class OttGameServer extends YServer {
       this.sendCustomMessage(connection, JSON.stringify({
         __ott: true,
         roomId: adapter.roomId,
-        revision: adapter.room.revision,
+        revision: payload.revision as number,
         type: "ott:state",
         state: projectRoomPayload(payload, viewer, spectatorCount),
       }));
@@ -541,8 +580,16 @@ export class OttGameServer extends YServer {
   }
 
   private async publishCommitted(adapter: DurableRoomAdapter, outcome: CommittedRoomOutcome): Promise<void> {
-    await this.broadcastState(adapter, outcome.payload);
-    if (!outcome.terminalReason) return;
+    if (!outcome.terminalReason) {
+      await this.broadcastState(adapter, outcome.payload);
+      return;
+    }
+    try {
+      await this.broadcastState(adapter, outcome.payload);
+    } catch {
+      await adapter.scheduleTerminalRetry(outcome.terminalReason);
+      return;
+    }
     try {
       await this.terminalizeAllocation(outcome.terminalReason);
       await adapter.markTerminalized(outcome.terminalReason);
@@ -560,13 +607,15 @@ export class OttGameServer extends YServer {
     }
     const spectatorCount = await this.spectatorCount();
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
-    const delivered = await this.sendProjection(connection, adapter, adapter.lastPayload as Record<string, unknown> | null | undefined, spectatorCount);
-    if (!delivered) return;
+    const payload = adapter.lastPayload as Record<string, unknown>;
+    await this.broadcastState(adapter, payload);
+    if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
+    if (!this.identities.has(connection)) return;
     return {
       type: "ott:state",
-      revision: adapter.room.revision,
+      revision: payload.revision as number,
       ok: true,
-      state: projectRoomPayload(adapter.lastPayload, { role: "spectator" }, spectatorCount),
+      state: projectRoomPayload(payload, { role: "spectator" }, spectatorCount),
       delivered: true,
     };
   }
@@ -609,30 +658,34 @@ export class OttGameServer extends YServer {
     const identity = this.identities.get(connection) ?? this.pendingIdentities.get(connection);
     const reservation = this.roleReservations.get(connection);
     const generation = this.invalidateConnection(connection);
-    void this.handleClose(connection, identity, reservation, generation);
+    void this.enqueueRoomOperation(() => this.handleClose(connection, identity, reservation, generation)).catch(() => undefined);
     super.onClose(connection, code, reason, wasClean);
   }
 
   private async handleClose(connection: Connection, identity?: RoomViewer, reservation?: RoleReservation, generation = this.ensureConnectionGeneration(connection)): Promise<void> {
     if (!this.isLiveGeneration(connection, generation)) return;
-    if (reservation) await reservation.completed;
-    if (!this.isLiveGeneration(connection, generation)) return;
-    await this.clearAttachment(connection, generation);
-    if (!this.isLiveGeneration(connection, generation)) return;
-    if (identity?.role !== "player") {
+    try {
+      if (reservation) await reservation.completed;
+      if (!this.isLiveGeneration(connection, generation)) return;
+      await this.clearAttachment(connection, generation);
+      if (!this.isLiveGeneration(connection, generation)) return;
+      if (identity?.role !== "player") {
+        const adapter = await this.loadRoom();
+        if (!this.isLiveGeneration(connection, generation)) return;
+        if (adapter && !adapter.unavailable && adapter.room) await this.broadcastState(adapter);
+        return;
+      }
       const adapter = await this.loadRoom();
       if (!this.isLiveGeneration(connection, generation)) return;
-      if (adapter && !adapter.unavailable && adapter.room) await this.broadcastState(adapter);
-      return;
-    }
-    const adapter = await this.loadRoom();
-    if (!this.isLiveGeneration(connection, generation)) return;
-    if (!adapter || adapter.unavailable || !adapter.room) return;
-    try {
-      const outcome = await adapter.close(connection);
-      if (outcome?.result) await this.publishCommitted(adapter, outcome);
-    } catch {
-      // A failed write makes the room unavailable; never publish an unpersisted close.
+      if (!adapter || adapter.unavailable || !adapter.room) return;
+      try {
+        const outcome = await adapter.close(connection);
+        if (outcome?.result) await this.publishCommitted(adapter, outcome);
+      } catch {
+        // A failed write makes the room unavailable; never publish an unpersisted close.
+      }
+    } finally {
+      this.forgetConnectionGeneration(connection, generation);
     }
   }
 }
