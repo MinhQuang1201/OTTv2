@@ -111,6 +111,73 @@ test("canonical capability round-trips and parallel verification commits one mut
   assert.equal(store.values.get("attach-nonce:" + claims.nonce), claims.now + claims.ttlMs);
 });
 
+test("spectator v2 capabilities are seatless, variant-bound, and replay-safe", async () => {
+  const { issueCapability, verifyCapability, verifyCapabilityTransaction } = await authModule();
+  const allocationId = "allocation-spectator-1";
+  const roomId = "ott-room-spectator-1";
+  const spectatorClaims = {
+    allocationId,
+    roomId,
+    purpose: "spectate",
+    role: "spectator",
+    now: 60_000,
+    ttlMs: 60_000,
+    nonce: "spectate-roundtrip-nonce-0001",
+  };
+  const spectatorToken = await issueCapability("test-secret", spectatorClaims);
+  const decoded = JSON.parse(Buffer.from(spectatorToken.split(".")[0], "base64url").toString("utf8"));
+  assert.deepEqual(decoded, ["ott-cap-v2", allocationId, roomId, "spectate", "spectator", 60_000, 120_000, spectatorClaims.nonce]);
+
+  const spectatorExpected = { allocationId, roomId, purpose: "spectate", role: "spectator" };
+  assert.equal((await verifyCapability("test-secret", spectatorToken, spectatorExpected, 60_001)).v, "ott-cap-v2");
+  assert.equal(await verifyCapability("test-secret", spectatorToken, { allocationId, roomId, purpose: "attach" }, 60_001), null);
+  assert.equal(await verifyCapability("test-secret", spectatorToken, { allocationId, roomId: "other-room", purpose: "spectate", role: "spectator" }, 60_001), null);
+
+  const playerToken = await issueCapability("test-secret", {
+    allocationId,
+    roomId,
+    purpose: "attach",
+    seat: "A",
+    now: 60_000,
+    nonce: "player-variant-nonce-000001",
+  });
+  assert.equal(await verifyCapability("test-secret", playerToken, spectatorExpected, 60_001), null);
+  assert.equal(await verifyCapability("test-secret", spectatorToken, spectatorExpected, 120_000), null, "expired spectator token");
+  assert.equal(await verifyCapability("wrong-secret", spectatorToken, spectatorExpected, 60_001), null, "invalid signature");
+
+  class MemoryDO {
+    values = new Map();
+    tail = Promise.resolve();
+    transaction(callback) {
+      const run = async () => {
+        const pending = new Map(this.values);
+        const result = await callback({
+          get: async (key) => pending.get(key),
+          put: async (key, value) => pending.set(key, value),
+        });
+        this.values = pending;
+        return result;
+      };
+      const next = this.tail.then(run, run);
+      this.tail = next.then(() => undefined, () => undefined);
+      return next;
+    }
+  }
+  const store = new MemoryDO();
+  const mutate = async (_payload, tx) => {
+    const count = await tx.get("spectator-mutations") ?? 0;
+    await tx.put("spectator-mutations", count + 1);
+    return { accepted: true, value: count + 1 };
+  };
+  const [first, second] = await Promise.all([
+    verifyCapabilityTransaction("test-secret", spectatorToken, spectatorExpected, store.transaction.bind(store), mutate, { now: 60_001, noncePrefix: "spectate-nonce" }),
+    verifyCapabilityTransaction("test-secret", spectatorToken, spectatorExpected, store.transaction.bind(store), mutate, { now: 60_001, noncePrefix: "spectate-nonce" }),
+  ]);
+  assert.deepEqual([first.ok, second.ok].sort(), [false, true]);
+  assert.equal(store.values.get("spectator-mutations"), 1);
+  assert.equal(store.values.get("spectate-nonce:" + spectatorClaims.nonce), 120_000);
+});
+
 test("rejected capability mutation rolls back both the mutation and nonce", async () => {
   const { issueCapability, verifyCapabilityTransaction } = await authModule();
   const values = new Map();

@@ -1,19 +1,33 @@
 const encoder = new TextEncoder();
 
-export const CAPABILITY_VERSION = "ott-cap-v1";
+export const PLAYER_CAPABILITY_VERSION = "ott-cap-v1";
+export const SPECTATOR_CAPABILITY_VERSION = "ott-cap-v2";
+/** Existing player callers keep the v1 name during the compatibility window. */
+export const CAPABILITY_VERSION = PLAYER_CAPABILITY_VERSION;
 export const CAPABILITY_TTL_MS = 60_000;
 
-export type CapabilityPayload = {
-  v: typeof CAPABILITY_VERSION;
+export type CapabilityBase = {
   allocationId: string;
   roomId: string;
-  purpose: "game-init" | "attach" | "seat-update" | "lifecycle";
-  seat: "A" | "B";
-  revision?: number;
   issuedAt: number;
   expiresAt: number;
   nonce: string;
 };
+
+export type PlayerCapability = CapabilityBase & {
+  v: typeof PLAYER_CAPABILITY_VERSION;
+  purpose: "game-init" | "attach" | "seat-update" | "lifecycle";
+  seat: "A" | "B";
+  revision?: number;
+};
+
+export type SpectatorCapability = CapabilityBase & {
+  v: typeof SPECTATOR_CAPABILITY_VERSION;
+  purpose: "spectate";
+  role: "spectator";
+};
+
+export type CapabilityPayload = PlayerCapability | SpectatorCapability;
 
 export interface CapabilityTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -25,17 +39,33 @@ export interface CapabilityTransaction {
 
 export type CapabilityTransactionRunner = <T>(callback: (storage: CapabilityTransaction) => Promise<T>) => Promise<T>;
 
-export type CapabilityExpectations = {
+export type PlayerCapabilityExpectations = {
   allocationId?: string;
   roomId: string;
-  purpose: CapabilityPayload["purpose"];
-  seat?: CapabilityPayload["seat"];
+  purpose: PlayerCapability["purpose"];
+  seat?: PlayerCapability["seat"];
   revision?: number;
 };
 
+export type SpectatorCapabilityExpectations = {
+  allocationId?: string;
+  roomId: string;
+  purpose: "spectate";
+  role: "spectator";
+};
+
+export type CapabilityExpectations = PlayerCapabilityExpectations | SpectatorCapabilityExpectations;
+
 export type CapabilityFailureReason = "version" | "format" | "allocation" | "room" | "purpose" | "seat" | "revision" | "timestamps" | "lifetime" | "nonce" | "signature" | "replay" | "parse";
+export type PlayerCapabilityVerification =
+  | { ok: true; payload: PlayerCapability }
+  | { ok: false; reason: CapabilityFailureReason };
+export type SpectatorCapabilityVerification =
+  | { ok: true; payload: SpectatorCapability }
+  | { ok: false; reason: CapabilityFailureReason };
 export type CapabilityVerification =
-  | { ok: true; payload: CapabilityPayload }
+  | PlayerCapabilityVerification
+  | SpectatorCapabilityVerification
   | { ok: false; reason: CapabilityFailureReason };
 
 export type TransactionalCapabilityVerification<T> =
@@ -54,6 +84,12 @@ function fromBase64url(value: string): Uint8Array {
 }
 
 function canonical(payload: CapabilityPayload): string {
+  if (payload.v === SPECTATOR_CAPABILITY_VERSION) {
+    return JSON.stringify([
+      payload.v, payload.allocationId, payload.roomId, payload.purpose,
+      payload.role, payload.issuedAt, payload.expiresAt, payload.nonce,
+    ]);
+  }
   const fields: unknown[] = [
     payload.v, payload.allocationId, payload.roomId, payload.purpose,
     payload.seat, payload.issuedAt, payload.expiresAt, payload.nonce,
@@ -177,8 +213,8 @@ export async function verifyOwnerCredential(credential: string, record: OwnerCre
 export async function rotateOwnerCredential(
   storage: CapabilityTransaction,
   secret: string,
-  input: { allocationId: string; roomId: string; seat: CapabilityPayload["seat"]; resumeCredential: string; now?: number },
-): Promise<{ seat: CapabilityPayload["seat"]; resumeCredential: string; ticket: string } | null> {
+  input: { allocationId: string; roomId: string; seat: PlayerCapability["seat"]; resumeCredential: string; now?: number },
+): Promise<{ seat: PlayerCapability["seat"]; resumeCredential: string; ticket: string } | null> {
   const credentialKey = `owner-credential:${input.allocationId}:${input.seat}`;
   const previous = await storage.get<OwnerCredentialRecord>(credentialKey);
   if (!previous || !(await verifyOwnerCredential(input.resumeCredential, previous))) return null;
@@ -282,10 +318,28 @@ export async function retryRecoverableInitialization<T>(
 }
 
 function parseCanonical(value: string): CapabilityPayload {
-  const fields = JSON.parse(value);
-  if (!Array.isArray(fields) || (fields.length !== 8 && fields.length !== 9)) throw new Error("Invalid capability payload");
+  const fields: unknown = JSON.parse(value);
+  if (!Array.isArray(fields)) throw new Error("Invalid capability payload");
+  if (fields[0] === SPECTATOR_CAPABILITY_VERSION) {
+    if (fields.length !== 8) throw new Error("Invalid spectator capability payload");
+    const [v, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce] = fields;
+    if (typeof allocationId !== "string" || typeof roomId !== "string" || purpose !== "spectate" ||
+        role !== "spectator" || !Number.isInteger(issuedAt) || !Number.isInteger(expiresAt) ||
+        typeof nonce !== "string") throw new Error("Invalid spectator capability payload");
+    return { v, allocationId, roomId, purpose, role, issuedAt, expiresAt, nonce };
+  }
+  if (fields[0] !== PLAYER_CAPABILITY_VERSION || (fields.length !== 8 && fields.length !== 9)) {
+    throw new Error("Invalid player capability payload");
+  }
   const [v, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, revision] = fields;
-  return { v, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, ...(revision === undefined ? {} : { revision }) } as CapabilityPayload;
+  if (typeof allocationId !== "string" || typeof roomId !== "string" ||
+      !["game-init", "attach", "seat-update", "lifecycle"].includes(purpose as string) ||
+      !["A", "B"].includes(seat as string) || !Number.isInteger(issuedAt) ||
+      !Number.isInteger(expiresAt) || typeof nonce !== "string" ||
+      (revision !== undefined && !Number.isInteger(revision))) {
+    throw new Error("Invalid player capability payload");
+  }
+  return { v, allocationId, roomId, purpose, seat, issuedAt, expiresAt, nonce, ...(revision === undefined ? {} : { revision }) } as PlayerCapability;
 }
 
 async function keyFor(secret: string): Promise<CryptoKey> {
@@ -294,24 +348,56 @@ async function keyFor(secret: string): Promise<CryptoKey> {
 
 export async function issueCapability(
   secret: string,
-  input: Omit<CapabilityPayload, "v" | "issuedAt" | "expiresAt" | "nonce"> & { now?: number; ttlMs?: number; nonce?: string },
+  input: Omit<PlayerCapability, "v" | "issuedAt" | "expiresAt" | "nonce"> & { now?: number; ttlMs?: number; nonce?: string },
+): Promise<string>;
+export async function issueCapability(
+  secret: string,
+  input: Omit<SpectatorCapability, "v" | "issuedAt" | "expiresAt" | "nonce"> & { now?: number; ttlMs?: number; nonce?: string },
+): Promise<string>;
+export async function issueCapability(
+  secret: string,
+  input: (Omit<PlayerCapability, "v" | "issuedAt" | "expiresAt" | "nonce"> | Omit<SpectatorCapability, "v" | "issuedAt" | "expiresAt" | "nonce">) & { now?: number; ttlMs?: number; nonce?: string },
 ): Promise<string> {
   const issuedAt = input.now ?? Date.now();
-  const payload: CapabilityPayload = {
-    v: CAPABILITY_VERSION,
-    allocationId: input.allocationId,
-    roomId: input.roomId,
-    purpose: input.purpose,
-    seat: input.seat,
-    issuedAt,
-    expiresAt: issuedAt + (input.ttlMs ?? CAPABILITY_TTL_MS),
-    nonce: input.nonce ?? createCapabilityNonce(),
-  };
+  const payload: CapabilityPayload = input.purpose === "spectate"
+    ? {
+      v: SPECTATOR_CAPABILITY_VERSION,
+      allocationId: input.allocationId,
+      roomId: input.roomId,
+      purpose: input.purpose,
+      role: input.role,
+      issuedAt,
+      expiresAt: issuedAt + (input.ttlMs ?? CAPABILITY_TTL_MS),
+      nonce: input.nonce ?? createCapabilityNonce(),
+    }
+    : {
+      v: PLAYER_CAPABILITY_VERSION,
+      allocationId: input.allocationId,
+      roomId: input.roomId,
+      purpose: input.purpose,
+      seat: input.seat,
+      ...(input.revision === undefined ? {} : { revision: input.revision }),
+      issuedAt,
+      expiresAt: issuedAt + (input.ttlMs ?? CAPABILITY_TTL_MS),
+      nonce: input.nonce ?? createCapabilityNonce(),
+    };
   const encoded = base64url(encoder.encode(canonical(payload)));
   const signature = await crypto.subtle.sign("HMAC", await keyFor(secret), encoder.encode(encoded));
   return `${encoded}.${base64url(new Uint8Array(signature))}`;
 }
 
+export async function verifyCapability(
+  secret: string,
+  token: string,
+  expected: PlayerCapabilityExpectations,
+  now = Date.now(),
+): Promise<PlayerCapability | null>;
+export async function verifyCapability(
+  secret: string,
+  token: string,
+  expected: SpectatorCapabilityExpectations,
+  now?: number,
+): Promise<SpectatorCapability | null>;
 export async function verifyCapability(
   secret: string,
   token: string,
@@ -322,6 +408,36 @@ export async function verifyCapability(
   return result.ok ? result.payload : null;
 }
 
+export async function verifyPlayerCapability(
+  secret: string,
+  token: string,
+  expected: PlayerCapabilityExpectations,
+  now = Date.now(),
+): Promise<PlayerCapability | null> {
+  return verifyCapability(secret, token, expected, now);
+}
+
+export async function verifySpectatorCapability(
+  secret: string,
+  token: string,
+  expected: SpectatorCapabilityExpectations,
+  now = Date.now(),
+): Promise<SpectatorCapability | null> {
+  return verifyCapability(secret, token, expected, now);
+}
+
+export async function verifyCapabilityDetailed(
+  secret: string,
+  token: string,
+  expected: PlayerCapabilityExpectations,
+  now = Date.now(),
+): Promise<PlayerCapabilityVerification>;
+export async function verifyCapabilityDetailed(
+  secret: string,
+  token: string,
+  expected: SpectatorCapabilityExpectations,
+  now?: number,
+): Promise<SpectatorCapabilityVerification>;
 export async function verifyCapabilityDetailed(
   secret: string,
   token: string,
@@ -333,15 +449,21 @@ export async function verifyCapabilityDetailed(
     if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return { ok: false, reason: "format" };
     const encoded = parts[0];
     const payload = parseCanonical(new TextDecoder().decode(fromBase64url(encoded)));
-    if (payload.v !== CAPABILITY_VERSION) return { ok: false, reason: "version" };
+    if (expected.purpose === "spectate") {
+      if (payload.v !== SPECTATOR_CAPABILITY_VERSION || payload.role !== expected.role) return { ok: false, reason: "version" };
+    } else if (payload.v !== PLAYER_CAPABILITY_VERSION) {
+      return { ok: false, reason: "version" };
+    }
     if (expected.allocationId !== undefined && payload.allocationId !== expected.allocationId) return { ok: false, reason: "allocation" };
     if (payload.roomId !== expected.roomId) return { ok: false, reason: "room" };
     if (payload.purpose !== expected.purpose) return { ok: false, reason: "purpose" };
-    if (!["A", "B"].includes(payload.seat)) return { ok: false, reason: "seat" };
-    if (expected.seat !== undefined && payload.seat !== expected.seat) return { ok: false, reason: "seat" };
-    if ((payload.purpose === "lifecycle" && (!Number.isInteger(payload.revision) || payload.revision! < 1)) ||
-      (payload.purpose !== "lifecycle" && payload.revision !== undefined) ||
-      (expected.revision !== undefined && payload.revision !== expected.revision)) return { ok: false, reason: "revision" };
+    if (expected.purpose !== "spectate") {
+      if (payload.v !== PLAYER_CAPABILITY_VERSION || !["A", "B"].includes(payload.seat)) return { ok: false, reason: "seat" };
+      if (expected.seat !== undefined && payload.seat !== expected.seat) return { ok: false, reason: "seat" };
+      if ((payload.purpose === "lifecycle" && (!Number.isInteger(payload.revision) || payload.revision! < 1)) ||
+        (payload.purpose !== "lifecycle" && payload.revision !== undefined) ||
+        (expected.revision !== undefined && payload.revision !== expected.revision)) return { ok: false, reason: "revision" };
+    }
     if (!Number.isInteger(payload.issuedAt) || !Number.isInteger(payload.expiresAt) || payload.expiresAt <= now || payload.issuedAt > now) return { ok: false, reason: "timestamps" };
     if (payload.expiresAt <= payload.issuedAt) return { ok: false, reason: "timestamps" };
     if (payload.expiresAt - payload.issuedAt > CAPABILITY_TTL_MS) return { ok: false, reason: "lifetime" };
@@ -355,6 +477,22 @@ export async function verifyCapabilityDetailed(
 }
 
 /** Verify a signed capability, then consume its nonce and apply its mutation atomically. */
+export async function verifyCapabilityTransaction<T>(
+  secret: string,
+  token: string,
+  expected: PlayerCapabilityExpectations,
+  transaction: CapabilityTransactionRunner,
+  mutate: (payload: PlayerCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  options: { now?: number; noncePrefix?: string } = {},
+): Promise<TransactionalCapabilityVerification<T>>;
+export async function verifyCapabilityTransaction<T>(
+  secret: string,
+  token: string,
+  expected: SpectatorCapabilityExpectations,
+  transaction: CapabilityTransactionRunner,
+  mutate: (payload: SpectatorCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  options?: { now?: number; noncePrefix?: string },
+): Promise<TransactionalCapabilityVerification<T>>;
 export async function verifyCapabilityTransaction<T>(
   secret: string,
   token: string,
@@ -384,8 +522,30 @@ export async function verifyCapabilityTransaction<T>(
   }
 }
 
+export async function verifyPlayerCapabilityTransaction<T>(
+  secret: string,
+  token: string,
+  expected: PlayerCapabilityExpectations,
+  transaction: CapabilityTransactionRunner,
+  mutate: (payload: PlayerCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  options: { now?: number; noncePrefix?: string } = {},
+): Promise<TransactionalCapabilityVerification<T>> {
+  return verifyCapabilityTransaction(secret, token, expected, transaction, mutate, options);
+}
+
+export async function verifySpectatorCapabilityTransaction<T>(
+  secret: string,
+  token: string,
+  expected: SpectatorCapabilityExpectations,
+  transaction: CapabilityTransactionRunner,
+  mutate: (payload: SpectatorCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  options: { now?: number; noncePrefix?: string } = {},
+): Promise<TransactionalCapabilityVerification<T>> {
+  return verifyCapabilityTransaction(secret, token, expected, transaction, mutate, options);
+}
+
 export interface AttachRecoveryAdapter<C, T extends { ok?: boolean }> {
-  attach(connection: C, seat: CapabilityPayload["seat"], name: string | undefined, storage: CapabilityTransaction): Promise<T>;
+  attach(connection: C, seat: PlayerCapability["seat"], name: string | undefined, storage: CapabilityTransaction): Promise<T>;
   forget(connection: C): void;
   reloadPersisted(): Promise<void>;
   scheduleAlarm(storage?: CapabilityTransaction): Promise<void>;
@@ -395,7 +555,7 @@ export interface AttachRecoveryAdapter<C, T extends { ok?: boolean }> {
 export async function attachWithCapabilityRecovery<C, T extends { ok?: boolean }>(
   secret: string,
   token: string,
-  expected: CapabilityExpectations,
+  expected: PlayerCapabilityExpectations,
   transaction: CapabilityTransactionRunner,
   adapter: AttachRecoveryAdapter<C, T>,
   connection: C,

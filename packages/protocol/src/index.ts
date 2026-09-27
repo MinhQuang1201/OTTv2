@@ -3,6 +3,7 @@ export const MIN_OTT_PACKET_INTERVAL_MS = 40;
 
 const COMMAND_KEYS = {
   "ott:attach": ["__ott", "roomId", "type", "ticket"],
+  "ott:spectate": ["__ott", "roomId", "type", "ticket"],
   "ott:move": ["__ott", "roomId", "type", "from", "to"],
   "ott:leave": ["__ott", "roomId", "type"],
 } as const;
@@ -15,10 +16,27 @@ const RESPONSE_KEYS = {
 
 export type OttCommand =
   | { __ott: true; roomId: string; type: "ott:attach"; ticket: string }
+  | { __ott: true; roomId: string; type: "ott:spectate"; ticket: string }
   | { __ott: true; roomId: string; type: "ott:move"; from: Coordinate; to: Coordinate }
   | { __ott: true; roomId: string; type: "ott:leave" };
 
 export type Coordinate = { x: number; y: number };
+
+export type ViewerIdentity =
+  | { readonly role: "player"; readonly seat: "A" | "B" }
+  | { readonly role: "spectator" };
+
+export type SpectatorProjection = {
+  readonly roomId: string;
+  readonly status: "playing" | "finished";
+  readonly revision: number;
+  readonly serverNow: number;
+  readonly players: unknown;
+  readonly state: unknown;
+  readonly events: readonly unknown[];
+  readonly viewer: { readonly role: "spectator" };
+  readonly spectatorCount: number;
+};
 
 export type OttResponse =
   | { __ott: true; roomId: string; revision: number; type: "ott:ack"; ok: true }
@@ -61,12 +79,13 @@ export function parseOttMessage(value: string): ParseResult<OttCommand> {
   const parsed = parseJson(value);
   if (!parsed.ok) return parsed;
   const object = parsed.value;
-  if (object.__ott !== true || typeof object.roomId !== "string" || typeof object.type !== "string") {
+  if (object.__ott !== true || typeof object.roomId !== "string" || object.roomId.length === 0 || typeof object.type !== "string") {
     return { ok: false, error: "invalid_envelope" };
   }
   const keys = COMMAND_KEYS[object.type as keyof typeof COMMAND_KEYS];
   if (!keys || !hasExactKeys(object, keys)) return { ok: false, error: "unknown_command" };
-  if (object.type === "ott:attach" && typeof object.ticket === "string" && object.ticket.length > 0) {
+  if ((object.type === "ott:attach" || object.type === "ott:spectate") &&
+      typeof object.ticket === "string" && object.ticket.length > 0) {
     return { ok: true, value: object as OttCommand };
   }
   if (object.type === "ott:move" && isCoordinate(object.from) && isCoordinate(object.to)) {
