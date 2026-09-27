@@ -224,7 +224,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
         <div className={styles.content}>
           <div className={styles.state} data-testid="app-state" data-state={appState.status}>
             <ScreenBoundary
-              error={appState.status === "error" && appState.error.code !== "room_unavailable" ? appState.error : null}
+              error={appState.status === "error" && !(appState.error.code === "room_unavailable" && appState.snapshot?.viewer?.role === "spectator") ? appState.error : null}
               resetKey={`${demo.scenario}:${appState.status}:${activeSession?.generation ?? 0}:${restartToken}`}
               onRetry={onRetry}
               onLobby={onLobby}
@@ -258,7 +258,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   readonly onlineAvailable: boolean;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
-  if (state.status === "error" && state.error.code === "room_unavailable") return (
+  if (state.status === "error" && state.error.code === "room_unavailable" && state.snapshot?.viewer?.role === "spectator") return (
     <Panel className={styles.screen} role="alert">
       <h1>Trận đấu không còn khả dụng</h1>
       <p>{state.error.message}</p>

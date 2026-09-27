@@ -35,7 +35,7 @@ describe("App shell lifecycle", () => {
         return snapshot;
       },
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-      start: async () => undefined,
+       start: async () => undefined,
       getLegalMoves: () => [],
       move: async () => ({ accepted: false, error: { code: "invalid_move", message: "Không hợp lệ.", retryable: false } }),
       leave: async () => undefined,
@@ -139,6 +139,51 @@ describe("App shell lifecycle", () => {
     expect(await screen.findByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument();
     expect(gateway.listRooms).not.toHaveBeenCalled();
     expect(onlineSessionFactory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "spectator-list",
+    "spectator-active",
+    "spectator-reconnecting",
+    "spectator-finished",
+    "spectator-room-gone",
+  ] as const)("keeps %s isolated from online discovery and sessions", async (scenario) => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSessionFactory = vi.fn();
+    const sessionFactory = vi.fn((next: DemoScenario) => createDemoSession(next));
+    render(<App initialScenario={scenario} onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} sessionFactory={sessionFactory} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "lobby-default");
+
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+    expect(onlineSessionFactory).not.toHaveBeenCalled();
+    expect(sessionFactory).toHaveBeenCalledWith(scenario);
+    expect(sessionFactory).toHaveBeenCalledWith("lobby-default");
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+  });
+
+  it("keeps generic online room_unavailable errors on the player error path", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onlineSession = fakeSession();
+    const onlineSessionFactory = vi.fn(() => onlineSession.session);
+    const gateway = { available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway;
+    render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
+    onlineSession.controls.transition({
+      phase: "error",
+      error: { code: "room_unavailable", message: "Phòng online không còn khả dụng.", retryable: true },
+    });
+
+    expect(await screen.findByRole("heading", { name: /Đã xảy ra sự cố/i })).toBeInTheDocument();
+    expect(screen.getByText("Phòng online không còn khả dụng.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Trận đấu không còn khả dụng" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Thử lại/i })).toBeInTheDocument();
   });
 
   it("keeps an unavailable online lobby usable instead of showing the error boundary", () => {
