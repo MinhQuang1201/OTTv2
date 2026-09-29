@@ -112,9 +112,10 @@ class Room {
     return { ok: true, seat, name: player.name, resumeToken: player.resumeToken };
   }
 
-  reconcileHydration(now = this.now()) {
+  reconcileHydration(now = this.now(), preserveSeats = []) {
     if (this.status === "done") return { ok: true, status: this.status, seats: [] };
-    const seats = ["A", "B"].filter((seat) => this.players[seat] && this.players[seat].connected);
+    const preserved = new Set(preserveSeats);
+    const seats = ["A", "B"].filter((seat) => this.players[seat] && this.players[seat].connected && !preserved.has(seat));
     if (!seats.length) return { ok: true, status: this.status, seats: [] };
     for (const seat of seats) {
       const player = this.players[seat];

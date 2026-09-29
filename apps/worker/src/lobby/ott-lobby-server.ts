@@ -129,6 +129,11 @@ export class OttLobbyServer extends DurableObject<Env> {
       return json({ matches: list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary) });
     }
 
+    if (!this.env.OTT_INTERNAL_SECRET) {
+      console.warn("OTT lobby control request rejected: missing secret binding");
+      return json({ error: "authority_unavailable" }, 503);
+    }
+
     const name = cleanName(body.name);
     if (action === "create") {
       if (!name) return json({ error: "invalid_name" }, 400);
