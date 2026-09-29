@@ -29,7 +29,7 @@ function scheduler() {
 function dependencies(overrides: Partial<AiSessionDependencies> = {}) {
   const timer = scheduler();
   const bridge = getGameCoreBridge();
-  const chooseMove = vi.fn(() => ({ from: { x: 8, y: 6 }, to: { x: 8, y: 7 } }));
+  const chooseMove = vi.fn(() => ({ from: { x: 4, y: 1 }, to: { x: 5, y: 2 } }));
   return {
     timer,
     chooseMove,
@@ -51,7 +51,7 @@ describe("AiSession", () => {
     expect(session.getSnapshot()).toMatchObject({ mode: "ai", viewer: { role: "player", seat: "A" }, viewerSeat: "A", capabilities: { canMove: true, canLeaveGame: false, canSpectate: false }, spectatorCount: 0, aiThinking: false, turn: "A" });
     expect(session.getLegalMoves({ x: 8, y: 6 })).toEqual([]);
     expect((await session.move({ x: 8, y: 6 }, { x: 8, y: 5 })).accepted).toBe(false);
-    expect((await session.move({ x: 0, y: 2 }, { x: 0, y: 1 })).accepted).toBe(true);
+    expect((await session.move({ x: 4, y: 7 }, { x: 3, y: 6 })).accepted).toBe(true);
   });
 
   it("schedules exactly one AI decision and disables input while thinking", async () => {
@@ -59,10 +59,10 @@ describe("AiSession", () => {
     const session = new AiSession(deps);
     await session.start({ mode: "ai", playerName: "An" });
 
-    await session.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    await session.move({ x: 4, y: 7 }, { x: 3, y: 6 });
     expect(session.getSnapshot()).toMatchObject({ aiThinking: true, pendingMove: true, turn: "B" });
     expect(timer.setTimeout).toHaveBeenCalledTimes(1);
-    expect((await session.move({ x: 0, y: 3 }, { x: 0, y: 2 })).accepted).toBe(false);
+    expect((await session.move({ x: 5, y: 6 }, { x: 5, y: 5 })).accepted).toBe(false);
     expect(timer.setTimeout).toHaveBeenCalledTimes(1);
 
     timer.runNext();
@@ -70,14 +70,14 @@ describe("AiSession", () => {
     expect(chooseMove).toHaveBeenCalledTimes(1);
     expect(chooseMove).toHaveBeenCalledWith(expect.anything(), "B");
     await vi.waitFor(() => expect(session.getSnapshot()).toMatchObject({ aiThinking: false, pendingMove: false, turn: "A" }));
-    expect(session.getSnapshot().events.at(-1)).toMatchObject({ type: "move", from: { x: 8, y: 6 }, to: { x: 8, y: 7 } });
+    expect(session.getSnapshot().events.at(-1)).toMatchObject({ type: "move", from: { x: 4, y: 1 }, to: { x: 5, y: 2 } });
   });
 
   it("cancels pending AI work on leave and dispose", async () => {
     const first = dependencies();
     const leaving = new AiSession(first.deps);
     await leaving.start({ mode: "ai", playerName: "An" });
-    await leaving.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    await leaving.move({ x: 4, y: 7 }, { x: 3, y: 6 });
     await leaving.leave();
     first.timer.runNext();
     expect(first.chooseMove).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("AiSession", () => {
     const second = dependencies();
     const disposed = new AiSession(second.deps);
     await disposed.start({ mode: "ai", playerName: "An" });
-    await disposed.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    await disposed.move({ x: 4, y: 7 }, { x: 3, y: 6 });
     disposed.dispose();
     second.timer.runNext();
     expect(second.chooseMove).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe("AiSession", () => {
       createInitialState: () => ({
         ...core.createInitialState(),
         pieces: [
-          { id: "A-la-0", player: "A", type: "la", x: 0, y: 7 },
+          { id: "A-la-0", player: "A", type: "la", x: 0, y: 1 },
           { id: "B-dam-0", player: "B", type: "dam", x: 8, y: 8 },
         ],
       }),
@@ -119,7 +119,7 @@ describe("AiSession", () => {
     const session = new AiSession({ scheduler: timer, chooseMove, local: { bridge } });
     await session.start({ mode: "ai", playerName: "An" });
 
-    const result = await session.move({ x: 0, y: 7 }, { x: 0, y: 8 });
+    const result = await session.move({ x: 0, y: 1 }, { x: 0, y: 0 });
     expect(result).toEqual({ accepted: true });
     expect(session.getSnapshot()).toMatchObject({ phase: "finished", result: { winner: "A", reason: "goal" }, aiThinking: false });
     expect(timer.setTimeout).not.toHaveBeenCalled();

@@ -212,6 +212,7 @@ describe("App shell lifecycle", () => {
     const gateway = { available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway;
     render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
 
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
     await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
     await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
     onlineSession.controls.transition({
@@ -262,6 +263,7 @@ describe("App shell lifecycle", () => {
     const onlineSessionFactory = vi.fn(() => onlineSession.session);
     render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
 
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
     await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
     expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby");
@@ -573,6 +575,7 @@ describe("App shell lifecycle", () => {
       <App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />
     );
 
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
     await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
     await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
 

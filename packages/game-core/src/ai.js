@@ -25,7 +25,6 @@
     if (trial.state.winner && trial.state.winner !== player) score -= 8000;
     for (const ev of trial.events) {
       if (ev.type === "capture") score += 40;
-      if (ev.type === "strike_loss") score -= 35;
     }
     const goal = GOAL[player];
     score += (8 - chebyshev(move.to, goal)) * 2;

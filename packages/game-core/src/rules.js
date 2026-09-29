@@ -136,6 +136,7 @@
       if (!inside(x, y)) continue;
       const occ = piecesAt(state, x, y);
       if (occ.length > 0 && (occ[0].player === piece.player || occ[0].type === piece.type)) continue;
+      if (occ.some((p) => p.player !== piece.player && compare(piece.type, p.type) === "lose")) continue;
       moves.push({ x, y });
     }
     return moves;
@@ -194,6 +195,9 @@
     if (occupants.length > 1) return fail("Trạng thái bàn cờ không hợp lệ");
     if (occupants.some((p) => p.player === player)) return fail("Không được đi vào ô có quân cùng phe");
     if (occupants.some((p) => p.type === mover.type)) return fail("Không được đi vào ô có quân cùng loại");
+    if (occupants.some((p) => p.player !== player && compare(mover.type, p.type) === "lose")) {
+      return fail("Không được đi vào ô có quân đối phương mạnh hơn");
+    }
 
     const next = cloneState(state);
     const nextMover = next.pieces.find((p) => p.id === mover.id);
@@ -218,14 +222,7 @@
           to: { x: to.x, y: to.y }
         });
       } else {
-        next.pieces = next.pieces.filter((p) => p.id !== nextMover.id);
-        events.push({
-          type: "strike_loss",
-          pieceId: nextMover.id,
-          byId: enemy.id,
-          from: { x: from.x, y: from.y },
-          to: { x: to.x, y: to.y }
-        });
+        return fail("Không được đi vào ô có quân đối phương mạnh hơn");
       }
     }
 

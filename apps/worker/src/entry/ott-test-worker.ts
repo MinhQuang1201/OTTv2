@@ -120,7 +120,7 @@ export default {
         try { body = await request.json(); } catch { return new Response("Bad request", { status: 400 }); }
         if (typeof body.roomId !== "string" || !/^ott-[0-9a-f-]{36}$/.test(body.roomId)) return new Response("Bad request", { status: 400 });
 
-        const allocationId = crypto.randomUUID();
+        const allocationId = body.roomId.slice("ott-".length);
         const nonce = crypto.randomUUID().replaceAll("-", "");
         const capability = await issueCapability(env.OTT_INTERNAL_SECRET, {
           allocationId,

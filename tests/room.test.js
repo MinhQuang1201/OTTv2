@@ -103,10 +103,10 @@ describe("room", () => {
     assert.deepEqual(a.inbox.at(-1), { type: "test" });
   });
 
-  it("seats two players and accepts the canonical opening C3 to D2", () => {
+  it("seats two players and accepts the canonical opening E8 to D7", () => {
     const clock = fakeClock(0);
     const { room, a } = roomWithPlayers(clock);
-    const result = room.handleMove(a, rules.parseSquare("c3"), rules.parseSquare("d2"));
+    const result = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"));
     assert.equal(result.ok, true);
     assert.equal(room.revision, 3);
     assert.equal(room.state.turn, "B");
@@ -127,10 +127,17 @@ describe("room", () => {
     const cases = [
       {
         pieces: [
-          { id: "A-dam-0", player: "A", type: "dam", x: 0, y: 7 },
+          { id: "A-dam-0", player: "A", type: "dam", x: 0, y: 1 },
           { id: "B-keo-0", player: "B", type: "keo", x: 5, y: 5 }
         ],
-        from: "a8", to: "a9", winner: "A", reason: "goal"
+        from: "a2", to: "a1", winner: "A", reason: "goal"
+      },
+      {
+        pieces: [
+          { id: "A-keo-0", player: "A", type: "keo", x: 4, y: 4 },
+          { id: "B-dam-0", player: "B", type: "dam", x: 8, y: 7 }
+        ],
+        from: "i8", to: "i9", winner: "B", reason: "goal", turn: "B"
       },
       {
         pieces: [
@@ -151,11 +158,13 @@ describe("room", () => {
       }
     ];
     for (const item of cases) {
-      const { room, a } = roomWithPlayers();
+      const { room, a, b } = roomWithPlayers();
       room.state = rules.createEmptyState();
       room.state.pieces = item.pieces;
+      room.state.turn = item.turn || "A";
       room.status = "playing";
-      const result = room.handleMove(a, rules.parseSquare(item.from), rules.parseSquare(item.to));
+      const actor = item.turn === "B" ? b : a;
+      const result = room.handleMove(actor, rules.parseSquare(item.from), rules.parseSquare(item.to));
       assert.equal(result.ok, true);
       assert.equal(room.revision, 3);
       assert.equal(room.state.winner, item.winner);
@@ -169,7 +178,7 @@ describe("room", () => {
     const clock = fakeClock(1000);
     const { room, a } = roomWithPlayers(clock);
     clock.advance(1250);
-    const result = room.handleMove(a, rules.parseSquare("c3"), rules.parseSquare("d2"));
+    const result = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"));
     assert.equal(result.ok, true);
     assert.equal(room.revision, 3, "clock settlement and the accepted move are one action");
     assert.equal(room.state.clock.remainingMs.A, config.TIME_CONTROL.initialMs - 1250);
@@ -327,7 +336,8 @@ describe("room", () => {
   });
 
   it("exposes the authoritative revision in snapshots", () => {
-    const { room } = roomWithPlayers();
+    const clock = fakeClock(0);
+    const { room } = roomWithPlayers(clock);
 
     assert.equal(room.payload().revision, 2);
   });

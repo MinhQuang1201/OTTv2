@@ -48,6 +48,19 @@ describe("LobbyScreen", () => {
     expect(props.onStartLocal).toHaveBeenCalledWith(["An", "Đối thủ"]);
   });
 
+  it("does not create an online room without a player name", async () => {
+    const user = userEvent.setup();
+    const { props } = renderLobby({
+      onlineAvailability: "online",
+      waitingRooms: { status: "ready", rooms: [] },
+    });
+
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+
+    expect(props.onCreateOnline).not.toHaveBeenCalled();
+    expect(screen.getByText("Nhập tên của bạn để tạo phòng online.")).toBeInTheDocument();
+  });
+
   it("uses a selected waiting room's exact allocation id", async () => {
     const user = userEvent.setup();
     const { props } = renderLobby({
@@ -59,7 +72,8 @@ describe("LobbyScreen", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /550e8400-e29b-41d4-a716-446655440000/i }));
-    expect(props.onJoinOnline).toHaveBeenCalledWith("", "550e8400-e29b-41d4-a716-446655440000");
+    expect(props.onJoinOnline).not.toHaveBeenCalled();
+    expect(screen.getByText("Nhập tên của bạn để vào phòng online.")).toBeInTheDocument();
   });
 
   it.each([

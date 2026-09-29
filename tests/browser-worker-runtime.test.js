@@ -82,7 +82,8 @@ test("two isolated browser profiles create, join, attach and play a legal move o
   // The Worker intentionally rate-limits each socket to one OTT command per 40 ms.
   // Leave ample room after B's attach and between the two UI clicks.
   await a.waitForTimeout(500);
-  const source = a.locator('[data-testid="board-cell-A3"]');
+  const source = a.locator('[data-testid^="board-cell-"][aria-label*="Người A"]').first();
+  const sourcePosition = await source.evaluate((cell) => ({ x: cell.dataset.x, y: cell.dataset.y }));
   await source.click();
   const target = a.locator('[data-testid^="board-cell-"][aria-label*="nước hợp lệ"]').first();
   await target.waitFor({ state: "visible" });
@@ -91,11 +92,11 @@ test("two isolated browser profiles create, join, attach and play a legal move o
   await target.click();
 
   try {
-    await b.waitForFunction(({ x, y }) => {
-      const from = document.querySelector('[data-testid="board-cell-A3"]');
+    await b.waitForFunction(({ x, y, sourceX, sourceY }) => {
+      const from = document.querySelector(`[data-x="${sourceX}"][data-y="${sourceY}"]`);
       const to = document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
       return from && to && from.getAttribute("aria-label")?.includes("trống") && !to.getAttribute("aria-label")?.includes("trống");
-    }, destination, { timeout: 10_000 });
+    }, { ...destination, sourceX: sourcePosition.x, sourceY: sourcePosition.y }, { timeout: 10_000 });
   } catch {
     const diagnostics = await fixture.diagnostics();
     const ui = await Promise.all([a, b].map((page) => page.evaluate(() => ({ game: Boolean(document.querySelector('[data-testid="game-screen"]')), pieces: [...document.querySelectorAll('[data-testid^="board-cell-"]')].filter((cell) => !cell.getAttribute("aria-label")?.includes("trống")).map((cell) => cell.getAttribute("aria-label")) }))));

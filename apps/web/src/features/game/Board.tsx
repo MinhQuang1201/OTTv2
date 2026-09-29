@@ -25,7 +25,7 @@ export function Board({ session, snapshot, onMove, onError }: BoardProps) {
           {cells.map((position) => {
             const piece = pieceByPosition.get(`${position.x}:${position.y}`);
             const selected = Boolean(selection?.from.x === position.x && selection.from.y === position.y);
-            return <BoardCell key={`${position.x}:${position.y}`} position={position} piece={piece} selected={selected} legal={legal(position)} goal={position.x === 0 && position.y === 8 ? "A" : position.x === 8 && position.y === 0 ? "B" : undefined} disabled={!canInteract} onClickPosition={select} />;
+            return <BoardCell key={`${position.x}:${position.y}`} position={position} piece={piece} selected={selected} legal={legal(position)} goal={position.x === 0 && position.y === 0 ? "A" : position.x === 8 && position.y === 8 ? "B" : undefined} disabled={!canInteract} onClickPosition={select} />;
           })}
         </div>
       </div>

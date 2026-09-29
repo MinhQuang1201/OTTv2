@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev:game": "node server.js",
-    "worker:dev": "wrangler dev --config apps/worker/wrangler.jsonc --local --ip 127.0.0.1 --port 8787",
+    "worker:dev": "node scripts/worker-dev.js",
     "test:worker-runtime": "node tests/worker-runtime.test.js",
     "build:playhtml-browser": "esbuild vendor/playhtml-minimal/browser/runtime-entry.js --bundle --platform=browser --format=iife --global-name=OTTPlayHTMLRuntime --outfile=vendor/playhtml-minimal/browser/runtime.js",
     "test:browser-worker-runtime": "npm run build:playhtml-browser && npm run build:web && node scripts/run-browser-worker-runtime.js",
@@ -22,6 +22,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "dotenv": "18.0.4",
     "partykit": "0.0.115",
     "partyserver": "0.5.10",
     "playhtml": "2.15.0",
@@ -41,6 +42,7 @@
     "playwright": "1.60.0",
     "typescript": "5.7.3",
     "vite": "5.4.14",
-    "vitest": "2.1.8"
+    "vitest": "2.1.8",
+    "wrangler": "4.141.0"
   }
 }

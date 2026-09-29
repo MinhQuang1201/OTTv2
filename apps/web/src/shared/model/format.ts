@@ -1,8 +1,8 @@
 import type { GameResultView, Position, Seat } from "./game";
 
 const GOAL_SQUARE: Record<Seat, Position> = {
-  A: { x: 0, y: 8 },
-  B: { x: 8, y: 0 },
+  A: { x: 0, y: 0 },
+  B: { x: 8, y: 8 },
 };
 
 export function formatSquare(position: Position): string {
