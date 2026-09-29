@@ -4,13 +4,13 @@ const path = require('node:path');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const workerEntry = fs.readFileSync(path.join(root, 'workers', 'ott-worker.ts'), 'utf8');
-const gameServer = fs.readFileSync(path.join(root, 'workers', 'ott-game-server.ts'), 'utf8');
-const lobbyServer = fs.readFileSync(path.join(root, 'workers', 'ott-lobby-server.ts'), 'utf8');
-const wrangler = fs.readFileSync(path.join(root, 'workers', 'wrangler.jsonc'), 'utf8');
-const workerConfiguration = fs.readFileSync(path.join(root, 'workers', 'worker-configuration.d.ts'), 'utf8');
+const workerEntry = fs.readFileSync(path.join(root, 'apps', 'worker', 'src', 'entry', 'ott-worker.ts'), 'utf8');
+const gameServer = fs.readFileSync(path.join(root, 'apps', 'worker', 'src', 'game', 'ott-game-server.ts'), 'utf8');
+const lobbyServer = fs.readFileSync(path.join(root, 'apps', 'worker', 'src', 'lobby', 'ott-lobby-server.ts'), 'utf8');
+const wrangler = fs.readFileSync(path.join(root, 'apps', 'worker', 'wrangler.jsonc'), 'utf8');
+const workerConfiguration = fs.readFileSync(path.join(root, 'apps', 'worker', 'worker-configuration.d.ts'), 'utf8');
 const workerRuntime = fs.readFileSync(path.join(root, 'tests', 'worker-runtime.test.js'), 'utf8');
-const workerConfig = JSON.parse(fs.readFileSync(path.join(root, 'workers', 'wrangler.jsonc'), 'utf8'));
+const workerConfig = JSON.parse(fs.readFileSync(path.join(root, 'apps', 'worker', 'wrangler.jsonc'), 'utf8'));
 
 test('Worker routes the YProvider party path through PartyServer', () => {
   assert.match(workerEntry, /from ["']partyserver["']/);
@@ -64,6 +64,6 @@ test('minimal Worker does not enable presence or a second transport', () => {
 
 test('browser demo clock stays within the persisted Room schema maximum', () => {
   const initialClockMs = Number(workerConfig.env.demo.vars.OTT_TEST_CLOCK_MS);
-  const roomClockLimitMs = require('../config').TIME_CONTROL.initialMs;
+  const roomClockLimitMs = require('../packages/game-core/src/config').TIME_CONTROL.initialMs;
   assert.ok(initialClockMs > 0 && initialClockMs <= roomClockLimitMs);
 });

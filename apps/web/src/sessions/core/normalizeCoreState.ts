@@ -15,6 +15,8 @@ export interface NormalizeCoreStateOptions {
   readonly playerCounts?: Partial<Record<Seat, Readonly<Record<PieceType, number>>>>;
 }
 
+const noCapabilities = { canMove: false, canLeaveGame: false, canSpectate: false } as const;
+
 const deepFreeze = <T,>(value: T): T => {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
@@ -54,11 +56,16 @@ export function normalizeCoreState(state: CoreState, options: NormalizeCoreState
   };
   const board = (state.pieces ?? []).map((piece) => ({ id: piece.id, seat: piece.player, type: piece.type, position: { x: piece.x, y: piece.y } }));
   const result = state.winner && reason(state.reason) ? { winner: state.winner, reason: reason(state.reason)! } : null;
+  const viewerSeat = options.viewerSeat ?? null;
+  const viewer = viewerSeat === null ? null : { role: "player" as const, seat: viewerSeat };
   return deepFreeze({
     mode,
     phase,
     boardRevision: options.boardRevision ?? 0,
-    viewerSeat: options.viewerSeat ?? null,
+    viewer,
+    viewerSeat,
+    capabilities: viewer ? { canMove: true, canLeaveGame: false, canSpectate: false } : noCapabilities,
+    spectatorCount: 0,
     turn: state.winner ? null : state.turn,
     board,
     players,
@@ -67,6 +74,7 @@ export function normalizeCoreState(state: CoreState, options: NormalizeCoreState
     aiThinking: options.aiThinking ?? false,
     roomId: options.roomId ?? null,
     waitingRooms: [],
+    publicMatches: [],
     result,
     events: options.events ?? [],
     error: null,

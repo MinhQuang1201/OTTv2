@@ -5,18 +5,20 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const auth = read("workers/internal-auth.ts");
-const lobby = read("workers/ott-lobby-server.ts");
-const game = read("workers/ott-game-server.ts");
-const worker = read("workers/ott-worker.ts");
-const wrangler = read("workers/wrangler.jsonc");
+const auth = read("apps/worker/src/auth/internal-auth.ts");
+const lobby = read("apps/worker/src/lobby/ott-lobby-server.ts");
+const game = read("apps/worker/src/game/ott-game-server.ts");
+const roomStorage = read("apps/worker/src/persistence/room-storage.ts");
+const worker = read("apps/worker/src/entry/ott-worker.ts");
+const wrangler = read("apps/worker/wrangler.jsonc");
 
 let loadedAuth;
 let loadedRoomStorage;
+let loadedGame;
 async function authModule() {
   if (!loadedAuth) {
     const { transformSync } = require("esbuild");
-    const { code } = transformSync(read("workers/internal-auth.ts"), { loader: "ts", format: "esm" });
+    const { code } = transformSync(read("apps/worker/src/auth/internal-auth.ts"), { loader: "ts", format: "esm" });
     loadedAuth = import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
   }
   return loadedAuth;
@@ -26,13 +28,13 @@ async function roomStorageModule() {
     const { buildSync } = require("esbuild");
     const Module = require("node:module");
     const { outputFiles } = buildSync({
-      entryPoints: [path.join(root, "workers", "room-storage.ts")],
+      entryPoints: [path.join(root, "apps", "worker", "src", "persistence", "room-storage.ts")],
       bundle: true,
       platform: "node",
       format: "cjs",
       write: false,
     });
-    const filename = path.join(root, "workers", "room-storage-test-bundle.cjs");
+    const filename = path.join(root, "apps", "worker", "src", "persistence", "room-storage-test-bundle.cjs");
     const bundledModule = new Module(filename, module);
     bundledModule.filename = filename;
     bundledModule.paths = Module._nodeModulePaths(root);
@@ -40,6 +42,137 @@ async function roomStorageModule() {
     loadedRoomStorage = Promise.resolve(bundledModule.exports);
   }
   return loadedRoomStorage;
+}
+
+async function gameModule() {
+  if (!loadedGame) {
+    const { build } = require("esbuild");
+    const Module = require("node:module");
+    const { outputFiles } = await build({
+      entryPoints: [path.join(root, "apps", "worker", "src", "game", "ott-game-server.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      plugins: [{
+        name: "task6-yserver-test-double",
+        setup(build) {
+          build.onResolve({ filter: /^y-partyserver$/ }, () => ({ path: "task6-yserver-test-double", namespace: "task6" }));
+          build.onLoad({ filter: /.*/, namespace: "task6" }, () => ({ contents: `
+            export class YServer {
+              constructor(ctx, env) { this.ctx = ctx; this.env = env; }
+              onConnect() {}
+              onMessage() {}
+              onClose() {}
+              sendCustomMessage(connection, message) { connection.send?.(message); }
+              fetch() { return Promise.resolve(new Response("Not found", { status: 404 })); }
+            }
+          `, loader: "js" }));
+        },
+      }],
+      write: false,
+    });
+    const filename = path.join(root, "apps", "worker", "src", "game", "ott-game-server-task6-test.cjs");
+    const bundledModule = new Module(filename, module);
+    bundledModule.filename = filename;
+    bundledModule.paths = Module._nodeModulePaths(root);
+    bundledModule._compile(outputFiles[0].text, filename);
+    loadedGame = bundledModule.exports;
+  }
+  return loadedGame;
+}
+
+function gameFixture(prototype, roomId = "ott-room-task6") {
+  const values = new Map([
+    ["allocationId", "allocation-task6"],
+    ["roomId", roomId],
+  ]);
+  const messages = [];
+  const storage = {
+    async get(key) { return values.get(key); },
+    async put(key, value) {
+      if (this.failPutKey === key) throw new Error("storage put failed");
+      values.set(key, value);
+    },
+    async delete(key) {
+      if (this.failDelete) throw new Error("storage delete failed");
+      values.delete(key);
+    },
+    async list(options = {}) {
+      const out = new Map();
+      for (const [key, value] of values) {
+        if (!options.prefix || key.startsWith(options.prefix)) {
+          out.set(key, value);
+        }
+      }
+      return out;
+    },
+    async transaction(callback) {
+      if (this.failTransaction) throw new Error("transaction failed");
+      const pending = new Map(values);
+      const result = await callback({
+        get: async (key) => pending.get(key),
+        put: async (key, value) => pending.set(key, value),
+        delete: async (key) => pending.delete(key),
+        list: async (options = {}) => {
+          const out = new Map();
+          for (const [key, value] of pending) {
+            if (!options.prefix || key.startsWith(options.prefix)) {
+              out.set(key, value);
+            }
+          }
+          return out;
+        },
+      });
+      values.clear();
+      for (const [key, value] of pending) values.set(key, value);
+      return result;
+    },
+    failDelete: false,
+    failPutKey: undefined,
+    failTransaction: false,
+  };
+  const server = Object.create(prototype);
+  server.ctx = { storage };
+  server.ottEnv = { OTT_INTERNAL_SECRET: "test-secret", OTT_SPECTATOR_ENABLED: "true" };
+  server.lastOttPacketMs = new Map();
+  server.identities = new Map();
+  server.pendingIdentities = new Map();
+  server.roleReservations = new Map();
+  server.connectionGenerations = new Map();
+  server.closedConnections = new WeakSet();
+  server.roomOperationTail = Promise.resolve();
+  server.identityNonces = new Map();
+  server.attachCapabilities = new Map();
+  server.sendCustomMessage = (_connection, message) => messages.push(JSON.parse(message));
+  return { values, storage, server, messages };
+}
+
+function connection(id) {
+  let attachment = null;
+  return {
+    id,
+    serializeAttachment(value) { attachment = value; },
+    deserializeAttachment() { return attachment; },
+    close() {},
+  };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((finish) => { resolve = finish; });
+  return { promise, resolve };
+}
+
+function roomPayload(roomId, revision) {
+  return {
+    roomId,
+    status: "playing",
+    serverNow: 100,
+    revision,
+    players: { A: null, B: null },
+    state: { turn: "A" },
+    events: [],
+  };
 }
 
 test("capability format is canonical, expiring, room-bound, and nonce-backed", () => {
@@ -109,6 +242,87 @@ test("canonical capability round-trips and parallel verification commits one mut
   assert.deepEqual([first.ok, second.ok].sort(), [false, true]);
   assert.equal(store.values.get("mutations"), 1);
   assert.equal(store.values.get("attach-nonce:" + claims.nonce), claims.now + claims.ttlMs);
+});
+
+test("capability types preserve player and spectator payload narrowing", () => {
+  assert.match(auth, /export type CapabilityPayload = PlayerCapability/);
+  assert.match(auth, /TransactionalPlayerCapabilityVerification/);
+  assert.match(auth, /TransactionalSpectatorCapabilityVerification/);
+  assert.match(auth, /Promise<TransactionalPlayerCapabilityVerification<T>>/);
+  assert.match(auth, /Promise<TransactionalSpectatorCapabilityVerification<T>>/);
+});
+
+test("capability overloads expose the union-typed compatibility path", () => {
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?now\?: number,[\s\S]*?\): Promise<CapabilityPayloadVariant \| null>;/);
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?\): Promise<CapabilityVerification>;/);
+  assert.match(auth, /expected: CapabilityExpectations,[\s\S]*?mutate: \(payload: CapabilityPayloadVariant,[\s\S]*?\): Promise<TransactionalCapabilityVerification<T>>;/);
+});
+
+test("spectator v2 capabilities are seatless, variant-bound, and replay-safe", async () => {
+  const { issueCapability, verifyCapability, verifyCapabilityTransaction } = await authModule();
+  const allocationId = "allocation-spectator-1";
+  const roomId = "ott-room-spectator-1";
+  const spectatorClaims = {
+    allocationId,
+    roomId,
+    purpose: "spectate",
+    role: "spectator",
+    now: 60_000,
+    ttlMs: 60_000,
+    nonce: "spectate-roundtrip-nonce-0001",
+  };
+  const spectatorToken = await issueCapability("test-secret", spectatorClaims);
+  const decoded = JSON.parse(Buffer.from(spectatorToken.split(".")[0], "base64url").toString("utf8"));
+  assert.deepEqual(decoded, ["ott-cap-v2", allocationId, roomId, "spectate", "spectator", 60_000, 120_000, spectatorClaims.nonce]);
+
+  const spectatorExpected = { allocationId, roomId, purpose: "spectate", role: "spectator" };
+  assert.equal((await verifyCapability("test-secret", spectatorToken, spectatorExpected, 60_001)).v, "ott-cap-v2");
+  assert.equal(await verifyCapability("test-secret", spectatorToken, { allocationId, roomId, purpose: "attach" }, 60_001), null);
+  assert.equal(await verifyCapability("test-secret", spectatorToken, { allocationId, roomId: "other-room", purpose: "spectate", role: "spectator" }, 60_001), null);
+
+  const playerToken = await issueCapability("test-secret", {
+    allocationId,
+    roomId,
+    purpose: "attach",
+    seat: "A",
+    now: 60_000,
+    nonce: "player-variant-nonce-000001",
+  });
+  assert.equal(await verifyCapability("test-secret", playerToken, spectatorExpected, 60_001), null);
+  assert.equal(await verifyCapability("test-secret", spectatorToken, spectatorExpected, 120_000), null, "expired spectator token");
+  assert.equal(await verifyCapability("wrong-secret", spectatorToken, spectatorExpected, 60_001), null, "invalid signature");
+
+  class MemoryDO {
+    values = new Map();
+    tail = Promise.resolve();
+    transaction(callback) {
+      const run = async () => {
+        const pending = new Map(this.values);
+        const result = await callback({
+          get: async (key) => pending.get(key),
+          put: async (key, value) => pending.set(key, value),
+        });
+        this.values = pending;
+        return result;
+      };
+      const next = this.tail.then(run, run);
+      this.tail = next.then(() => undefined, () => undefined);
+      return next;
+    }
+  }
+  const store = new MemoryDO();
+  const mutate = async (_payload, tx) => {
+    const count = await tx.get("spectator-mutations") ?? 0;
+    await tx.put("spectator-mutations", count + 1);
+    return { accepted: true, value: count + 1 };
+  };
+  const [first, second] = await Promise.all([
+    verifyCapabilityTransaction("test-secret", spectatorToken, spectatorExpected, store.transaction.bind(store), mutate, { now: 60_001, noncePrefix: "spectate-nonce" }),
+    verifyCapabilityTransaction("test-secret", spectatorToken, spectatorExpected, store.transaction.bind(store), mutate, { now: 60_001, noncePrefix: "spectate-nonce" }),
+  ]);
+  assert.deepEqual([first.ok, second.ok].sort(), [false, true]);
+  assert.equal(store.values.get("spectator-mutations"), 1);
+  assert.equal(store.values.get("spectate-nonce:" + spectatorClaims.nonce), 120_000);
 });
 
 test("rejected capability mutation rolls back both the mutation and nonce", async () => {
@@ -652,7 +866,938 @@ test("Game rejects browser control bypass and validates attach through authority
   assert.match(game, /attach-nonce/);
   assert.match(game, /OTT_INTERNAL_SECRET/);
   assert.match(game, /purpose: "attach"/);
-  assert.match(game, /this\.attached\.has\(connection\)/);
+  assert.match(game, /this\.identities\.get\(connection\)/);
+});
+
+test("Game uses one immutable role identity and checks it before capability verification", () => {
+  assert.match(game, /identit(?:y|ies)/);
+  assert.match(game, /pending.*role|role.*pending/);
+  assert.match(game, /spectate-nonce/);
+  assert.match(game, /existingIdentity[\s\S]*?verifyCapabilityTransaction/);
+  assert.match(game, /role: "spectator"/);
+  assert.match(game, /role: "player"/);
+  assert.doesNotMatch(game, /this\.attached\.has\(connection\)/);
+});
+
+test("Game terminal handling sends committed state before Lobby terminalization", () => {
+  assert.match(game, /terminalReason/);
+  assert.match(game, /broadcastState[\s\S]*?terminalizeAllocation/);
+  assert.match(game, /markTerminalized/);
+  assert.doesNotMatch(game, /DurableRoomAdapter\.(load|create)\([^;]*terminalizeAllocation/);
+});
+
+test("Room storage never performs Lobby terminalization", () => {
+  assert.doesNotMatch(roomStorage, /terminalizeAllocation/);
+  assert.match(roomStorage, /CommittedRoomOutcome/);
+});
+
+test("spectator role is immutable, read-only, nonce-safe, and counted from authenticated live identity", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4, status: "playing", state: {} },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    moveCalls: 0,
+    leaveCalls: 0,
+    closeCalls: 0,
+    async move() { this.moveCalls += 1; throw new Error("spectator move reached adapter"); },
+    async leave() { this.leaveCalls += 1; throw new Error("spectator leave reached adapter"); },
+    async close() { this.closeCalls += 1; throw new Error("spectator close reached adapter"); },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const first = connection("spectator-1");
+  const firstNonce = "spectator-role-first-nonce-001";
+  const firstToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: firstNonce,
+  });
+
+  await fixture.server.dispatchOttMessage(first, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: firstToken }));
+  assert.deepEqual(fixture.server.identities.get(first), { role: "spectator" });
+  assert.equal(fixture.values.get(`spectate-nonce:${firstNonce}`) > 0, true);
+  assert.deepEqual(fixture.messages.at(-1).state.viewer, { role: "spectator" });
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+
+  const secondNonce = "spectator-role-second-nonce-01";
+  const secondToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: secondNonce,
+  });
+  fixture.server.lastOttPacketMs.delete(first);
+  await fixture.server.dispatchOttMessage(first, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: secondToken }));
+  assert.equal(fixture.values.has(`spectate-nonce:${secondNonce}`), false, "duplicate spectate must not consume another nonce");
+  assert.equal(fixture.messages.at(-1).error, "connection_role_already_fixed");
+
+  for (const command of [
+    { __ott: true, roomId: "ott-room-task6", type: "ott:move", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } },
+    { __ott: true, roomId: "ott-room-task6", type: "ott:leave" },
+  ]) {
+    fixture.server.lastOttPacketMs.delete(first);
+    await fixture.server.dispatchOttMessage(first, JSON.stringify(command));
+    assert.equal(fixture.messages.at(-1).error, "spectator_read_only");
+  }
+  assert.equal(adapter.moveCalls, 0);
+  assert.equal(adapter.leaveCalls, 0);
+  assert.equal(adapter.room.revision, 4);
+
+  const second = connection("spectator-2");
+  const secondAttachToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-role-third-nonce-1",
+  });
+  await fixture.server.dispatchOttMessage(second, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: secondAttachToken }));
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2);
+
+  fixture.server.sendCustomMessage = () => { throw new Error("send failed"); };
+  await fixture.server.broadcastState(adapter);
+  assert.deepEqual(fixture.server.identities.get(first), { role: "spectator" }, "send failure must not revoke presence");
+  fixture.server.sendCustomMessage = (_connection, message) => fixture.messages.push(JSON.parse(message));
+
+  await fixture.server.handleClose(first, { role: "spectator" });
+  assert.equal(adapter.closeCalls, 0);
+  assert.equal(fixture.server.identities.has(first), false);
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+});
+
+test("role reservation rejects a mixed spectator command before delayed player validation completes", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const validationStarted = deferred();
+  const releaseValidation = deferred();
+  fixture.server.authority = {
+    async validateAttach() {
+      validationStarted.resolve();
+      await releaseValidation.promise;
+      fixture.server.attachCapabilities.set(player, {
+        seat: "A", nonce: "role-reservation-player-01", expiresAt: Date.now() + 60_000, token: playerToken,
+      });
+      return { seat: "A" };
+    },
+  };
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+    async attach() { return { ok: true, seat: "A" }; },
+    async scheduleAlarm() {},
+    forget() {},
+    async reloadPersisted() {},
+  });
+  const player = connection("role-reservation-player");
+  const playerToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "role-reservation-player-01",
+  });
+  const spectatorToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "role-reservation-spectator-01",
+  });
+
+  const playerAttach = fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: playerToken,
+  }));
+  await validationStarted.promise;
+  fixture.server.lastOttPacketMs.delete(player);
+  await fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: spectatorToken,
+  }));
+
+  assert.equal(fixture.values.has("spectate-nonce:role-reservation-spectator-01"), false);
+  assert.equal(fixture.messages.at(-1).error, "connection_role_already_fixed");
+
+  releaseValidation.resolve();
+  await playerAttach;
+  assert.deepEqual(fixture.server.identities.get(player), { role: "player", seat: "A" });
+});
+
+test("close invalidates a delayed spectator promotion before transaction completion", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const transactionStarted = deferred();
+  const releaseTransaction = deferred();
+  const closeFinished = deferred();
+  const originalTransaction = fixture.storage.transaction.bind(fixture.storage);
+  fixture.storage.transaction = async (callback) => {
+    transactionStarted.resolve();
+    await releaseTransaction.promise;
+    return originalTransaction(callback);
+  };
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  fixture.server.broadcastState = async () => { closeFinished.resolve(); };
+  const spectator = connection("close-during-spectator-attach");
+  const nonce = "close-during-spectator-attach-01";
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce,
+  });
+
+  const attach = fixture.server.dispatchOttMessage(spectator, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+  await transactionStarted.promise;
+  fixture.server.onClose(spectator, 1000, "closed", true);
+  assert.equal(fixture.server.identities.has(spectator), false);
+  assert.equal(fixture.server.roleReservations.has(spectator), false);
+
+  releaseTransaction.resolve();
+  await attach;
+  await closeFinished.promise;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.server.identities.has(spectator), false);
+  assert.equal(fixture.server.pendingIdentities.has(spectator), false);
+  assert.equal(fixture.values.has("live-attachment:close-during-spectator-attach"), false);
+  assert.equal(fixture.values.has(`spectate-nonce:${nonce}`), true);
+  assert.equal(fixture.server.connectionGenerations.has(spectator), false);
+});
+
+test("player attachment serialization failure compensates the committed Room seat", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: {} },
+    lastPayload: roomPayload("ott-room-task6", 1),
+    attached: null,
+    rollbackCalls: 0,
+    async attach(connection) {
+      this.attached = connection;
+      return { ok: true, seat: "A" };
+    },
+    async scheduleAlarm() {},
+    async rollbackAttach(connection) {
+      assert.equal(this.attached, connection);
+      this.rollbackCalls += 1;
+      this.attached = null;
+      this.lastPayload = roomPayload("ott-room-task6", 2);
+      return { result: { ok: true }, payload: this.lastPayload, terminalReason: null };
+    },
+    commitAttach() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  let closed = false;
+  const player = { id: "player-serialization-failure", serializeAttachment() { throw new Error("attachment serialization failed"); }, close() { closed = true; } };
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "player-serialization-failure-01",
+  });
+
+  await fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: token,
+  }));
+
+  assert.equal(adapter.rollbackCalls, 1);
+  assert.equal(adapter.attached, null);
+  assert.equal(fixture.server.identities.has(player), false);
+  assert.equal(fixture.server.pendingIdentities.has(player), false);
+  assert.equal(closed, true);
+});
+
+test("real adapter attach rollback restores persistence and permits a later A attach", async () => {
+  const { OttGameServer } = await gameModule();
+  const { DurableRoomAdapter, ROOM_KEY } = await roomStorageModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.values.set("creatorName", "Alice");
+  const adapter = await DurableRoomAdapter.create("ott-room-task6", fixture.storage, () => 100);
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  let closeCalls = 0;
+  const failedPlayer = {
+    id: "real-adapter-failed-player",
+    serializeAttachment() { throw new Error("attachment serialization failed"); },
+    close() { closeCalls += 1; },
+  };
+  const failedToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "real-adapter-failed-attach-01",
+  });
+
+  await fixture.server.dispatchOttMessage(failedPlayer, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: failedToken,
+  }));
+
+  assert.equal(closeCalls, 1);
+  assert.equal(adapter.room.players.A, null);
+  assert.equal((await fixture.storage.get(ROOM_KEY)).players.A, null);
+  assert.deepEqual(adapter.connectionsSnapshot(), []);
+
+  const validPlayer = connection("real-adapter-valid-player");
+  const validToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "real-adapter-valid-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(validPlayer, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: validToken,
+  }));
+
+  assert.equal(adapter.room.players.A.connection, validPlayer);
+  assert.deepEqual(adapter.connectionsSnapshot(), [validPlayer]);
+  assert.deepEqual(fixture.server.identities.get(validPlayer), { role: "player", seat: "A" });
+});
+
+test("real adapter B attach rollback restores a live A and permits a later B attach", async () => {
+  const { OttGameServer } = await gameModule();
+  const { DurableRoomAdapter, ROOM_KEY } = await roomStorageModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.values.set("creatorName", "Alice");
+  fixture.values.set("seat-name:B", "Bob");
+  const adapter = await DurableRoomAdapter.create("ott-room-task6", fixture.storage, () => 100);
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const playerA = connection("real-adapter-live-A");
+  const attachA = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "real-adapter-live-A-attach-01",
+  });
+
+  await fixture.server.dispatchOttMessage(playerA, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: attachA,
+  }));
+  const beforeAttachB = structuredClone(await fixture.storage.get(ROOM_KEY));
+
+  const failedPlayerB = {
+    id: "real-adapter-failed-B",
+    serializeAttachment() { throw new Error("B attachment serialization failed"); },
+    close() {},
+  };
+  const failedAttachB = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "B", nonce: "real-adapter-failed-B-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(failedPlayerB, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: failedAttachB,
+  }));
+
+  assert.equal(adapter.room.players.A.connected, true);
+  assert.equal(adapter.room.players.A.connection, playerA);
+  assert.equal(adapter.room.players.B, null);
+  assert.deepEqual(adapter.connectionsSnapshot(), [playerA]);
+  assert.deepEqual(await fixture.storage.get(ROOM_KEY), beforeAttachB);
+
+  const playerB = connection("real-adapter-valid-B");
+  const attachB = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "B", nonce: "real-adapter-valid-B-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(playerB, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: attachB,
+  }));
+
+  assert.equal(adapter.room.players.A.connection, playerA);
+  assert.equal(adapter.room.players.B.connection, playerB);
+  assert.deepEqual(adapter.connectionsSnapshot(), [playerA, playerB]);
+});
+
+test("room operations serialize move, leave, and alarm payload revisions", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const moveStarted = deferred();
+  const releaseMove = deferred();
+  const calls = [];
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: {} },
+    lastPayload: roomPayload("ott-room-task6", 1),
+    async move() {
+      calls.push("move-start");
+      moveStarted.resolve();
+      await releaseMove.promise;
+      calls.push("move-end");
+      return { result: { ok: true }, payload: roomPayload("ott-room-task6", 10), terminalReason: null };
+    },
+    async leave() {
+      calls.push("leave");
+      return { result: { ok: true }, payload: roomPayload("ott-room-task6", 11), terminalReason: null };
+    },
+    async onAlarm() {
+      calls.push("alarm");
+      return { result: { ok: true }, payload: roomPayload("ott-room-task6", 12), terminalReason: null };
+    },
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const player = connection("ordered-player");
+  fixture.server.identities.set(player, { role: "player", seat: "A" });
+  fixture.server.onCustomMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:move", from: { x: 0, y: 0 }, to: { x: 1, y: 1 },
+  }));
+  await moveStarted.promise;
+  fixture.server.lastOttPacketMs.delete(player);
+  fixture.server.onCustomMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:leave",
+  }));
+  const alarm = fixture.server.onAlarm();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["move-start"]);
+
+  releaseMove.resolve();
+  await Promise.all([fixture.server.roomOperationTail, alarm]);
+  assert.deepEqual(calls, ["move-start", "move-end", "leave", "alarm"]);
+  const states = fixture.messages.filter((message) => message.type === "ott:state");
+  assert.deepEqual(states.map((message) => [message.revision, message.state.revision]), [[10, 10], [11, 11], [12, 12]]);
+});
+
+test("spectator attach fans out the updated count to existing players and spectators", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const existingSpectator = connection("existing-spectator");
+  const existingPlayer = connection("existing-player");
+  fixture.server.identities.set(existingSpectator, { role: "spectator" });
+  fixture.server.identityNonces.set(existingSpectator, "existing-spectator-nonce");
+  fixture.values.set("spectate-nonce:existing-spectator-nonce", Date.now() + 60_000);
+  fixture.server.identities.set(existingPlayer, { role: "player", seat: "A" });
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 3, status: "playing", state: {} },
+    lastPayload: roomPayload("ott-room-task6", 3),
+  });
+  fixture.server.sendCustomMessage = (connection, message) => fixture.messages.push({ connection: connection.id, ...JSON.parse(message) });
+  const newSpectator = connection("new-spectator");
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "new-spectator-nonce",
+  });
+
+  await fixture.server.dispatchOttMessage(newSpectator, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+
+  const states = fixture.messages.filter((message) => message.type === "ott:state");
+  assert.deepEqual(states.map((message) => message.connection).sort(), ["existing-player", "existing-spectator", "new-spectator"]);
+  assert.deepEqual(states.map((message) => message.state.spectatorCount), [2, 2, 2]);
+});
+
+test("terminal projection failure proceeds with Lobby terminalization and marker", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const calls = [];
+  fixture.server.broadcastState = async () => { throw new Error("projection failed"); };
+  fixture.server.terminalizeAllocation = async () => calls.push("lobby");
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4 },
+    async markTerminalized() { calls.push("marker"); },
+    async scheduleTerminalRetry(reason) { calls.push(["retry", reason]); },
+  };
+
+  await fixture.server.publishCommitted(adapter, {
+    result: { ok: true },
+    payload: roomPayload("ott-room-task6", 4),
+    terminalReason: "goal",
+  });
+
+  assert.deepEqual(calls, ["lobby", "marker"]);
+});
+
+test("bundled terminal send failure proceeds with Lobby terminalization and marker", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const spectator = connection("terminal-send-retry-spectator");
+  fixture.server.identities.set(spectator, { role: "spectator" });
+  fixture.server.identityNonces.set(spectator, "terminal-send-retry-nonce");
+  fixture.values.set("spectate-nonce:terminal-send-retry-nonce", Date.now() + 60_000);
+  const calls = [];
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4 },
+    async scheduleTerminalRetry(reason) { calls.push(["retry", reason]); },
+    async markTerminalized() { calls.push("marker"); },
+  };
+  const outcome = { result: { ok: true }, payload: roomPayload("ott-room-task6", 4), terminalReason: "goal" };
+  fixture.server.terminalizeAllocation = async () => calls.push("lobby");
+  fixture.server.sendCustomMessage = () => { throw new Error("recipient send failed"); };
+
+  await fixture.server.publishCommitted(adapter, outcome);
+  assert.deepEqual(calls, ["lobby", "marker"]);
+
+  calls.length = 0;
+  fixture.server.terminalizeAllocation = async () => {
+    calls.push("lobby");
+    throw new Error("Lobby unavailable");
+  };
+  await fixture.server.publishCommitted(adapter, outcome);
+  assert.deepEqual(calls, ["lobby", ["retry", "goal"]]);
+});
+
+test("spectator promotion requires attachment serialization and cannot reuse a failed role", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6",
+    room: { revision: 4, status: "playing", state: {} },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4,
+      players: { A: null, B: null }, state: { turn: "A" }, events: [],
+    },
+  });
+  const nonce = "spectator-missing-serializer-01";
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce,
+  });
+  let closed = false;
+  const missingSerializer = { id: "missing-serializer", close() { closed = true; } };
+
+  await fixture.server.dispatchOttMessage(missingSerializer, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+
+  assert.equal(fixture.server.identities.has(missingSerializer), false);
+  assert.equal(fixture.values.has("live-attachment:missing-serializer"), false);
+  assert.equal(fixture.values.has(`spectate-nonce:${nonce}`), true);
+  assert.equal(closed, true);
+});
+
+test("spectator transaction and compensation failures leave no reusable authenticated role", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  const failedTransaction = connection("spectator-transaction-failure");
+  fixture.storage.failTransaction = true;
+  const transactionToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-transaction-failure-01",
+  });
+  await fixture.server.dispatchOttMessage(failedTransaction, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: transactionToken }));
+  assert.equal(fixture.server.identities.has(failedTransaction), false);
+
+  fixture.storage.failTransaction = false;
+  fixture.storage.failPutKey = "live-attachment:spectator-compensation-failure";
+  fixture.storage.failDelete = true;
+  let closed = false;
+  const failedCompensation = { ...connection("spectator-compensation-failure"), close() { closed = true; } };
+  const compensationToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-compensation-failure-01",
+  });
+  await fixture.server.dispatchOttMessage(failedCompensation, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: compensationToken }));
+  assert.equal(fixture.server.identities.has(failedCompensation), false);
+  assert.equal(closed, true);
+});
+
+test("spectator initial send failure retains the authenticated identity", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  const spectator = connection("spectator-initial-send-failure");
+  let closed = false;
+  spectator.close = () => { closed = true; };
+  fixture.server.sendCustomMessage = () => { throw new Error("send failed"); };
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-initial-send-failure-01",
+  });
+
+  await fixture.server.dispatchOttMessage(spectator, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token }));
+
+  assert.deepEqual(fixture.server.identities.get(spectator), { role: "spectator" });
+  assert.equal(closed, false);
+});
+
+test("spectator admission survives a failed projection to another connection", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const existing = connection("existing-player");
+  const spectator = connection("new-spectator");
+  fixture.server.identities.set(existing, { role: "player", seat: "A" });
+  fixture.server.identityNonces.set(existing, "existing-player-nonce");
+  fixture.values.set("attach-nonce:existing-player-nonce", Date.now() + 10_000);
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  let summaryPublished = false;
+  fixture.server.publishPublicSummary = async () => { summaryPublished = true; };
+  fixture.server.sendCustomMessage = (target, message) => {
+    if (target === existing) throw new Error("stale socket");
+    fixture.messages.push(JSON.parse(message));
+  };
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-fanout-01",
+  });
+
+  await fixture.server.dispatchOttMessage(spectator, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token }));
+
+  assert.equal(fixture.server.identities.has(spectator), true);
+  assert.equal(summaryPublished, true);
+  assert.equal(fixture.messages.some((message) => message.type === "ott:state"), true);
+});
+
+test("unauthenticated close does not rebroadcast room state", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const connectionWithoutIdentity = connection("unauthenticated");
+  let broadcasts = 0;
+  let summaries = 0;
+  fixture.server.roomLoad = Promise.resolve({ room: {}, unavailable: false });
+  fixture.server.broadcastState = async () => { broadcasts++; };
+  fixture.server.publishPublicSummary = async () => { summaries++; };
+
+  await fixture.server.handleClose(connectionWithoutIdentity, undefined);
+
+  assert.equal(broadcasts, 0);
+  assert.equal(summaries, 0);
+});
+
+test("committed terminal projection is sent before Lobby cleanup and marker persistence", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const spectator = connection("terminal-spectator");
+  const order = [];
+  fixture.server.identities.set(spectator, { role: "spectator" });
+  fixture.server.identityNonces.set(spectator, "terminal-spectator-nonce-01");
+  fixture.values.set("spectate-nonce:terminal-spectator-nonce-01", Date.now() + 10_000);
+  fixture.server.sendCustomMessage = (_connection, message) => {
+    const parsed = JSON.parse(message);
+    order.push(parsed.type);
+    if (parsed.type === "ott:state") fixture.values.set("terminalProjection", parsed);
+  };
+  fixture.server.terminalizeAllocation = async () => order.push("lobby-terminalize");
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 9 },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "finished", serverNow: 100, revision: 9,
+      players: { A: null, B: null }, state: { winner: "A" }, events: [],
+    },
+    async markTerminalized() { order.push("terminal-marker"); },
+    async scheduleAlarm() { order.push("retry-alarm"); },
+  };
+
+  await fixture.server.publishCommitted(adapter, {
+    result: { ok: true },
+    payload: { ...adapter.lastPayload, revision: 77, state: { winner: "B" } },
+    terminalReason: "goal",
+  });
+  assert.deepEqual(order, ["ott:state", "lobby-terminalize", "terminal-marker"]);
+  assert.equal(fixture.values.get("terminalProjection").state.revision, 77);
+
+  const retryOrder = [];
+  fixture.server.sendCustomMessage = () => retryOrder.push("ott:state");
+  fixture.server.terminalizeAllocation = async () => { retryOrder.push("lobby-terminalize"); throw new Error("Lobby unavailable"); };
+  const retryAdapter = {
+    ...adapter,
+    async markTerminalized() { retryOrder.push("terminal-marker"); },
+    async scheduleTerminalRetry(reason) {
+      retryOrder.push("retry-alarm");
+      fixture.values.set("terminalRetryReason", reason);
+    },
+  };
+  await fixture.server.publishCommitted(retryAdapter, {
+    result: { ok: true },
+    payload: retryAdapter.lastPayload,
+    terminalReason: "goal",
+  });
+  assert.deepEqual(retryOrder, ["ott:state", "lobby-terminalize", "retry-alarm"]);
+  assert.equal(fixture.values.get("terminalRetryReason"), "goal");
+});
+
+test("public match summary projection extracts correct player names, connectivity, clocks, and runningSeat", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const { Room } = require("../packages/game-core/src/room.js");
+  let currentTime = 1_000;
+  const room = new Room("ott-room-task6", { now: () => currentTime });
+  room.players.A = { name: "Alice", connected: true };
+  room.players.B = { name: "Bob", connected: false };
+  room.status = "playing";
+  room.state.clock = { remainingMs: { A: 450_000, B: 500_000 }, runningSeat: "A" };
+  room.clockAnchorMs = 1_000;
+  const adapter = {
+    roomId: "ott-room-task6",
+    room,
+    lastPayload: room.payload(),
+  };
+
+  currentTime = 1_100;
+  let updateBody = null;
+  fixture.server.ottEnv.OTT_LOBBY = {
+    idFromName() { return "lobby"; },
+    get() {
+      return {
+        async fetch(req) {
+          updateBody = JSON.parse(await req.text());
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      };
+    },
+  };
+
+  await fixture.server.publishPublicSummary(adapter);
+  assert.ok(updateBody, "Lobby active-update should be called");
+  assert.equal(updateBody.summary.players.A.name, "Alice");
+  assert.equal(updateBody.summary.players.A.connected, true);
+  assert.equal(updateBody.summary.players.A.remainingMs, 449_900);
+  assert.equal(updateBody.summary.players.B.name, "Bob");
+  assert.equal(updateBody.summary.players.B.connected, false);
+  assert.equal(updateBody.summary.players.B.remainingMs, 500_000);
+  assert.equal(updateBody.summary.runningSeat, "A");
+  assert.equal(updateBody.summary.status, "playing");
+});
+
+test("spectator ticket cannot attach to terminal room and does not consume ticket nonce", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4, status: "done", state: { winner: "A", reason: "goal" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "done", serverNow: 100, revision: 4,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { winner: "A", reason: "goal" }, events: [],
+    },
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const spectator = connection("spectator-terminal-test");
+  const nonce = "spectator-terminal-nonce-001";
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce,
+  });
+
+  await fixture.server.dispatchOttMessage(spectator, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+
+  assert.equal(fixture.server.identities.has(spectator), false, "Spectator identity must not be installed");
+  assert.equal(fixture.values.has(`spectate-nonce:${nonce}`), false, "Nonce must not be consumed for terminal room");
+  const lastMsg = fixture.messages.at(-1);
+  assert.equal(lastMsg.type, "ott:error");
+  assert.equal(lastMsg.error, "room_unavailable");
+});
+
+test("purgeExpiredNonces removes expired capability nonces while preserving unexpired nonces and active live attachments", async () => {
+  const { purgeExpiredNonces } = await authModule();
+  assert.equal(typeof purgeExpiredNonces, "function", "purgeExpiredNonces must be exported from internal-auth");
+
+  const values = new Map([
+    ["spectate-nonce:expired-unretained", 1000],
+    ["spectate-nonce:expired-retained", 1000],
+    ["spectate-nonce:unexpired", 3000],
+    ["attach-nonce:expired", 1000],
+    ["nonce:expired", 1000],
+    ["unrelated:key", "keep-me"],
+  ]);
+  const storage = {
+    async get(k) { return values.get(k); },
+    async put(k, v) { values.set(k, v); },
+    async delete(k) { values.delete(k); },
+    async list(opts = {}) {
+      const out = new Map();
+      for (const [k, v] of values) {
+        if (!opts.prefix || k.startsWith(opts.prefix)) out.set(k, v);
+      }
+      return out;
+    },
+  };
+
+  const purged = await purgeExpiredNonces(storage, {
+    now: 2000,
+    retainNonces: ["expired-retained"],
+  });
+
+  assert.equal(purged, 3, "Must purge exactly 3 expired unretained nonces");
+  assert.equal(values.has("spectate-nonce:expired-unretained"), false);
+  assert.equal(values.has("attach-nonce:expired"), false);
+  assert.equal(values.has("nonce:expired"), false);
+  assert.equal(values.has("spectate-nonce:expired-retained"), true, "Retained nonce must not be purged");
+  assert.equal(values.has("spectate-nonce:unexpired"), true, "Unexpired nonce must not be purged");
+  assert.equal(values.get("unrelated:key"), "keep-me", "Unrelated keys must not be touched");
+});
+
+test("OttGameServer purges expired capability nonces during repeated attach/close cycles while keeping storage bounded", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: { turn: "A" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 1,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+
+  let currentTime = 100_000;
+  fixture.server.now = () => currentTime;
+
+  // Cycle 1: Spectator 1 attaches at t = 100_000, ticket expires at 160_000
+  const spec1 = connection("spectator-bounded-1");
+  const token1 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-1-000001", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec1, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token1,
+  }));
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-1-000001"), true);
+
+  // Spectator 1 disconnects/closes
+  await fixture.server.handleClose(spec1, { role: "spectator" });
+  assert.equal(fixture.server.identities.has(spec1), false);
+
+  // Advance time past ticket 1 expiration
+  currentTime = 170_000;
+
+  // Cycle 2: Spectator 2 attaches at t = 170_000, ticket expires at 230_000
+  const spec2 = connection("spectator-bounded-2");
+  const token2 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-2-000002", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec2, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+
+  // Nonce 1 MUST be purged on attach, Nonce 2 must exist
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-1-000001"), false, "Expired cycle 1 nonce must be purged on attach");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-2-000002"), true, "Cycle 2 nonce must be stored");
+
+  // Spectator 2 disconnects
+  await fixture.server.handleClose(spec2, { role: "spectator" });
+
+  // Advance time past ticket 2 expiration
+  currentTime = 240_000;
+
+  // Cycle 3: Spectator 3 attaches
+  const spec3 = connection("spectator-bounded-3");
+  const token3 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-3-000003", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec3, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token3,
+  }));
+
+  // Nonce 2 MUST be purged, Nonce 3 must exist
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-2-000002"), false, "Expired cycle 2 nonce must be purged");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-3-000003"), true, "Cycle 3 nonce must be stored");
+
+  // Total spectate-nonce records in storage must be exactly 1, proving bounded storage!
+  const remainingNonces = [...fixture.values.keys()].filter((k) => k.startsWith("spectate-nonce:"));
+  assert.deepEqual(remainingNonces, ["spectate-nonce:nonce-cycle-3-000003"], "Storage must be bounded to only unexpired/live nonces");
+});
+
+test("live spectator attachment retains proof and spectator count even after capability ticket TTL expires", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: { turn: "A" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 1,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+
+  let currentTime = 100_000;
+  fixture.server.now = () => currentTime;
+
+  // Spectator 1 attaches at t = 100_000 (ticket expires at 160_000)
+  const spec1 = connection("spectator-live-1");
+  const token1 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-1-00000001", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec1, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token1,
+  }));
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), true);
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+
+  // Time advances past ticket 1 expiration (t = 170_000), but Spectator 1 is STILL CONNECTED
+  currentTime = 170_000;
+
+  // Spectator 2 attaches at t = 170_000 (ticket expires at 230_000)
+  const spec2 = connection("spectator-live-2");
+  const token2 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-2-00000002", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec2, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+
+  // Spectator 1's nonce MUST NOT be purged because Spectator 1 is an active live attachment
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), true, "Live attachment nonce must be preserved");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-2-00000002"), true);
+  // Spectator count must be 2
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2, "Both spectators must be counted");
+
+  // Replay of unexpired token2 must be rejected with replay error
+  fixture.server.lastOttPacketMs.delete(spec2);
+  const spec2Replay = connection("spectator-live-2-replay");
+  await fixture.server.dispatchOttMessage(spec2Replay, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+  assert.equal(fixture.messages.at(-1).error, "spectate_replayed", "Unexpired token replay must be rejected");
+
+  // Now Spectator 1 closes connection
+  await fixture.server.handleClose(spec1, { role: "spectator" });
+  assert.equal(fixture.server.identities.has(spec1), false);
+
+  // Advance time further and attach Spectator 3
+  currentTime = 180_000;
+  const spec3 = connection("spectator-live-3");
+  const token3 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-3-00000003", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec3, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token3,
+  }));
+
+  // Now Spectator 1's nonce MUST be purged since Spectator 1 is closed and ticket expired
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), false, "Closed expired spectator nonce must now be purged");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-2-00000002"), true, "Live spec2 nonce must still exist");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-3-00000003"), true, "Fresh spec3 nonce must exist");
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2, "Spectator count must now reflect 2 active spectators");
+});
+
+test("OttGameServer alarm sweeps expired capability nonces", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.now = () => 500_000;
+
+  // Manually seed expired and unexpired nonces
+  fixture.values.set("spectate-nonce:alarm-expired-1", 400_000);
+  fixture.values.set("spectate-nonce:alarm-expired-2", 450_000);
+  fixture.values.set("spectate-nonce:alarm-unexpired", 600_000);
+  fixture.values.set("attach-nonce:alarm-expired", 400_000);
+  fixture.values.set("attach-nonce:alarm-unexpired", 600_000);
+
+  assert.equal(typeof fixture.server.alarm, "function", "OttGameServer must define alarm method");
+  await fixture.server.alarm();
+
+  assert.equal(fixture.values.has("spectate-nonce:alarm-expired-1"), false);
+  assert.equal(fixture.values.has("spectate-nonce:alarm-expired-2"), false);
+  assert.equal(fixture.values.has("attach-nonce:alarm-expired"), false);
+  assert.equal(fixture.values.has("spectate-nonce:alarm-unexpired"), true);
+  assert.equal(fixture.values.has("attach-nonce:alarm-unexpired"), true);
+});
+
+test("OttGameServer reschedules the next room or nonce alarm after purging", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  let scheduled = 0;
+  fixture.server.roomLoad = Promise.resolve({ unavailable: false, scheduleAlarm: async () => { scheduled++; } });
+
+  await fixture.server.alarm();
+
+  assert.equal(scheduled, 1);
 });
 
 test("Worker uses separate Lobby and Game DO bindings without a process registry", () => {
@@ -660,7 +1805,7 @@ test("Worker uses separate Lobby and Game DO bindings without a process registry
   assert.match(worker, /OTT_LOBBY/);
   assert.match(wrangler, /"class_name"\s*:\s*"OttLobbyServer"/);
   assert.match(wrangler, /"class_name"\s*:\s*"OttGameServer"/);
-  assert.match(read("workers/worker-configuration.d.ts"), /OTT_INTERNAL_SECRET/);
+  assert.match(read("apps/worker/worker-configuration.d.ts"), /OTT_INTERNAL_SECRET/);
   assert.doesNotMatch(worker, /new Map|process\./);
   assert.doesNotMatch(lobby, /new Map|process\./);
 });

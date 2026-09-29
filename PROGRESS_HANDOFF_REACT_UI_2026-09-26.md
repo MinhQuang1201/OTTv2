@@ -75,9 +75,23 @@ Các review độc lập cũng đã xác nhận:
 
 `git diff --check` đã pass ở các checkpoint đã commit.
 
-## Điểm dừng hiện tại — Task 10 đang dang dở
+## Trạng thái sau session 2026-09-26
 
-Subagent Task 10 đã bị dừng trước khi commit. Workspace hiện có các file **uncommitted/untracked**:
+Task 10–13 đã được triển khai trong workspace hiện tại. Các thay đổi vẫn **chưa được commit** vì workspace chứa nhiều thay đổi repository-organization/Worker migration ngoài phạm vi React UI. Không reset, checkout, clean hoặc stage toàn bộ workspace.
+
+### Task 10 — online runtime/client ✅
+
+Đã hoàn tất:
+
+- `OnlineSession` với public event mapping cho `open`, `close`, `reconnecting`, `resumed`, `joined`, `state`, `gameover`, `left`, `error`.
+- Lọc authoritative revision cũ/trùng và event ID trùng.
+- `move` chỉ gọi `client.move(from, to)`; board không optimistic update.
+- Display-only online clock ticks; snapshot authoritative tiếp theo thay thế estimate.
+- `controlRequest`, `runtimeBridge`, `OnlineLobbyGateway` và tests.
+- App/Lobby online create/list/join integration.
+- Giữ one-room PlayHTML bootstrap invariant.
+
+Các file online hiện tại đã được test và có thể tiếp tục review như implementation hoàn chỉnh, không còn là WIP chưa xác nhận:
 
 ```text
 apps/web/src/sessions/online/controlRequest.ts
@@ -87,58 +101,63 @@ apps/web/src/sessions/online/OnlineLobbyGateway.ts
 apps/web/src/sessions/online/runtimeBridge.ts
 ```
 
-Chưa xác nhận hoàn chỉnh và chưa có commit cho:
+### Task 11 — production static serving/browser tests ✅
 
-- `OnlineSession.ts` và event-mapping tests.
-- `controlRequest`, runtime bridge, lobby gateway tests.
-- App/Lobby online create/list/join integration.
-- authoritative revision ordering và display-only online clocks.
-- one-room bootstrap invariant khi leave online.
+- `server.js` chỉ phục vụ production build từ `apps/web/dist`.
+- Giữ adapter diagnostic tại `apps/web/static/playhtml-game.html`.
+- Server/security/browser tests dùng React build và stable roles/test IDs.
+- Static boundary tests và two-profile Worker/browser smoke đã pass.
 
-Vì vậy không được coi các file online hiện tại là production-ready; phiên sau cần đọc/review chúng như work-in-progress trước khi stage.
+### Task 12 — retire legacy UI ✅
 
-## Còn lại theo plan
-
-### Task 10 — online runtime/client
-
-Hoàn thiện `OnlineSession`, test public event mapping (`open`, `close`, `reconnecting`, `resumed`, `joined`, `state`, `gameover`, `left`, `error`), stale revision/duplicate event filtering, move chỉ gọi `client.move`, và board chỉ đổi sau authoritative state mới.
-
-Chạy guardrail bắt buộc:
-
-```powershell
-npm.cmd run test:web -- apps/web/src/sessions/online
-npm.cmd run typecheck:web
-npm.cmd run build:web
-rg -n "new\s+(WebSocket|PartySocket)|polling|createPageData|can-play|presence|awareness|cursors" apps/web/src
-```
-
-### Task 11 — production static serving/browser tests
-
-- Serve only `apps/web/dist` from `server.js`.
-- Add retained `apps/web/static/playhtml-game.html` adapter diagnostic page.
-- Migrate server/security/browser tests to React build and stable roles/test IDs.
-- Run build, static boundary tests, and Playwright Worker/browser smoke tests.
-
-### Task 12 — retire legacy UI
-
-Chỉ sau parity verification mới xóa legacy UI/assets:
+Đã parity-check trước khi xóa:
 
 - `apps/web/src/legacy/game.js`
 - `apps/web/public/index.html`
 - `apps/web/public/style.css`
 - `apps/web/public/tokens.css`
-- obsolete PNG assets nếu không còn dùng
+- `apps/web/public/assets/dam.png`
+- `apps/web/public/assets/la.png`
+- `apps/web/public/assets/keo.png`
 
-Cập nhật `README.md`, `CLAUDE.md`, `apps/web/README.md` với dev/build/test/typecheck/demo scenario/session boundaries và PlayHTML restrictions.
+Giữ `apps/web/static/playhtml-game.html` và `apps/web/public/assets/match.jpg` theo mục đích diagnostic/design reference. Đã xóa các legacy tests parse `legacy/game.js`. Đã cập nhật `README.md`, `CLAUDE.md`, `apps/web/README.md` và `CONFIG.md`.
 
-### Task 13 — polish và final verification
+### Task 13 — polish và final verification ✅
 
-- Cross-screen accessibility tests.
-- Desktop 1440×900 và 1280×720 polish.
-- Responsive baseline dưới desktop breakpoint.
-- Keyboard operation và reduced-motion verification.
-- Full matrix: web build/typecheck/tests, Worker/game-core tests, server-security tests, browser tests, `git diff --check`.
-- Request final code review trước khi merge.
+- Thêm `apps/web/src/accessibility/cross-screen.accessibility.test.tsx`.
+- Kiểm tra landmarks, headings, form labels, live status, dialog focus, keyboard board và đủ 81 ô.
+- Hoàn tất desktop width/polish cho 1440×900 và 1280×720.
+- Responsive baseline: side rail collapse, player panels stack, board fill width dưới breakpoint.
+- Reduced-motion rules và keyboard behavior đã được xác nhận.
+- Sửa module detection của `packages/game-core/src/config.js`, `rules.js`, `ai.js` để Node/Vite/Wrangler bundle dùng đúng dependency path.
+
+## Verification evidence sau session
+
+Đã chạy lại các lệnh sau:
+
+```text
+npm.cmd run test:web                         -> 20 test files, 124 tests passed
+npm.cmd run typecheck:web                    -> passed
+npm.cmd run build:web                        -> passed
+npm.cmd run build:playhtml-browser           -> passed
+npm.cmd run test:browser-worker-runtime      -> passed
+                                             -> 2 isolated profiles, 1 YProvider socket/profile,
+                                                authoritative move propagation passed
+node --test server/boundary focused suites   -> 14/14 passed
+git diff --check                             -> passed
+```
+
+Guardrail scan trong `apps/web/src` không tìm thấy transport/state path cấm: WebSocket/PartySocket fallback, polling, page data, `can-play`, presence, awareness hoặc cursors.
+
+### Node suite còn lỗi baseline ngoài React UI
+
+`npm.cmd test` hiện chạy 184 tests, trong đó **163 passed, 18 failed, 3 skipped**. Các lỗi còn lại nằm ở dirty repository-organization/Worker migration, không thuộc các file React Task 10–13:
+
+- PartyKit legacy room hydration/runtime contract.
+- `worker-test-harness` contract cũ lệch schema `attachNonce`.
+- Một test-only Worker initialize dùng room ID không khớp contract hiện tại.
+
+Không được ghi nhận `npm.cmd test` là pass cho tới khi migration baseline này được xử lý riêng. Browser Worker runtime chính và two-profile smoke hiện đã pass sau khi sửa module bridge.
 
 ## Workspace caveat — thay đổi cũ không thuộc UI task
 
@@ -155,10 +174,10 @@ Chỉ stage file thuộc task đang làm; tuyệt đối không stage toàn bộ
 
 1. Đọc file này và implementation plan trước.
 2. Kiểm tra `git status --short` và giữ nguyên dirty changes ngoài phạm vi.
-3. Review các file `sessions/online/` đang untracked; không giả định đã hoàn tất.
-4. Tiếp tục Task 10 bằng subagent mới theo TDD, sau đó spec review và quality review độc lập.
-5. Chỉ commit khi focused tests, typecheck, build và transport guardrails pass.
-6. Sau Task 10 mới chuyển sang Task 11–13; không xóa legacy UI sớm.
+3. Không xóa hoặc reset các thay đổi migration/Worker hiện có.
+4. Nếu tiếp tục React UI, bắt đầu từ focused feature/session tests và giữ các boundary đã xác nhận.
+5. Nếu cần full green repository, xử lý riêng 18 lỗi `npm.cmd test` thuộc PartyKit/Worker migration; không trộn vào React UI task.
+6. Trước khi commit, stage explicit paths của React/UI task; tuyệt đối không dùng `git add .`.
 
 ## Quyết định tại thời điểm pause
 
@@ -167,9 +186,11 @@ React demo UI: COMPLETE
 Lobby: COMPLETE
 LocalSession/game-core bridge: COMPLETE
 AiSession: COMPLETE
-Online React session: IN PROGRESS / UNCOMMITTED
-Production static migration: NOT STARTED
-Legacy UI removal: NOT STARTED
-Final accessibility/browser verification: NOT STARTED
+Online React session: COMPLETE / UNCOMMITTED
+Production static migration: COMPLETE / UNCOMMITTED
+Legacy UI removal: COMPLETE / UNCOMMITTED
+Final accessibility/browser verification: COMPLETE
+React web verification: PASS
+Browser Worker smoke: PASS
+Full npm test: BLOCKED BY PRE-EXISTING MIGRATION BASELINE FAILURES
 ```
-

@@ -28,6 +28,11 @@ export const DEMO_SCENARIOS = Object.freeze([
   "result-timeout",
   "result-disconnect-timeout",
   "result-leave",
+  "spectator-list",
+  "spectator-active",
+  "spectator-reconnecting",
+  "spectator-finished",
+  "spectator-room-gone",
 ] as const);
 
 export function isDemoScenario(value: unknown): value is DemoScenario {
@@ -130,6 +135,9 @@ function eventFor(scenario: DemoScenario): GameEventView | null {
     "result-timeout": { winner: "B", reason: "timeout" },
     "result-disconnect-timeout": { winner: "B", reason: "disconnect_timeout" },
     "result-leave": { winner: "B", reason: "leave" },
+    "spectator-list": undefined, "spectator-active": undefined,
+    "spectator-reconnecting": undefined, "spectator-finished": { winner: "A", reason: "goal" },
+    "spectator-room-gone": undefined,
   };
   const result = reasons[scenario];
   return result ? makeEvent({ id: 1, type: "win", ...result }) : null;
@@ -139,14 +147,22 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
   if (!isDemoScenario(scenario)) throw new Error(`Unknown demo scenario: ${String(scenario)}`);
   const isLobby = scenario.startsWith("lobby-");
   const isResult = scenario.startsWith("result-");
+  const isSpectator = scenario.startsWith("spectator-");
+  const isSpectatorList = scenario === "spectator-list";
+  const isSpectatorFinished = scenario === "spectator-finished";
+  const isRoomGone = scenario === "spectator-room-gone";
   const event = eventFor(scenario);
-  const result = event?.type === "win" ? { winner: event.winner, reason: event.reason } : null;
+  const result = isSpectatorFinished
+    ? { winner: "A" as const, reason: "goal" as const }
+    : event?.type === "win" ? { winner: event.winner, reason: event.reason } : null;
   const warning = scenario === "game-clock-warning";
-  const reconnecting = scenario === "game-reconnecting";
+  const reconnecting = scenario === "game-reconnecting" || scenario === "spectator-reconnecting";
   const error = scenario === "lobby-online-unavailable"
     ? { code: "online_unavailable" as const, message: "Chơi online hiện không khả dụng.", retryable: false }
     : scenario === "game-recoverable-error"
       ? { code: "session_failed" as const, message: "Không thể đồng bộ ván đấu.", retryable: true }
+      : isRoomGone
+        ? { code: "room_unavailable" as const, message: "Trận đấu không còn khả dụng", retryable: false }
       : null;
   const waitingRooms = scenario === "lobby-rooms"
     ? [
@@ -156,27 +172,42 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
     : [];
   const snapshot = makeSnapshot({
     mode: "demo",
-    phase: isResult ? "finished" : isLobby ? (scenario === "lobby-online-connecting" ? "preparing" : "idle") : scenario === "game-waiting" ? "waiting" : scenario === "game-recoverable-error" ? "error" : "playing",
-    boardRevision: isResult ? 2 : isLobby || scenario === "game-waiting" ? 0 : 1,
-    viewerSeat: isLobby ? null : "A",
-    turn: isLobby || scenario === "game-waiting" || isResult ? null : "A",
+    phase: isRoomGone ? "error" : isResult || isSpectatorFinished ? "finished" : isLobby || isSpectatorList ? (scenario === "lobby-online-connecting" ? "preparing" : "idle") : scenario === "game-waiting" ? "waiting" : scenario === "game-recoverable-error" ? "error" : "playing",
+    boardRevision: isResult || isSpectatorFinished ? 2 : isLobby || isSpectatorList || scenario === "game-waiting" ? 0 : 1,
+    viewer: isSpectator ? { role: "spectator" } : undefined,
+    viewerSeat: isSpectator ? null : isLobby || isSpectatorList || isRoomGone ? null : "A",
+    capabilities: isSpectator ? { canMove: false, canLeaveGame: false, canSpectate: true } : undefined,
+    spectatorCount: isSpectator ? 12 : 0,
+    turn: isLobby || isSpectatorList || scenario === "game-waiting" || isResult || isSpectatorFinished || isRoomGone ? null : "A",
     board: CANONICAL_BOARD,
     players: players({
       A: { remainingMs: warning ? 35_000 : 10 * 60 * 1000 },
       B: { connected: !reconnecting },
     }),
-    connection: scenario === "lobby-online-unavailable" ? "unavailable" : scenario === "lobby-online-connecting" ? "connecting" : reconnecting ? "reconnecting" : "online",
+    connection: scenario === "lobby-online-unavailable" ? "unavailable" : scenario === "lobby-online-connecting" ? "connecting" : isRoomGone ? "unavailable" : reconnecting ? "reconnecting" : "online",
     pendingMove: false,
     aiThinking: scenario === "game-ai-thinking",
-    roomId: isLobby ? null : "DEMO-42",
+    roomId: isLobby || isSpectatorList || isRoomGone ? null : "DEMO-42",
     waitingRooms,
+    publicMatches: isSpectatorList ? [{
+      allocationId: "DEMO-ALLOCATION-42",
+      roomId: "DEMO-42",
+      status: "playing",
+      players: {
+        A: { seat: "A", name: "An", connected: true, remainingMs: 540_000 },
+        B: { seat: "B", name: "Bình", connected: true, remainingMs: 510_000 },
+      },
+      spectatorCount: 12,
+      serverNow: 1_790_000_000_000,
+      runningSeat: "A",
+    }] : [],
     result,
     events: event ? [event] : [],
     error,
   });
   return freezeFixture({
     snapshot,
-    moves: isLobby || isResult || scenario === "game-waiting"
+    moves: isLobby || isResult || isSpectator || scenario === "game-waiting"
       ? []
       : scenario === "game-move-rejected"
         ? [REJECTED_MOVE]

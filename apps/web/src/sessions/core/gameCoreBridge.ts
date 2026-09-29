@@ -7,6 +7,8 @@ import type { Position, Seat, PieceType } from "../../shared/model/game";
 export type CoreState = OttCoreState;
 export type CoreEvent = OttCoreEvent;
 export type CoreMoveResult = OttCoreMoveResult;
+export type CoreMove = NonNullable<ReturnType<OttCoreAi["chooseMove"]>>;
+export type CoreMoveChooser = (state: CoreState, player: Seat) => CoreMove | null;
 
 export interface GameCoreBridge {
   readonly config: OttCoreConfig;

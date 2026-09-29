@@ -11,7 +11,7 @@ let loadedRoomStorage;
 async function authModule() {
   if (!loadedAuth) {
     const { transformSync } = require("esbuild");
-    const { code } = transformSync(read("workers/internal-auth.ts"), { loader: "ts", format: "esm" });
+    const { code } = transformSync(read("apps/worker/src/auth/internal-auth.ts"), { loader: "ts", format: "esm" });
     loadedAuth = import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
   }
   return loadedAuth;
@@ -22,13 +22,13 @@ async function roomStorageModule() {
     const { buildSync } = require("esbuild");
     const Module = require("node:module");
     const { outputFiles } = buildSync({
-      entryPoints: [path.join(root, "workers", "room-storage.ts")],
+      entryPoints: [path.join(root, "apps", "worker", "src", "persistence", "room-storage.ts")],
       bundle: true,
       platform: "node",
       format: "cjs",
       write: false,
     });
-    const filename = path.join(root, "workers", "room-storage-task4-test.cjs");
+    const filename = path.join(root, "apps", "worker", "src", "persistence", "room-storage-task4-test.cjs");
     const bundledModule = new Module(filename, module);
     bundledModule.filename = filename;
     bundledModule.paths = Module._nodeModulePaths(root);
@@ -103,7 +103,7 @@ test("lifecycle revision receiver rejects stale and future updates and cleans bo
   assert.equal(values.has(`owner-ticket:${allocationId}:B`), false);
 });
 
-test("recipient projection selects its own seat and whitelists public room fields", async () => {
+test("recipient projection emits immutable player and spectator views without private Room fields", async () => {
   const { projectRoomPayload } = await roomStorageModule();
   const payload = {
     roomId: "ott-room-game-3",
@@ -120,16 +120,25 @@ test("recipient projection selects its own seat and whitelists public room field
     resumeCredential: "owner-secret",
   };
 
-  const forA = projectRoomPayload(payload, "A");
-  const forB = projectRoomPayload(payload, "B");
+  const forA = projectRoomPayload(payload, { role: "player", seat: "A" }, 4);
+  const forB = projectRoomPayload(payload, { role: "player", seat: "B" }, 4);
+  const forSpectator = projectRoomPayload(payload, { role: "spectator" }, 4);
   assert.equal(forA.you, "A");
   assert.equal(forB.you, "B");
+  assert.deepEqual(forA.viewer, { role: "player", seat: "A" });
+  assert.deepEqual(forB.viewer, { role: "player", seat: "B" });
+  assert.deepEqual(forSpectator.viewer, { role: "spectator" });
+  assert.equal(forSpectator.spectatorCount, 4);
+  assert.equal(forSpectator.you, undefined);
   assert.deepEqual(forA.players.A, { name: "Alice", connected: true });
   assert.deepEqual(forA.players.B, { name: "Bob", connected: true });
-  assert.equal(JSON.stringify([forA, forB]).includes("private-A"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("private-B"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("owner-secret"), false);
-  assert.equal(JSON.stringify([forA, forB]).includes("internal-capability"), false);
+  const serialized = JSON.stringify([forA, forB, forSpectator]);
+  assert.equal(serialized.includes("private-A"), false);
+  assert.equal(serialized.includes("private-B"), false);
+  assert.equal(serialized.includes("owner-secret"), false);
+  assert.equal(serialized.includes("internal-capability"), false);
+  assert.equal(serialized.includes("connection"), false);
+  assert.equal(serialized.includes("storage"), false);
 });
 
 test("DurableRoomAdapter attaches using Lobby-persisted names rather than a browser-supplied value", async () => {

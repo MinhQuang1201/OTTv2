@@ -33,4 +33,101 @@ describe("Board", () => {
     rerender(<Board session={session} snapshot={{ ...snapshot, phase: "waiting", turn: null }} />);
     expect(screen.getByTestId("board-cell-A3")).toBeDisabled();
   });
+
+  it("keeps spectator and null-viewer boards read-only without calling session APIs", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("spectator-active");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
+    const move = vi.spyOn(session, "move");
+    const snapshot = session.getSnapshot();
+    const { rerender } = render(<Board session={session} snapshot={snapshot} />);
+
+    expect(screen.getAllByRole("button", { name: /^Ô /i })).toHaveLength(81);
+    expect(screen.getAllByRole("button").every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    const cell = screen.getByTestId("board-cell-A3");
+    await user.click(cell);
+    await user.pointer({ target: cell, keys: "[TouchA]" });
+    await user.keyboard("{Enter}");
+    expect(getLegalMoves).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+
+    rerender(<Board session={session} snapshot={{ ...snapshot, viewer: null, viewerSeat: null, phase: "idle" }} />);
+    expect(screen.getByTestId("board-cell-A3")).toBeDisabled();
+
+    rerender(<Board session={session} snapshot={{
+      ...snapshot,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+    }} />);
+    expect(screen.getByTestId("board-cell-A3")).toBeDisabled();
+    await user.click(screen.getByTestId("board-cell-A3"));
+    expect(getLegalMoves).not.toHaveBeenCalled();
+  });
+
+  it("keeps a player viewer read-only when move capability is disabled", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
+    const move = vi.spyOn(session, "move");
+    const snapshot = session.getSnapshot();
+    const restrictedSnapshot = {
+      ...snapshot,
+      viewer: { role: "player" as const, seat: "A" as const },
+      viewerSeat: "A" as const,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+    };
+    render(<Board session={session} snapshot={restrictedSnapshot} />);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(screen.getByTestId("board-cell-A3"));
+    await user.keyboard("{Enter}");
+    expect(getLegalMoves).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it("keeps a null-viewer error board disabled without crashing", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const getLegalMoves = vi.spyOn(session, "getLegalMoves");
+    const move = vi.spyOn(session, "move");
+    const snapshot = session.getSnapshot();
+    const errorSnapshot = {
+      ...snapshot,
+      phase: "error" as const,
+      viewer: null,
+      viewerSeat: null,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+      error: { code: "session_failed" as const, message: "Không thể đồng bộ ván đấu.", retryable: true },
+    };
+    render(<Board session={session} snapshot={errorSnapshot} />);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(screen.getByTestId("board-cell-A3"));
+    expect(getLegalMoves).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it("clears a player selection when move capability is revoked", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const snapshot = session.getSnapshot();
+    const { rerender } = render(<Board session={session} snapshot={snapshot} />);
+
+    await user.click(screen.getByTestId("board-cell-A3"));
+    expect(screen.getByTestId("board-cell-A3")).toHaveAttribute("aria-pressed", "true");
+
+    rerender(<Board session={session} snapshot={{ ...snapshot, viewer: { role: "player", seat: "A" } }} />);
+    expect(screen.getByTestId("board-cell-A3")).toHaveAttribute("aria-pressed", "true");
+
+    rerender(<Board session={session} snapshot={{
+      ...snapshot,
+      viewer: { role: "spectator" },
+      viewerSeat: null,
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: true },
+    }} />);
+    expect(screen.getByTestId("board-cell-A3")).toHaveAttribute("aria-pressed", "false");
+  });
 });

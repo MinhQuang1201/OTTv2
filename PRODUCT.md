@@ -16,7 +16,7 @@ Hai người chơi muốn một ván cờ chiến thuật ngắn trên trình du
 
 ## Product Purpose
 
-OTTv2 là oẳn tù tì đưa lên bàn 9x9. Mỗi bên 9 quân (3 Đấm, 3 Lá, 3 Kéo), đi như vua, ăn theo vòng Đấm > Kéo > Lá > Đấm. Thắng khi đưa quân vào ô thắng của mình (A: a9, B: i1) hoặc khi ăn hết toàn bộ quân đối phương.
+OTTv2 là oẳn tù tì đưa lên bàn 9x9. Mỗi bên 10 quân (3 Đấm, 4 Lá, 3 Kéo), đi một ô theo 8 hướng, ăn theo vòng Đấm > Kéo > Lá > Đấm. Quân yếu hơn không được đi vào quân khắc chế nó. Thắng khi đưa quân vào ô thắng của mình (A: a1, B: i9) hoặc khi ăn hết toàn bộ quân đối phương.
 
 Success (khi online được mở sau evidence gate): hai người vào cùng một phòng, đi luân phiên, worker là trọng tài, ván kết thúc đúng luật. Hiện local và AI là các mode khả dụng; không tuyên bố online production ready.
 
@@ -35,9 +35,9 @@ Không phải oẳn tù tì một lần chọn. Không phải cờ vua. Cơ ch�
 
 ## Constraints
 
-- Bàn 9x9, 9 quân mỗi bên, đối xứng 180 độ qua tâm.
-- A khởi tạo ở A3:C5, B khởi tạo ở G5:I7 và hai đội đối xứng 180°.
-- Không đặt quân lên a9/i1 lúc xếp.
+- Bàn 9x9, 10 quân mỗi bên, đối xứng 180 độ qua tâm.
+- A khởi tạo ở khu vực E8:H5, B đối xứng 180° và hai đội đối xứng 180°.
+- Không đặt quân lên a1/i9 lúc xếp.
 - Quân không đứng kề ô thắng của mình lúc xếp (tránh thắng nước 1).
 - Luật do server quyết khi chơi online.
 - Online production chỉ mở sau evidence trực tiếp cho lobby-to-game authorization server-authenticated, fork/bootstrap PlayHTML, same-connection transport, routing/lifecycle/persistence, static-host denial và two-profile acceptance. PartyKit `0.0.115` hiện chưa chứng minh được channel này (`Stub.socket()` trả `WebSocket`; `Server.onMessage` không có authenticated origin/route metadata), nên secure lobby-driven initialization vẫn BLOCKED; không dùng internal marker forgeable, client relay hoặc process map. Không coi gate nào PASS nếu chưa chạy.

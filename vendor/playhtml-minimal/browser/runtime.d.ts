@@ -1,5 +1,6 @@
 export interface MinimalPlayhtml {
   readonly ready: Promise<void>;
+  readonly provider?: unknown;
   createCustomMessageChannel(): {
     send(message: string): Promise<void>;
     subscribe(listener: (message: string) => void): () => void;
@@ -9,8 +10,9 @@ export interface MinimalPlayhtml {
 }
 
 export interface MinimalPlayhtmlRuntime {
-  configure(options: { host: string; room: string }): void;
+  configure(options: { host: string; room: string; party?: "main" | "lobby" }): void;
   init(): MinimalPlayhtml;
+  reset?(): Promise<void> | void;
 }
 
 declare global {

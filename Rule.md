@@ -29,8 +29,8 @@ Trò chơi có hai ghế:
 
 | Ghế | Màu | Ô thắng | Thứ tự đi |
 |---|---|---|---|
-| A | Đỏ | A9 | Đi trước |
-| B | Xanh | I1 | Đi sau |
+| A | Đỏ | A1 | Đi trước |
+| B | Xanh | I9 | Đi sau |
 
 Trong code, ghế được gọi là `A` và `B`. Trong giao diện hoặc tài liệu, ghế A tương ứng với Đỏ và ghế B tương ứng với Xanh.
 
@@ -61,10 +61,10 @@ Các cột được gọi từ A đến I, các hàng được gọi từ 1 đ�
 
 Theo quy ước này:
 
-- `A1` là góc trên bên trái.
-- `I1` là góc trên bên phải và là ô thắng của Xanh/B.
-- `A9` là góc dưới bên trái và là ô thắng của Đỏ/A.
-- `I9` là góc dưới bên phải.
+- `A1` là góc trên bên trái và là ô thắng của Đỏ/A.
+- `I1` là góc trên bên phải.
+- `A9` là góc dưới bên trái.
+- `I9` là góc dưới bên phải và là ô thắng của Xanh/B.
 
 Tọa độ không phân biệt chữ hoa và chữ thường khi nhập, nhưng tọa độ hợp lệ phải có một cột từ A đến I và một hàng từ 1 đến 9.
 
@@ -72,10 +72,10 @@ Tọa độ không phân biệt chữ hoa và chữ thường khi nhập, nhưng
 
 ## 4. Quân và số lượng ban đầu
 
-Mỗi người bắt đầu với 9 quân:
+Mỗi người bắt đầu với 10 quân:
 
-- 3 quân Đấm.
-- 3 quân Lá.
+- 3 quân Đấm (Búa).
+- 4 quân Lá (Bao/Giấy).
 - 3 quân Kéo.
 
 Mỗi quân có đúng một chủ sở hữu và đúng một loại quân.
@@ -84,15 +84,16 @@ Mỗi quân có đúng một chủ sở hữu và đúng một loại quân.
 
 | Ô | Loại quân |
 |---|---|
-| A3 | Lá |
-| B3 | Đấm |
-| C3 | Kéo |
-| A4 | Đấm |
-| B4 | Kéo |
-| C4 | Lá |
-| A5 | Kéo |
-| B5 | Lá |
-| C5 | Đấm |
+| E8 | Lá |
+| F8 | Đấm |
+| E7 | Kéo |
+| F7 | Lá |
+| G7 | Đấm |
+| F6 | Kéo |
+| G6 | Lá |
+| H6 | Đấm |
+| G5 | Kéo |
+| H5 | Lá |
 
 ### Đội hình Xanh/B
 
@@ -100,17 +101,18 @@ Mỗi quân có đúng một chủ sở hữu và đúng một loại quân.
 
 | Ô | Loại quân |
 |---|---|
-| I7 | Lá |
-| H7 | Đấm |
-| G7 | Kéo |
-| I6 | Đấm |
-| H6 | Kéo |
-| G6 | Lá |
-| I5 | Kéo |
-| H5 | Lá |
-| G5 | Đấm |
+| E2 | Lá |
+| D2 | Đấm |
+| E3 | Kéo |
+| D3 | Lá |
+| C3 | Đấm |
+| D4 | Kéo |
+| C4 | Lá |
+| B4 | Đấm |
+| C5 | Kéo |
+| B5 | Lá |
 
-Không quân nào được đặt sẵn trên `A9` hoặc `I1`. Không quân nào đứng kề ô thắng của chính mình ở trạng thái ban đầu, vì vậy không thể thắng ngay ở nước đầu tiên.
+Không quân nào được đặt sẵn trên `A1` hoặc `I9`. Không quân nào đứng kề ô thắng của chính mình ở trạng thái ban đầu, vì vậy không thể thắng ngay ở nước đầu tiên.
 
 ---
 
@@ -153,12 +155,12 @@ Hai quân cùng loại không khắc chế nhau.
 
 ## 7. Cách di chuyển
 
-Quân di chuyển như quân Vua trong cờ vua:
+Quân di chuyển một ô theo một trong tám hướng:
 
 - Một nước đi chỉ hợp lệ khi ván đang diễn ra và do người đang tới lượt thực hiện.
 - Ô nguồn phải là tọa độ hợp lệ và đang có đúng một quân của người thực hiện nước đi.
 - Ô đích phải là tọa độ hợp lệ, nằm trong bàn cờ và cách ô nguồn đúng một ô theo một trong tám hướng.
-- Ô đích còn phải thỏa mãn luật ô đích ở mục 8. Một nước giao chiến mà quân đi bị loại vẫn là nước đi hợp lệ.
+- Ô đích còn phải thỏa mãn luật ô đích ở mục 8.
 - Mỗi lượt, một quân chỉ được đi đúng một ô.
 - Có thể đi theo một trong tám hướng: ngang, dọc hoặc chéo.
 - Không được đi ra ngoài bàn cờ.
@@ -221,9 +223,9 @@ Nước đi bị từ chối vì mỗi ô chỉ có thể chứa một quân và
 Nếu quân đi và quân đứng ở ô đích khác loại, áp dụng vòng khắc chế:
 
 - Nếu quân đi thắng, quân đứng ở ô đích bị loại; quân đi chiếm ô đích.
-- Nếu quân đi thua, quân đi bị loại; quân ở ô đích giữ nguyên vị trí.
+- Nếu quân đi thua, nước đi không hợp lệ; cả hai quân giữ nguyên vị trí.
 - Không bao giờ có hai quân cùng đứng trên một ô.
-- Nước giao chiến đã thực hiện được xem là một nước hợp lệ và lượt chuyển sang đối phương, trừ khi ván đã kết thúc.
+- Nước đi vào quân mạnh hơn không làm thay đổi trạng thái, không chuyển lượt và không tạo event.
 
 Ví dụ:
 
@@ -237,7 +239,7 @@ Ví dụ:
 Đỏ Đấm -> Xanh Lá
 ```
 
-Đấm thua Lá. Đỏ Đấm bị loại và Xanh Lá giữ nguyên ô.
+Đấm thua Lá. Nước đi bị từ chối; cả hai quân giữ nguyên vị trí.
 
 ---
 
@@ -272,9 +274,9 @@ Không tự động bỏ lượt và không xử hòa trong trường hợp này
 
 ### 10.1. Đến ô thắng
 
-Đỏ/A thắng ngay khi một quân Đỏ/A đi vào `A9`.
+Đỏ/A thắng ngay khi một quân Đỏ/A đi vào `A1`.
 
-Xanh/B thắng ngay khi một quân Xanh/B đi vào `I1`.
+Xanh/B thắng ngay khi một quân Xanh/B đi vào `I9`.
 
 Quân chỉ được ghi nhận thắng trên ô thắng của chính phe mình. Đứng trên ô thắng của đối phương không tạo ra chiến thắng.
 
@@ -284,7 +286,7 @@ Một người chơi thắng ngay khi đối phương không còn bất kỳ qu�
 
 Điều này nghĩa là:
 
-- Mất toàn bộ 9 quân là thua.
+- Mất toàn bộ 10 quân là thua.
 - Mất toàn bộ quân của một loại nhưng vẫn còn quân khác chưa phải là thua.
 - Không cần mỗi loại quân phải còn ít nhất một quân.
 
@@ -327,9 +329,9 @@ Ván đã kết thúc thì mọi nước đi tiếp theo đều không hợp l�
 | Có Kéo đối phương | Đấm | Đấm thắng, Kéo bị loại, Đấm chiếm ô |
 | Có Lá đối phương | Kéo | Kéo thắng, Lá bị loại, Kéo chiếm ô |
 | Có Đấm đối phương | Lá | Lá thắng, Đấm bị loại, Lá chiếm ô |
-| Có Lá đối phương | Đấm | Đấm thua, Đấm bị loại, Lá giữ ô |
-| Có Kéo đối phương | Lá | Lá thua, Lá bị loại, Kéo giữ ô |
-| Có Đấm đối phương | Kéo | Kéo thua, Kéo bị loại, Đấm giữ ô |
+| Có Lá đối phương | Đấm | Nước đi không hợp lệ, không quân nào bị loại |
+| Có Kéo đối phương | Lá | Nước đi không hợp lệ, không quân nào bị loại |
+| Có Đấm đối phương | Kéo | Nước đi không hợp lệ, không quân nào bị loại |
 
 ---
 
@@ -337,18 +339,18 @@ Ván đã kết thúc thì mọi nước đi tiếp theo đều không hợp l�
 
 ### Đỏ đến ô thắng
 
-Một quân Đỏ đi từ `A8` vào `A9`.
+Một quân Đỏ đi từ `A2` vào `A1`.
 
 ```text
-Đỏ -> A9 -> Đỏ thắng
+Đỏ -> A1 -> Đỏ thắng
 ```
 
 ### Xanh đến ô thắng
 
-Một quân Xanh đi từ `I2` vào `I1`.
+Một quân Xanh đi từ `I8` vào `I9`.
 
 ```text
-Xanh -> I1 -> Xanh thắng
+Xanh -> I9 -> Xanh thắng
 ```
 
 ### Ăn quân cuối cùng
@@ -396,7 +398,7 @@ Luật này chỉ áp dụng khi ván chưa kết thúc và không thay đổi l
 
 ## 15. Đặc tả ngắn gọn
 
-> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng A9; ghế B màu Xanh đi sau và có ô thắng I1. Mỗi người có 9 quân gồm 3 Đấm, 3 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi chỉ được di chuyển một quân của mình đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại. Nếu ô đích có quân đối phương khác loại, Đấm thắng Kéo, Kéo thắng Lá và Lá thắng Đấm; quân thắng chiếm ô còn quân thua bị loại. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, khi đối phương tới lượt nhưng không còn nước đi hợp lệ, hoặc khi đồng hồ đối phương hết. Mỗi ghế có 10 phút cho cả ván; nước đi không hợp lệ không chuyển lượt hay dừng đồng hồ. Mất kết nối được giữ ghế trong 60 giây để quay lại, quá hạn thì đối thủ thắng. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
+> OTTv2 là trò chơi chiến thuật hai người trên bàn cờ 9x9. Ghế A màu Đỏ đi trước và có ô thắng A1; ghế B màu Xanh đi sau và có ô thắng I9. Mỗi người có 10 quân gồm 3 Đấm, 4 Lá và 3 Kéo. Mỗi ô chỉ chứa tối đa một quân. Trong lượt của mình, người chơi chỉ được di chuyển một quân của mình đúng một ô theo một trong tám hướng. Không được đi vào ô có quân cùng phe hoặc quân đối phương cùng loại. Nếu ô đích có quân đối phương khác loại, chỉ quân thắng mới được chiếm ô; quân yếu hơn không được đi vào ô đó. Người chơi thắng khi đưa quân của mình vào ô thắng, khi đối phương không còn quân nào, khi đối phương tới lượt nhưng không còn nước đi hợp lệ, hoặc khi đồng hồ đối phương hết. Mỗi ghế có 10 phút cho cả ván; nước đi không hợp lệ không chuyển lượt hay dừng đồng hồ. Mất kết nối được giữ ghế trong 60 giây để quay lại, quá hạn thì đối thủ thắng. Ván kết thúc ngay khi một điều kiện thắng được thỏa mãn.
 
 ---
 
@@ -405,14 +407,14 @@ Luật này chỉ áp dụng khi ván chưa kết thúc và không thay đổi l
 ```text
 BÀN CỜ:          9 x 9
 MỖI Ô:           Tối đa 1 quân
-GHẾ A:           Đỏ, đi trước, thắng tại A9
-GHẾ B:           Xanh, đi sau, thắng tại I1
-QUÂN MỖI BÊN:    3 Đấm, 3 Lá, 3 Kéo
+GHẾ A:           Đỏ, đi trước, thắng tại A1
+GHẾ B:           Xanh, đi sau, thắng tại I9
+QUÂN MỖI BÊN:    3 Đấm, 4 Lá, 3 Kéo
 DI CHUYỂN:       Đúng 1 ô, 8 hướng
 KHẮC CHẾ:        Đấm > Kéo > Lá > Đấm
 CÙNG PHE:        Không được đi vào ô đã có quân
 CÙNG LOẠI:       Nước đi không hợp lệ
-KHÁC LOẠI:       Quân thắng chiếm ô, quân thua bị loại
+KHÁC LOẠI:       Quân thắng chiếm ô, quân yếu hơn bị từ chối
 THẮNG 1:         Vào ô thắng của mình
 THẮNG 2:         Đối phương hết toàn bộ quân
 THẮNG 3:         Đối phương không còn nước đi hợp lệ

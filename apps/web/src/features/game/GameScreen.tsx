@@ -27,6 +27,7 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
   const highestEventId = useRef(0);
   const [effectQueue, setEffectQueue] = useState<number[]>([]);
   const effectEventId = effectQueue[0] ?? null;
+  const spectator = activeSnapshot.viewer?.role === "spectator";
 
   useEffect(() => {
     const unseen = activeSnapshot.events
@@ -51,7 +52,11 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
   }, [activeSnapshot.result]);
 
   const leave = async () => {
-    if (activeSnapshot.mode === "online") {
+    if (spectator) {
+      onLobby();
+      return;
+    }
+    if (activeSnapshot.capabilities.canLeaveGame) {
       setConfirmLeave(true);
       return;
     }
@@ -66,15 +71,15 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
   const onError = (error: { message: string; code: string }) => pushToast(error.message, error.code === "invalid_move" ? "error" : "warning");
   const names: Partial<Record<Seat, string>> = { A: activeSnapshot.players.A?.name ?? "An", B: activeSnapshot.players.B?.name ?? "Bình" };
 
-  return <section className={styles.gameScreen} aria-labelledby="game-title">
-    <GameTopBar roomId={activeSnapshot.roomId} connection={activeSnapshot.connection} onLeave={() => void leave()} />
+  return <section className={styles.gameScreen} aria-labelledby="game-title" data-testid="game-screen">
+     <GameTopBar roomId={activeSnapshot.roomId} connection={activeSnapshot.connection} spectator={spectator} spectatorCount={activeSnapshot.spectatorCount} onLeave={() => void leave()} />
     <div className={styles.gameLayout}>
       <div className={styles.players}>
-        <PlayerPanel player={activeSnapshot.players.B} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} />
-        <PlayerPanel player={activeSnapshot.players.A} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} />
+         <PlayerPanel player={activeSnapshot.players.B} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} spectator={spectator} />
+         <PlayerPanel player={activeSnapshot.players.A} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} spectator={spectator} />
       </div>
-      <main className={styles.boardColumn}>
-        <h1 id="game-title">Bàn chơi <span className={styles.visuallyHidden}>BÃ n chÆ¡i</span></h1>
+       <main className={styles.boardColumn} aria-labelledby="game-title">
+         <h1 id="game-title">Bàn chơi</h1>
         <TurnStatus snapshot={activeSnapshot} />
         <div className={effectEventId !== null ? styles.effects : undefined} data-event-id={effectEventId ?? undefined}><Board session={session} snapshot={activeSnapshot} onError={onError} /></div>
       </main>

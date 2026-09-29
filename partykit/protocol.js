@@ -1,4 +1,4 @@
-const config = require("../config");
+const config = require("../packages/game-core/src/config");
 
 const MAX_MESSAGE = config.MAX_MESSAGE;
 const RATE_LIMIT_MS = 40;

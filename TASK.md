@@ -1,6 +1,6 @@
 Kế Hoạch Đồng Bộ Logic OTTv2 Với Rule.md
 Trạng thái: Chỉ lập kế hoạch. Plan Mode đang bật nên tôi không tạo/sửa file Markdown trong workspace. Khi được phép thực thi, lưu nguyên kế hoạch này tại docs/superpowers/plans/2026-09-25-rule-md-logic-alignment.md.
-Mục tiêu: Đồng bộ toàn bộ logic game, server referee, AI, giao diện và kiểm thử với Rule.md: một quân mỗi ô, cùng loại khác phe bị chặn, mục tiêu A9/I1, thắng do loại toàn bộ quân hoặc làm đối phương hết nước đi.
+Mục tiêu: Đồng bộ toàn bộ logic game, server referee, AI, giao diện và kiểm thử với Rule.md: một quân mỗi ô, cùng loại khác phe bị chặn, mục tiêu A1/I9, thắng do loại toàn bộ quân hoặc làm đối phương hết nước đi.
 Kiến trúc: rules.js là nguồn luật duy nhất cho local, AI và online. config.js chỉ chứa hằng số bàn/đội hình. room.js và server.js chỉ quản lý phiên/phòng và phát trạng thái do engine quyết định. game.js chỉ hiển thị và gửi nước đi, không tự quyết thắng thua.
 Công nghệ: Node.js 18+, JavaScript CommonJS/UMD, node:test, WebSocket ws.
 Phạm vi file
@@ -35,26 +35,26 @@ Files:
 Modify: tests/rules.test.js
 Reference: Rule.md mục 2, 4, 5, 8, 9, 10, 11, 12
 1.1. Cập nhật test đội hình và tọa độ
-Thay test setup hiện tại bằng kiểm tra đúng 9 quân A ở:
-- A3 Lá, B3 Đấm, C3 Kéo
-- A4 Đấm, B4 Kéo, C4 Lá
-- A5 Kéo, B5 Lá, C5 Đấm
+Thay test setup hiện tại bằng kiểm tra đúng 10 quân A ở:
+- E8 Lá, F8 Đấm, E7 Kéo
+- F7 Lá, G7 Đấm, F6 Kéo
+- G6 Lá, H6 Đấm, G5 Kéo, H5 Lá
 Kiểm tra B là ảnh xoay 180 độ của A và giữ nguyên loại quân.
-Kiểm tra GOAL.A === a9, GOAL.B === i1.
-Kiểm tra A9 và I1 trống.
+Kiểm tra GOAL.A === a1, GOAL.B === i9.
+Kiểm tra A1 và I9 trống.
 Kiểm tra không quân nào có thể đi vào ô thắng của chính phe tại lượt đầu.
 Đổi assertion hướng đội hình:
 - A phải ở vùng x <= 2, y từ 2 đến 4.
 - B phải ở vùng x >= 6, y từ 4 đến 6.
 1.2. Cập nhật test di chuyển mở ván
 Thay nước cũ i3 -> i2, vốn không còn hợp lệ theo đội hình mới.
-Dùng nước A hợp lệ, ví dụ c3 -> d2.
-Dùng nước xa không hợp lệ, ví dụ c3 -> c1.
+Dùng nước A hợp lệ, ví dụ e8 -> d7.
+Dùng nước xa không hợp lệ, ví dụ e8 -> e6.
 Giữ test sai lượt, ra ngoài bàn, đứng yên và đi quá một ô.
 1.3. Thay toàn bộ test xếp chồng
 Xóa test “stacks same types on one square”.
 Xóa test “lets a stacked piece step off”.
-Thêm test: A Đấm ở E5, B Đấm ở F5; A đi E5 -> F5 phải bị từ chối.
+Thêm test: A Lá ở E5, B Kéo ở F5; A đi E5 -> F5 phải bị từ chối.
 Assert:
 - result.ok === false.
 - result.state === null.
@@ -72,9 +72,9 @@ Gọi helper sau:
 - Đòn thua.
 - Cố đi vào quân khác phe cùng loại.
 1.5. Cập nhật test điều kiện thắng
-Giữ fixture A8 -> A9; assert A thắng với reason === "goal".
-Giữ fixture I2 -> I1; assert B thắng với reason === "goal".
-Giữ test quân A đứng tại I1 không thắng.
+Giữ fixture A2 -> A1; assert A thắng với reason === "goal".
+Giữ fixture I8 -> I9; assert B thắng với reason === "goal".
+Giữ test quân A đứng tại I9 không thắng.
 Sửa test “mất một loại”:
 - B mất toàn bộ một loại nhưng còn quân loại khác.
 - Assert winner === null.
@@ -85,10 +85,10 @@ Sửa test “ăn quân cuối”:
 - Assert reason === "elimination".
 - Assert không còn quân B.
 Thêm test ngược:
-- A thực hiện đòn thua và đó là quân A cuối cùng.
-- Assert B thắng với reason === "elimination".
+- A cố đi vào quân B khắc chế nó.
+- Assert nước đi bị từ chối và state không đổi.
 1.6. Bổ sung test ưu tiên điều kiện thắng
-Tạo nước đi hợp lệ vừa đưa A vào A9 vừa loại quân cuối cùng của B.
+Tạo nước đi hợp lệ vừa đưa A vào A1 vừa loại quân cuối cùng của B.
 Assert:
 - A thắng.
 - reason === "goal".
@@ -119,7 +119,7 @@ Thành:
 const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
 2.2. Sửa chú thích setup
 Cập nhật chú thích đang nhắc a1.
-Ghi rõ A bắt đầu tại A3:C5, mục tiêu A là A9.
+Ghi rõ A bắt đầu tại khu vực E8:H5, mục tiêu A là A1.
 Không thay A_SETUP: đội hình hiện có đã khớp bảng trong Rule.md.
 Không thay công thức xoay 180 độ của B.
 2.3. Chạy test setup và goal
@@ -222,8 +222,8 @@ room.broadcast({
 });
 4.3. Viết test Room theo luật mới
 Test cùng loại khác phe bị Room.handleMove từ chối, state và turn giữ nguyên.
-Test A đi A8 -> A9 làm room.status === "done".
-Test B đi I2 -> I1 làm room.status === "done".
+Test A đi A2 -> A1 làm room.status === "done".
+Test B đi I8 -> I9 làm room.status === "done".
 Test mất một loại nhưng còn quân không kết thúc room.
 Test ăn quân cuối cùng kết thúc room với elimination.
 Test đối phương không còn nước đi kết thúc room với no_moves.
@@ -265,8 +265,8 @@ Thành:
 for (let y = 0; y < config.SIZE; y += 1)
 Đảm bảo labels hàng và ô render dùng cùng hướng.
 6.2. Sửa đánh dấu ô thắng
-Đổi goal-a từ (0, 0) sang (0, 8).
-Đổi goal-b từ (8, 8) sang (8, 0).
+Đổi goal-a từ (0, 8) sang (0, 0).
+Đổi goal-b từ (8, 0) sang (8, 8).
 Ưu tiên đọc trực tiếp từ config.GOAL, không hard-code lại:
 if (x === config.GOAL.A.x && y === config.GOAL.A.y) btn.classList.add("goal-a");
 if (x === config.GOAL.B.x && y === config.GOAL.B.y) btn.classList.add("goal-b");
@@ -276,11 +276,11 @@ Không hỗ trợ nhiều token trong một .cell.
 Có thể giữ wrapper CSS .stack để tránh sửa CSS trong phạm vi này, nhưng đổi tên thành .piece-wrap chỉ khi CSS hiện có không bị ảnh hưởng.
 6.4. Bỏ event xếp chồng
 Xóa ev.type === "stack" khỏi burst animation.
-Chỉ animate capture và strike_loss.
+Chỉ animate capture; không còn nước strike_loss hợp lệ.
 6.5. Sửa thông báo kết thúc
 goal:
-- A: “Đưa quân vào ô thắng A9.”
-- B: “Đưa quân vào ô thắng I1.”
+- A: “Đưa quân vào ô thắng A1.”
+- B: “Đưa quân vào ô thắng I9.”
 elimination: “Đối phương không còn quân trên bàn.”
 no_moves: “Đối thủ không còn nước đi hợp lệ.”
 Giữ disconnect.
@@ -313,16 +313,16 @@ rtk err node --check game.js
 Kỳ vọng: không lỗi cú pháp.
 7.2. Chạy toàn bộ test
 rtk npm test
-Kỳ vọng: toàn bộ test pass, không còn assertion về stack, wipe, wipeType, draw, a1 hoặc i9 với vai trò ô thắng.
+Kỳ vọng: toàn bộ test pass, không còn assertion về stack, wipe, wipeType, draw, A9 hoặc I1 với vai trò ô thắng.
 7.3. Quét dấu vết luật cũ
-rtk grep "stack|wipeType|wipeVictim|reason === \"draw\"|reason === \"wipe\"|a1|i9" -g "!node_modules" .
+rtk grep "stack|wipeType|wipeVictim|reason === \"draw\"|reason === \"wipe\"|A9|I1" -g "!node_modules" .
 Kỳ vọng: không còn code logic/UI/test tham chiếu luật cũ. Các kết quả thuộc tài liệu lịch sử hoặc nội dung không liên quan phải được kiểm tra thủ công trước khi xóa.
 7.4. Smoke test server
 rtk npm start
 Mở hai trình duyệt hoặc hai tab.
 Tạo phòng và vào phòng.
 Xác nhận A đi trước.
-Xác nhận ô thắng hiển thị A9/I1.
+Xác nhận ô thắng hiển thị A1/I9.
 Xác nhận thử đi vào quân đối phương cùng loại bị từ chối.
 Xác nhận UI không hiển thị hai quân trên một ô.
 Xác nhận kết thúc ván hiển thị đúng thông báo cho goal, elimination, no_moves.

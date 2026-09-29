@@ -4,35 +4,43 @@ import { Panel } from "../../shared/ui/Panel";
 import { TextField } from "../../shared/ui/TextField";
 import styles from "./lobby.module.css";
 import { WaitingRoomList, type WaitingRoomState } from "./WaitingRoomList";
+import { PublicMatchList, type PublicMatchIdentity, type PublicMatchListState } from "../spectator/PublicMatchList";
 
 export type OnlineAvailability = "online" | "connecting" | "unavailable";
 
 export interface OnlineRoomPanelProps {
   readonly availability: OnlineAvailability;
   readonly waitingRooms?: WaitingRoomState;
+  readonly publicMatches?: PublicMatchListState;
   readonly playerName?: string;
   readonly onPlayerNameChange?: (value: string) => void;
   readonly showNameField?: boolean;
   readonly onCreate: (playerName: string) => void;
   readonly onJoin: (playerName: string, roomId: string) => void;
+  readonly onWatch?: (identity: PublicMatchIdentity) => void;
   readonly onRetryRooms?: () => void;
+  readonly allowDemoWatch?: boolean;
 }
 
 export function OnlineRoomPanel({
   availability,
   waitingRooms = { status: "ready", rooms: [] },
+  publicMatches = { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." },
   playerName: controlledName,
   onPlayerNameChange,
   showNameField = true,
   onCreate,
   onJoin,
+  onWatch = () => undefined,
   onRetryRooms,
+  allowDemoWatch = false,
 }: OnlineRoomPanelProps) {
   const [uncontrolledName, setUncontrolledName] = useState(controlledName ?? "");
   const [roomId, setRoomId] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
   const name = controlledName ?? uncontrolledName;
   const isReady = availability === "online";
+  const canWatchMatches = isReady || allowDemoWatch;
 
   useEffect(() => {
     if (controlledName !== undefined) setUncontrolledName(controlledName);
@@ -74,6 +82,7 @@ export function OnlineRoomPanel({
         disabled={!isReady}
         onSelectRoom={(selectedRoomId) => { setRoomId(selectedRoomId); setRoomError(null); onJoin(name.trim(), selectedRoomId); }}
       />
+      <PublicMatchList state={publicMatches} disabled={!canWatchMatches} onWatch={onWatch} />
     </Panel>
   );
 }

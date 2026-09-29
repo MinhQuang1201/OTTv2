@@ -17,4 +17,12 @@ describe("ResultDialog", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(title)).toBeInTheDocument();
   });
+
+  it("uses named neutral result copy for a spectator", () => {
+    render(<ResultDialog open result={{ winner: "A", reason: "goal" }} viewerSeat={null} playerNames={{ A: "An", B: "Bình" }} onClose={() => undefined} onLobby={() => undefined} />);
+
+    expect(screen.getByText("An thắng")).toBeInTheDocument();
+    expect(screen.queryByText("Bạn thắng")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bạn thua")).not.toBeInTheDocument();
+  });
 });

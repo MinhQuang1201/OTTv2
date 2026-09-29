@@ -4,6 +4,24 @@
 **Phạm vi:** Thay đổi chưa commit triển khai theo `docs/superpowers/plans/2026-09-25-playhtml-fork-blocker-resolution.md`.  
 **Kết luận:** Không thể triển khai production. Trạng thái online PlayHTML/PartyKit là **BLOCKED** cho đến khi các evidence gate dưới đây được thực hiện và ghi nhận. Không suy diễn production readiness từ bridge/mock hoặc từ test deterministic.
 
+## Cập Nhật Trạng Thái Spectator Mode (2026-09-28)
+
+Phần này là trạng thái hiện tại của worktree `feat/spectator-mode`. Các mục review bên dưới vẫn được giữ làm lịch sử/rationale; các đường dẫn PartyKit cũ trong những mục đó không thay thế cho evidence của kiến trúc Worker/ Durable Objects đang hoạt động.
+
+- **Implementation:** Đã hoàn tất các sửa lỗi authority, persistence, spectator fan-out, reconnect, dispose lifecycle và spectator read-only. UI spectator, demo scenarios và regression coverage đã có.
+- **Web tests:** `npm run test:web` đạt **228/228** trên 24 test files.
+- **Supported Node tests:** explicit regression suite đạt **199/199** trên 19 test files. Các suite `spectator-test-worker.test.js`, `worker-runtime.test.js`, `browser-worker-runtime.test.js` và `worker-test-harness-runtime.test.js` được cố ý loại khỏi scope theo yêu cầu review.
+- **Typechecks:** `npm run typecheck:web` và `npx tsc -p apps/worker/tsconfig.json --noEmit` đều PASS.
+- **Build:** `npm run build:web` PASS.
+- **Diff hygiene:** `git diff --check` PASS. Các cảnh báo LF/CRLF của Git chỉ là cảnh báo chuyển line ending.
+- **Commit state:** Thay đổi hiện chưa được commit.
+- **Production gate:** Spectator production vẫn **BLOCKED**. `OTT_SPECTATOR_ENABLED` phải tiếp tục fail-closed; chưa có evidence hibernation/reconnect qua Durable Object eviction hoặc manual two-browser acceptance.
+- **Local/AI:** Không bị ảnh hưởng và tiếp tục là đường chạy được khi online spectator unavailable.
+
+### Stop Rule Hiện Tại
+
+Không ghi production-ready, Task 7 PASS hoặc two-profile acceptance PASS dựa trên các test deterministic ở trên. Chỉ mở rollout sau khi có evidence trực tiếp cho hibernating presence, reconnect sau eviction/restart và acceptance hai browser profile. `docs/playhtml-upstream-lock.md` tiếp tục là nguồn trạng thái kỹ thuật duy nhất cho gate upstream.
+
 ## Trạng thái evidence
 
 - Báo cáo review trước đó ghi nhận `GET /SERVER.JS` trả `200`; phải chạy lại denylist HTTP test trước khi coi vấn đề đã được xử lý.

@@ -1,9 +1,13 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App, createDemoSession, safeSessionError, type AppState, type SessionFactory } from "./App";
 import { ScreenBoundary } from "./ScreenBoundary";
 import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
+import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
+import type { DemoScenario } from "../shared/model/game";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -33,7 +37,7 @@ describe("App shell lifecycle", () => {
         return snapshot;
       },
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-      start: async () => undefined,
+       start: async () => undefined,
       getLegalMoves: () => [],
       move: async () => ({ accepted: false, error: { code: "invalid_move", message: "Không hợp lệ.", retryable: false } }),
       leave: async () => undefined,
@@ -57,6 +61,11 @@ describe("App shell lifecycle", () => {
     ["lobby-online-unavailable", /OTTv2/i, "lobby"],
     ["game-active-a", /Bàn chơi/i, "playing"],
     ["result-goal", /Kết quả/i, "finished"],
+    ["spectator-list", /OTTv2/i, "lobby"],
+    ["spectator-active", /Bàn chơi/i, "playing"],
+    ["spectator-reconnecting", /Bàn chơi/i, "playing"],
+    ["spectator-finished", /Bàn chơi/i, "finished"],
+    ["spectator-room-gone", /Trận đấu không còn khả dụng/i, "error"],
   ] as const)("routes %s to the %s screen", (scenario, heading, state) => {
     render(<App initialScenario={scenario} />);
 
@@ -67,12 +76,198 @@ describe("App shell lifecycle", () => {
     );
   });
 
+  it.each([
+    ["spectator-list", "lobby", true],
+    ["spectator-active", "playing", true],
+    ["spectator-reconnecting", "playing", true],
+    ["spectator-finished", "finished", true],
+    ["spectator-room-gone", "error", false],
+  ] as const)("exposes the typed App state for %s", async (scenario: DemoScenario, status, hasSpectatorViewer) => {
+    const states: AppState[] = [];
+    render(<App initialScenario={scenario} onStateChange={(state) => states.push(state)} />);
+
+    await waitFor(() => expect(states.at(-1)?.status).toBe(status));
+    const state = states.at(-1)!;
+    if (hasSpectatorViewer) {
+      if (state.status === "lobby" || state.status === "playing" || state.status === "finished") {
+        expect(state.snapshot.viewer).toEqual({ role: "spectator" });
+        expect(state.snapshot.viewerSeat).toBeNull();
+        expect(state.snapshot.capabilities).toEqual({ canMove: false, canLeaveGame: false, canSpectate: true });
+        expect(state.snapshot.spectatorCount).toBe(12);
+      }
+    }
+    if (scenario === "spectator-list" && state.status === "lobby") {
+      expect(state.snapshot.publicMatches).toHaveLength(1);
+    }
+    if (scenario === "spectator-room-gone" && state.status === "error") {
+      expect(state.status).toBe("error");
+      expect(state.error.code).toBe("room_unavailable");
+      expect(screen.getByRole("heading", { name: "Trận đấu không còn khả dụng" })).toBeInTheDocument();
+    }
+  });
+
+  it("labels spectator demos and does not discover online rooms", () => {
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+
+    render(<App initialScenario="spectator-list" onlineGateway={gateway} />);
+
+    expect(screen.getByText("Demo")).toBeInTheDocument();
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+  });
+
+  it("renders the spectator-list active match section from the demo snapshot", () => {
+    render(<App initialScenario="spectator-list" />);
+
+    expect(screen.getByRole("heading", { name: "Trận đang diễn ra" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Phòng đang chờ" })).toBeInTheDocument();
+  });
+
+  it("keeps active-match discovery unavailable for blocked production lobby state", () => {
+    render(<App initialScenario="lobby-default" onlineGateway={{ available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway} />);
+
+    expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Xem trận/i })).not.toBeInTheDocument();
+  });
+
+  it("allows the deterministic demo watch action even when production online is unavailable", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onWatchMatch = vi.fn();
+    render(<App initialScenario="spectator-list" onWatchMatch={onWatchMatch} />);
+
+    const watchButton = screen.getByRole("button", { name: /Xem trận.*An.*Bình/i });
+    expect(watchButton).not.toBeDisabled();
+    await user.click(watchButton);
+
+    expect(onWatchMatch).toHaveBeenCalledWith({ allocationId: "DEMO-ALLOCATION-42", roomId: "DEMO-42" });
+  });
+
+  it("passes only the selected public match identity to the watch callback", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onWatchMatch = vi.fn();
+    render(<App initialScenario="spectator-list" onWatchMatch={onWatchMatch} />);
+
+    await user.click(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i }));
+
+    expect(onWatchMatch).toHaveBeenCalledWith({ allocationId: "DEMO-ALLOCATION-42", roomId: "DEMO-42" });
+  });
+
+  it("shows a room-unavailable spectator message with a direct lobby path", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="spectator-room-gone" />);
+
+    expect(screen.getByRole("heading", { name: "Trận đấu không còn khả dụng" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+  });
+
+  it("refreshes spectator fixtures locally when switching scenarios", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSessionFactory = vi.fn();
+    render(<App initialScenario="spectator-list" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "spectator-active");
+
+    expect(await screen.findByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument();
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+    expect(onlineSessionFactory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "spectator-list",
+    "spectator-active",
+    "spectator-reconnecting",
+    "spectator-finished",
+    "spectator-room-gone",
+  ] as const)("keeps %s isolated from online discovery and sessions", async (scenario) => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSessionFactory = vi.fn();
+    const sessionFactory = vi.fn((next: DemoScenario) => createDemoSession(next));
+    render(<App initialScenario={scenario} onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} sessionFactory={sessionFactory} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "lobby-default");
+
+    expect(gateway.listRooms).not.toHaveBeenCalled();
+    expect(onlineSessionFactory).not.toHaveBeenCalled();
+    expect(sessionFactory).toHaveBeenCalledWith(scenario);
+    expect(sessionFactory).toHaveBeenCalledWith("lobby-default");
+    expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+  });
+
+  it("keeps generic online room_unavailable errors on the player error path", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onlineSession = fakeSession();
+    const onlineSessionFactory = vi.fn(() => onlineSession.session);
+    const gateway = { available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway;
+    render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
+    onlineSession.controls.transition({
+      phase: "error",
+      error: { code: "room_unavailable", message: "Phòng online không còn khả dụng.", retryable: true },
+    });
+
+    expect(await screen.findByRole("heading", { name: /Đã xảy ra sự cố/i })).toBeInTheDocument();
+    expect(screen.getByText("Phòng online không còn khả dụng.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Trận đấu không còn khả dụng" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Thử lại/i })).toBeInTheDocument();
+  });
+
   it("keeps an unavailable online lobby usable instead of showing the error boundary", () => {
     render(<App initialScenario="lobby-online-unavailable" />);
 
     expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/không khả dụng/i);
     expect(screen.queryByRole("heading", { name: /Đã xảy ra sự cố/i })).not.toBeInTheDocument();
+  });
+
+  it("starts same-device play through LocalSession", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="lobby-default" />);
+
+    await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+    expect(screen.getByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument();
+  });
+
+  it("starts AI play through AiSession", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<App initialScenario="lobby-default" />);
+
+    await user.click(screen.getByRole("button", { name: /Đánh với AI/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+    expect(screen.getByText("Máy")).toBeInTheDocument();
+    expect(screen.getByText(/Đến lượt bạn/i)).toBeInTheDocument();
+  });
+
+  it("delegates online create to an OnlineSession instead of switching demo scenarios", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+    } as unknown as OnlineLobbyGateway;
+    const onlineSession = fakeSession();
+    const onlineSessionFactory = vi.fn(() => onlineSession.session);
+    render(<App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />);
+
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby");
+    expect(gateway.listRooms).not.toHaveBeenCalled();
   });
 
   it("shows a safe retryable error and recovers to the lobby", async () => {
@@ -126,7 +321,7 @@ describe("App shell lifecycle", () => {
     await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
     value.controls.transition({ phase: "finished", turn: null, result: { winner: "A", reason: "goal" } });
     await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "finished"));
-    expect(states).toEqual(["boot", "lobby", "preparing", "playing", "finished"]);
+    await waitFor(() => expect(states).toEqual(["boot", "lobby", "preparing", "playing", "finished"]));
   });
 
   it("invokes retry for a retryable boundary error", async () => {
@@ -176,5 +371,230 @@ describe("App shell lifecycle", () => {
     render(<App initialScenario={"not-a-scenario" as never} />);
 
     expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+  });
+
+  it("serializes lobby-to-game-to-lobby transitions and awaits disposal", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const eventLog: string[] = [];
+    let sessionCount = 0;
+
+    const factory: SessionFactory = () => {
+      const id = ++sessionCount;
+      eventLog.push(`create-lobby-${id}`);
+      const snapshot = new DemoSession("lobby-default").getSnapshot();
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: () => () => undefined,
+        start: async () => { eventLog.push(`start-lobby-${id}`); },
+        getLegalMoves: () => [],
+        move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+        leave: async () => undefined,
+        dispose: async () => {
+          eventLog.push(`dispose-start-lobby-${id}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          eventLog.push(`dispose-end-lobby-${id}`);
+        },
+      };
+    };
+
+    render(<App initialScenario="lobby-default" sessionFactory={factory} />);
+    expect(eventLog).toContain("create-lobby-1");
+
+    await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+    expect(eventLog).toContain("dispose-end-lobby-1");
+
+    await user.click(screen.getByRole("button", { name: /Rời bàn/i }));
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby"));
+    expect(eventLog).toContain("create-lobby-2");
+  });
+
+  it("awaits async spectator session disposal before transitioning to lobby", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    let spectatorDisposeAwaited = false;
+    let lobbyCreatedAfterSpectatorDisposed = false;
+
+    const spectatorDispose = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      spectatorDisposeAwaited = true;
+    });
+
+    const spectatorSnapshot = {
+      ...new DemoSession("spectator-active").getSnapshot(),
+      viewer: { role: "spectator" as const },
+      capabilities: { canMove: false, canLeaveGame: false, canSpectate: true },
+    };
+
+    const spectatorSession: GameSession = {
+      getSnapshot: () => spectatorSnapshot,
+      subscribe: () => () => undefined,
+      start: async () => undefined,
+      getLegalMoves: () => [],
+      move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+      leave: async () => undefined,
+      dispose: spectatorDispose,
+    };
+
+    const sessionFactory: SessionFactory = (scenario) => {
+      if (scenario === "lobby-default" && spectatorDispose.mock.calls.length > 0) {
+        lobbyCreatedAfterSpectatorDisposed = spectatorDisposeAwaited;
+      }
+      if (scenario === "spectator-active") {
+        return spectatorSession;
+      }
+      return new DemoSession(scenario);
+    };
+
+    render(<App initialScenario="lobby-default" sessionFactory={sessionFactory} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "spectator-active");
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Bàn chơi/i })).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Kịch bản demo/i }), "lobby-default");
+    await waitFor(() => expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument());
+
+    expect(spectatorDispose).toHaveBeenCalledTimes(1);
+    expect(lobbyCreatedAfterSpectatorDisposed).toBe(true);
+  });
+
+  it("serializes rapid session transitions without coexisting providers", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const disposalAwaitedOrder: string[] = [];
+    const activeSessions = new Set<string>();
+
+    const makeSession = (id: string, delayMs = 15): GameSession => {
+      const snapshot = new DemoSession("lobby-default").getSnapshot();
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: () => () => undefined,
+        start: async () => {
+          activeSessions.add(id);
+        },
+        getLegalMoves: () => [],
+        move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+        leave: async () => undefined,
+        dispose: async () => {
+          await new Promise((r) => setTimeout(r, delayMs));
+          activeSessions.delete(id);
+          disposalAwaitedOrder.push(id);
+        },
+      };
+    };
+
+    const sessionFactory: SessionFactory = (scenario) => makeSession(scenario);
+
+    render(<App initialScenario="lobby-default" sessionFactory={sessionFactory} />);
+
+    const select = screen.getByRole("combobox", { name: /Kịch bản demo/i });
+    await user.selectOptions(select, "game-active-a");
+    await user.selectOptions(select, "game-ai-thinking");
+    await user.selectOptions(select, "lobby-default");
+
+    await waitFor(() => {
+      expect(disposalAwaitedOrder).toContain("lobby-default");
+    });
+
+    expect(activeSessions.size).toBeLessThanOrEqual(1);
+  });
+
+  it("serializes session replacement when earlier disposal is held unresolved while multiple transitions arrive", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const activeSessions = new Set<string>();
+    const disposedSessions = new Set<string>();
+    let resolveInitialDisposal!: () => void;
+    const initialDisposalPromise = new Promise<void>((r) => {
+      resolveInitialDisposal = r;
+    });
+
+    const sessionFactory: SessionFactory = (scenario) => {
+      const snapshot = new DemoSession("lobby-default").getSnapshot();
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: () => () => undefined,
+        start: async () => {
+          activeSessions.add(scenario);
+        },
+        getLegalMoves: () => [],
+        move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+        leave: async () => undefined,
+        dispose: async () => {
+          if (scenario === "lobby-default") {
+            await initialDisposalPromise;
+          }
+          activeSessions.delete(scenario);
+          disposedSessions.add(scenario);
+        },
+      };
+    };
+
+    render(<App initialScenario="lobby-default" sessionFactory={sessionFactory} />);
+
+    // Initial session is running
+    expect(activeSessions.has("lobby-default")).toBe(true);
+
+    const select = screen.getByRole("combobox", { name: /Kịch bản demo/i });
+    // Queue rapid transitions while lobby-default disposal is unresolved
+    await user.selectOptions(select, "game-active-a");
+    await user.selectOptions(select, "game-ai-thinking");
+    await user.selectOptions(select, "game-reconnecting");
+
+    // While initial disposal is held, no second session should be running
+    expect(activeSessions.size).toBe(1);
+    expect(activeSessions.has("lobby-default")).toBe(true);
+    expect(activeSessions.has("game-reconnecting")).toBe(false);
+
+    // Now resolve initial disposal
+    resolveInitialDisposal();
+
+    // After queue drains, only the final generation (game-reconnecting) should be active
+    await waitFor(() => {
+      expect(activeSessions.has("game-reconnecting")).toBe(true);
+    });
+
+    expect(activeSessions.size).toBe(1);
+    expect(disposedSessions.has("lobby-default")).toBe(true);
+  });
+
+  it("disposes the currently active session on unmount using activeSessionRef", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const onlineSessionDisposed = vi.fn();
+    const snapshot = new DemoSession("lobby-default").getSnapshot();
+    const onlineSession: GameSession = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => undefined,
+      start: async () => undefined,
+      getLegalMoves: () => [],
+      move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+      leave: async () => undefined,
+      dispose: onlineSessionDisposed,
+    };
+    const onlineSessionFactory = vi.fn(() => onlineSession);
+    const gateway = { available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway;
+
+    const { unmount } = render(
+      <App initialScenario="lobby-default" onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    expect(onlineSessionDisposed).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects single-provider boundary: does not poll listActiveMatches when Task 7 is blocked", async () => {
+    const listActiveMatches = vi.fn();
+    const gateway = {
+      available: true,
+      listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+      listActiveMatches,
+    } as unknown as OnlineLobbyGateway;
+
+    render(<App initialScenario="lobby-default" onlineGateway={gateway} />);
+
+    expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
+    expect(listActiveMatches).not.toHaveBeenCalled();
   });
 });

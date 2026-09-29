@@ -110,10 +110,13 @@ export class AiSession implements GameSession {
   }
 
   private decorate(snapshot: GameSnapshot): GameSnapshot {
+    const viewerSeat = snapshot.phase === "playing" || snapshot.phase === "finished" ? this.humanSeat : null;
     return Object.freeze({
       ...snapshot,
       mode: "ai" as const,
-      viewerSeat: this.humanSeat,
+      viewer: viewerSeat === null ? null : { role: "player" as const, seat: viewerSeat },
+      viewerSeat,
+      capabilities: viewerSeat === null ? { canMove: false, canLeaveGame: false, canSpectate: false } : { canMove: true, canLeaveGame: false, canSpectate: false },
       aiThinking: this.aiThinking,
       pendingMove: snapshot.pendingMove || this.aiThinking,
     });

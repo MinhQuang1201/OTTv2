@@ -6,12 +6,13 @@ export interface CustomMessageChannel {
 
 export interface MinimalPlayhtml {
   readonly ready: Promise<unknown>;
+  readonly provider?: unknown;
   createCustomMessageChannel(): CustomMessageChannel;
 }
 
 export interface MinimalProvider {
   sendMessage(message: string): void;
-  on(event: "custom-message", listener: (message: unknown) => void): (() => void) | void;
+  on(event: string, listener: (message: unknown) => void): (() => void) | void;
 }
 
 export function createMinimalPlayhtml(options: {

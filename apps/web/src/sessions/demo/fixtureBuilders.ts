@@ -76,7 +76,10 @@ const emptySnapshot: GameSnapshot = {
   mode: "demo",
   phase: "idle",
   boardRevision: 0,
+  viewer: null,
   viewerSeat: null,
+  capabilities: { canMove: false, canLeaveGame: false, canSpectate: false },
+  spectatorCount: 0,
   turn: null,
   board: [],
   players: {},
@@ -85,15 +88,28 @@ const emptySnapshot: GameSnapshot = {
   aiThinking: false,
   roomId: null,
   waitingRooms: [],
+  publicMatches: [],
   result: null,
   events: [],
   error: null,
 };
 
 export function makeSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
+  const viewerSeat = overrides.viewerSeat ?? emptySnapshot.viewerSeat;
+  const viewer = overrides.viewer ?? (viewerSeat === null ? null : { role: "player" as const, seat: viewerSeat });
+  const capabilities = overrides.capabilities ?? (
+    viewer?.role === "player"
+      ? { canMove: true, canLeaveGame: false, canSpectate: false }
+      : viewer?.role === "spectator"
+        ? { canMove: false, canLeaveGame: false, canSpectate: true }
+        : emptySnapshot.capabilities
+  );
   return freezeFixture({
     ...emptySnapshot,
     ...overrides,
+    viewer,
+    viewerSeat,
+    capabilities,
     board: overrides.board ?? emptySnapshot.board,
     players: overrides.players ?? emptySnapshot.players,
     events: overrides.events ?? emptySnapshot.events,

@@ -1,20 +1,23 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const net = require("node:net");
 const { spawn } = require("node:child_process");
 const WebSocket = require("ws");
 const test = require("node:test");
-const rules = require("../rules");
+const rules = require("../packages/game-core/src/rules");
+const {
+  availablePort,
+  readConfiguredPort,
+  readWorkerHost,
+  workerOrigin,
+  wranglerLauncher,
+} = require("../config/local-runtime");
 
 const root = path.resolve(__dirname, "..");
-const port = Number(process.env.OTT_WORKER_PORT || 8787);
-const base = `http://127.0.0.1:${port}`;
-
-const WRANGLER_VERSION = "4.141.0";
 const STARTUP_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const LOG_LIMIT = 32_000;
+let activeWorker;
 
 function runtimeLog(message) {
   process.stderr.write(`[worker-runtime ${new Date().toISOString()}] ${message}\n`);
@@ -35,59 +38,76 @@ function withTimeout(operation, timeoutMs, label) {
   });
 }
 
-function assertPortIsFree() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createConnection({ host: "127.0.0.1", port });
-    probe.once("connect", () => {
-      probe.destroy();
-      reject(new Error(`Worker runtime port ${port} is already in use; stop the existing process before running this harness`));
-    });
-    probe.once("error", (error) => {
-      if (error.code === "ECONNREFUSED") resolve();
-      else reject(error);
-    });
-  });
+function spawnLocalCommand(command, args, options) {
+  if (process.platform !== "win32") return spawn(command, args, options);
+  const quote = (value) => {
+    const text = String(value);
+    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
+  };
+  const commandLine = [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ");
+  return spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], options);
 }
 
-function startWorker() {
+async function startWorker() {
   const envFile = path.join(root, ".dev.vars");
   fs.mkdirSync(path.join(root, ".wrangler"), { recursive: true });
-  const persistTo = fs.mkdtempSync(path.join(root, ".wrangler", "worker-runtime-"));
-  const command = [
-    "npx", "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "workers/wrangler.jsonc", "--env", "test", "--local",
-    "--env-file", envFile, "--persist-to", persistTo, "--ip", "127.0.0.1", "--port", String(port), "--show-interactive-dev-session=false",
-  ];
-  runtimeLog(`spawn: ${command.join(" ")}`);
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", command.join(" ")], { cwd: root, stdio: ["ignore", "pipe", "pipe"] })
-    : spawn(command[0], command.slice(1), { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-  const output = { stdout: "", stderr: "" };
-  child.stdout.on("data", (chunk) => { output.stdout = appendLog(output.stdout, chunk); });
-  child.stderr.on("data", (chunk) => { output.stderr = appendLog(output.stderr, chunk); });
-  const exited = new Promise((resolve, reject) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-    child.once("error", reject);
-  });
-  return { child, exited, output, persistTo };
+  const host = readWorkerHost();
+  const fixedPort = readConfiguredPort(process.env.OTT_WORKER_PORT);
+  let lastError;
+  for (let attempt = 0; attempt < (fixedPort ? 1 : 3); attempt += 1) {
+    const port = fixedPort ?? await availablePort(host);
+    const persistRoot = fs.mkdtempSync(path.join(root, ".wrangler", "worker-runtime-"));
+    const persistTo = path.join(persistRoot, `attempt-${attempt + 1}`);
+    fs.mkdirSync(persistTo, { recursive: true });
+    const launcher = wranglerLauncher();
+    const args = [
+      ...launcher.argsPrefix, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "test", "--local",
+      "--env-file", envFile, "--persist-to", persistTo, "--ip", host, "--port", String(port),
+      "--inspector-port", "0", "--show-interactive-dev-session=false",
+    ];
+    runtimeLog(`spawn: ${launcher.command} ${args.join(" ")}`);
+    const child = spawnLocalCommand(launcher.command, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    const output = { stdout: "", stderr: "" };
+    child.stdout.on("data", (chunk) => { output.stdout = appendLog(output.stdout, chunk); });
+    child.stderr.on("data", (chunk) => { output.stderr = appendLog(output.stderr, chunk); });
+    const exited = new Promise((resolve, reject) => {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("error", reject);
+    });
+    const worker = { child, host, port, base: workerOrigin(host, port), exited, output, persistTo, persistRoot };
+    try {
+      await waitForHttp(worker);
+      activeWorker = worker;
+      return worker;
+    } catch (error) {
+      lastError = error;
+      await stopWorker(worker);
+      fs.rmSync(persistRoot, { recursive: true, force: true });
+      if (fixedPort || !/EADDRINUSE|EACCES|WSAEACCES|10013|bind/i.test(error.message)) throw error;
+    }
+  }
+  throw lastError;
 }
 
 async function stopWorker(worker) {
-  if (worker.child.exitCode !== null || worker.child.signalCode !== null) return;
+  if (!worker) return;
   runtimeLog(`cleanup: stopping Wrangler process ${worker.child.pid}`);
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(worker.child.pid), "/t", "/f"], { stdio: "ignore" });
-    await new Promise((resolve) => killer.once("exit", resolve));
-  } else {
-    worker.child.kill("SIGTERM");
+  if (worker.child.exitCode === null && worker.child.signalCode === null) {
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/pid", String(worker.child.pid), "/t", "/f"], { stdio: "ignore" });
+      await new Promise((resolve) => killer.once("exit", resolve));
+    } else {
+      worker.child.kill("SIGTERM");
+    }
   }
-  await withTimeout(worker.exited, REQUEST_TIMEOUT_MS, "Wrangler cleanup").catch(() => {
-    worker.child.kill("SIGKILL");
-  });
-  fs.rmSync(worker.persistTo, { recursive: true, force: true });
+  await withTimeout(worker.exited, REQUEST_TIMEOUT_MS, "Wrangler cleanup").catch(() => {});
+  if (worker.child.exitCode === null && worker.child.signalCode === null) throw new Error(`Wrangler process ${worker.child.pid} did not stop`);
+  fs.rmSync(worker.persistRoot || worker.persistTo, { recursive: true, force: true });
+  if (activeWorker === worker) activeWorker = undefined;
 }
 
-async function control(action, body = {}) {
-  const response = await withTimeout(fetch(`${base}/control/${action}`, {
+async function control(action, body = {}, worker = activeWorker) {
+  const response = await withTimeout(fetch(`${worker.base}/control/${action}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -103,8 +123,8 @@ async function control(action, body = {}) {
   return { response, body: responseBody };
 }
 
-async function connectRoom(roomId) {
-  const socket = new WebSocket(`${base.replace(/^http/, "ws")}/parties/main/${roomId}`);
+async function connectRoom(roomId, worker = activeWorker) {
+  const socket = new WebSocket(`${worker.base.replace(/^http/, "ws")}/parties/main/${roomId}`);
   await withTimeout(new Promise((resolve, reject) => {
     socket.once("open", resolve);
     socket.once("error", reject);
@@ -161,7 +181,11 @@ async function waitForHttp(worker) {
     attempt += 1;
     try {
       // Use a route that cannot mutate the Lobby rate-limit state before scenarios begin.
-      const response = await withTimeout(fetch(`${base}/__worker_runtime_ready__`), REQUEST_TIMEOUT_MS, "readiness request");
+      if (worker.child.exitCode !== null || worker.child.signalCode !== null) {
+        const exited = await worker.exited.catch((error) => ({ error: error.message }));
+        throw new Error(`Worker HTTP endpoint did not become reachable. Exit: ${JSON.stringify(exited)}\nstdout:\n${worker.output.stdout}\nstderr:\n${worker.output.stderr}`);
+      }
+      const response = await withTimeout(fetch(`${worker.base}/__worker_runtime_ready__`), REQUEST_TIMEOUT_MS, "readiness request");
       if (response.status === 404) {
         runtimeLog(`ready: HTTP ${response.status} after ${attempt} attempts`);
         return;
@@ -186,8 +210,7 @@ test("real Wrangler local runtime confirms control create initializes a room", a
     return;
   }
 
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   try {
     await waitForHttp(worker);
 
@@ -199,9 +222,9 @@ test("real Wrangler local runtime confirms control create initializes a room", a
     assert.equal(typeof created.body.ticket, "string");
     assert.equal(JSON.stringify(created.body).includes("OTT_INTERNAL_SECRET"), false);
 
-    const uppercaseRoom = await fetch(`${base}/parties/main/${created.body.room.toUpperCase()}`);
+    const uppercaseRoom = await fetch(`${worker.base}/parties/main/${created.body.room.toUpperCase()}`);
     assert.equal(uppercaseRoom.status, 404, "uppercase room paths must be rejected before PartyServer dispatch");
-    const trailingSlash = await fetch(`${base}/parties/main/${created.body.room}/`);
+    const trailingSlash = await fetch(`${worker.base}/parties/main/${created.body.room}/`);
     assert.equal(trailingSlash.status, 404, "noncanonical trailing-slash room paths must be rejected");
 
     runtimeLog("scenario: complete");
@@ -219,8 +242,7 @@ test("parallel control creates expose only fully initialized waiting allocations
     return;
   }
 
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   try {
     await waitForHttp(worker);
 
@@ -262,8 +284,7 @@ test("control resume rotates owner credentials and never accepts a caller-select
     t.skip("NOT RUN: .dev.vars is absent; create it locally with OTT_INTERNAL_SECRET for the approved smoke");
     return;
   }
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   const pauseForRateLimit = () => new Promise((resolve) => setTimeout(resolve, 45));
   try {
     await waitForHttp(worker);
@@ -309,8 +330,7 @@ test("parallel reuse of one attach ticket mutates one seat and rejects its repla
     return;
   }
 
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   let joinOwnerSocket;
   try {
     await waitForHttp(worker);
@@ -386,8 +406,7 @@ test("Lobby join reserves trusted B name and both capability holders receive pla
     t.skip("NOT RUN: .dev.vars is absent; create it locally with OTT_INTERNAL_SECRET for the approved smoke");
     return;
   }
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   let socketA;
   let socketB;
   try {
@@ -448,8 +467,7 @@ test("test Worker expires unattached allocations using server-owned deadlines an
     t.skip("NOT RUN: .dev.vars is absent; create it locally with OTT_INTERNAL_SECRET for the approved smoke");
     return;
   }
-  await assertPortIsFree();
-  const worker = startWorker();
+  const worker = await startWorker();
   try {
     await waitForHttp(worker);
     const created = await control("create", {
