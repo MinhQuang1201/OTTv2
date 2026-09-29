@@ -9,24 +9,25 @@
   const BEATS = { dam: "keo", keo: "la", la: "dam" };
   const TYPE_LABEL = { dam: "Đấm", la: "Lá", keo: "Kéo" };
   const SEAT_LABEL = { A: "Đỏ", B: "Xanh" };
-  const GOAL = { A: { x: 0, y: 8 }, B: { x: 8, y: 0 } };
+  const GOAL = { A: { x: 0, y: 0 }, B: { x: 8, y: 8 } };
 
   const TIME_CONTROL = {
     initialMs: 10 * 60 * 1000,
     reconnectGraceMs: 60 * 1000
   };
 
-  // A starts in the upper-left. B is the 180-degree rotate around e5.
+  // A starts in the upper-right. B is the 180-degree rotate around e5.
   const A_SETUP = [
-    { type: "la", x: 0, y: 2 },
-    { type: "dam", x: 1, y: 2 },
-    { type: "keo", x: 2, y: 2 },
-    { type: "dam", x: 0, y: 3 },
-    { type: "keo", x: 1, y: 3 },
-    { type: "la", x: 2, y: 3 },
-    { type: "keo", x: 0, y: 4 },
-    { type: "la", x: 1, y: 4 },
-    { type: "dam", x: 2, y: 4 }
+    { type: "la", x: 4, y: 7 },
+    { type: "dam", x: 5, y: 7 },
+    { type: "keo", x: 4, y: 6 },
+    { type: "la", x: 5, y: 6 },
+    { type: "dam", x: 6, y: 6 },
+    { type: "keo", x: 5, y: 5 },
+    { type: "la", x: 6, y: 5 },
+    { type: "dam", x: 7, y: 5 },
+    { type: "keo", x: 6, y: 4 },
+    { type: "la", x: 7, y: 4 }
   ];
 
   const DELTAS = [

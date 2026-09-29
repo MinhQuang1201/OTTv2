@@ -24,13 +24,13 @@ describe("LocalSession", () => {
     expect(snapshot.viewer).toEqual({ role: "player", seat: "A" });
     expect(snapshot.capabilities).toEqual({ canMove: true, canLeaveGame: false, canSpectate: false });
     expect(snapshot.spectatorCount).toBe(0);
-    expect(snapshot.board).toHaveLength(18);
+    expect(snapshot.board).toHaveLength(20);
     expect(snapshot.turn).toBe("A");
     expect(snapshot.players.A?.name).toBe("An");
     expect(snapshot.players.B?.name).toBe("Bình");
     expect(snapshot.players.A?.remainingMs).toBe(600_000);
-    expect(snapshot.board.some((piece) => piece.position.x === 0 && piece.position.y === 8)).toBe(false);
-    expect(snapshot.board.some((piece) => piece.position.x === 8 && piece.position.y === 0)).toBe(false);
+    expect(snapshot.board.some((piece) => piece.position.x === 0 && piece.position.y === 0)).toBe(false);
+    expect(snapshot.board.some((piece) => piece.position.x === 8 && piece.position.y === 8)).toBe(false);
   });
 
   it("uses safe explicit viewer defaults before and after a session error", async () => {
@@ -51,8 +51,8 @@ describe("LocalSession", () => {
     const listener = vi.fn();
     session.subscribe(listener);
     await session.start({ mode: "local", playerNames: ["An", "Bình"] });
-    expect(session.getLegalMoves({ x: 0, y: 2 })).toContainEqual({ x: 0, y: 1 });
-    const result = await session.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    expect(session.getLegalMoves({ x: 4, y: 7 })).toContainEqual({ x: 3, y: 6 });
+    const result = await session.move({ x: 4, y: 7 }, { x: 3, y: 6 });
     expect(result).toEqual({ accepted: true });
     expect(session.getSnapshot().turn).toBe("B");
     expect(session.getSnapshot().viewer).toEqual({ role: "player", seat: "B" });
@@ -66,7 +66,7 @@ describe("LocalSession", () => {
     const session = new LocalSession(clock());
     await session.start({ mode: "local", playerNames: ["An", "Bình"] });
     const before = session.getSnapshot();
-    const result = await session.move({ x: 0, y: 2 }, { x: 0, y: 0 });
+    const result = await session.move({ x: 4, y: 7 }, { x: 4, y: 5 });
     expect(result).toMatchObject({ accepted: false, error: { code: "invalid_move" } });
     expect(session.getSnapshot()).toBe(before);
   });

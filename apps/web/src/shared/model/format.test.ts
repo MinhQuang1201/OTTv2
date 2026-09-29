@@ -14,6 +14,7 @@ describe("game display formatting", () => {
   });
 
   it("describes a goal result using the winner's canonical goal square", () => {
-    expect(resultReason({ winner: "A", reason: "goal" })).toMatch(/A9/);
+    expect(resultReason({ winner: "A", reason: "goal" })).toMatch(/A1/);
+    expect(resultReason({ winner: "B", reason: "goal" })).toMatch(/I9/);
   });
 });

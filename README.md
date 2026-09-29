@@ -1,11 +1,11 @@
 # OTTv2 – Oẳn Tù Tì
 
-Cờ chiến thuật hai người trên bàn 9×9. Mỗi quân là Đấm, Lá hoặc Kéo. Ăn theo oẳn tù tì. Thắng khi đưa quân vào ô thắng của mình, hoặc khi ăn hết toàn bộ quân đối phương.
+Cờ chiến thuật hai người trên bàn 9×9. Mỗi bên có 10 quân: 3 Đấm, 4 Lá và 3 Kéo. Ăn theo oẳn tù tì. Thắng khi đưa quân vào ô thắng của mình, hoặc khi ăn hết toàn bộ quân đối phương.
 
-- Người A (Đỏ) thắng trên **a9**. Người B (Xanh) thắng trên **i1**.
-- Đi như vua cờ vua: 8 hướng, 1 ô.
+- Người A (Đỏ) thắng trên **a1**. Người B (Xanh) thắng trên **i9**.
+- Đi một ô theo 8 hướng.
 - Cùng loại khác phe: nước đi bị từ chối; mỗi ô chỉ có một quân.
-- Khác loại: bên thắng oẳn tù tì ăn; bên thua mất quân đi (đòn thua).
+- Khác loại: bên thắng oẳn tù tì ăn; bên thua bị từ chối và trạng thái không đổi.
 
 ## Chạy
 
@@ -53,13 +53,13 @@ Demo fixture có thể chọn bằng query key, ví dụ `?demo=result-goal`,
 | | |
 |---|---|
 | Bàn | 9×9, file a–i, rank 1–9 |
-| Quân | Mỗi bên 9 quân: 3 Đấm, 3 Lá, 3 Kéo |
+| Quân | Mỗi bên 10 quân: 3 Đấm, 4 Lá, 3 Kéo |
 | Vòng ăn | Đấm > Kéo > Lá > Đấm |
 | Di chuyển | 1 ô, 8 hướng; không ra ngoài bàn; không vào ô có quân cùng phe |
 | Cùng loại | Không được đi vào ô có quân đối phương cùng loại |
-| Ô thắng | A: a9 · B: i1 — chỉ quân của chính mình |
+| Ô thắng | A: a1 · B: i9 — chỉ quân của chính mình |
 | Ăn hết quân | Không còn quân nào của đối phương → thắng ngay |
-| Thế trận | A ở A3:C5, B ở G5:I7, đối xứng 180°; không đặt quân lên a9/i1 lúc xếp |
+| Thế trận | A ở khu vực E8:H5, B đối xứng 180°; không đặt quân lên a1/i9 lúc xếp |
 | Đồng hồ | 10 phút mỗi ghế; server quyết định timeout |
 | Kết nối lại | Grace 60 giây; `leave` xử thua ngay, `close` giữ ghế |
 
@@ -95,6 +95,10 @@ npm test
 ## Biến môi trường
 
 `PORT` — cổng HTTP static, mặc định `3000`.
+`OTT_WORKER_HOST` — địa chỉ loopback cho Worker local, mặc định `127.0.0.1`.
+`OTT_WORKER_PORT` — cổng Worker local; để trống để hệ điều hành cấp cổng động, hoặc đặt thủ công khi debug/CI.
+`VITE_OTT_PLAYHTML_HOST` — public Worker origin dùng cho PlayHTML/YProvider trong browser build.
+`VITE_OTT_PLAYHTML_CONTROL_ENDPOINT` — HTTPS/HTTP Worker origin dùng cho create/list/join/resume trong browser build.
 `OTT_PLAYHTML_HOST` — endpoint self-hosted dành cho adapter; không đặt secret trong frontend.
 `OTT_PLAYHTML_CONTROL_ENDPOINT` — HTTPS Worker control endpoint for create/list/join/resume; bỏ trống thì online unavailable.
 `OTT_SPECTATOR_ENABLED` — cờ tính năng khán giả phía Worker, mặc định tắt (chỉ bật khi `"true"`).
@@ -106,9 +110,13 @@ Kiến trúc online production duy nhất được cấu hình là Cloudflare Wo
 Worker local/deploy commands:
 
 ```bash
-npx wrangler dev --config apps/worker/wrangler.jsonc
-npx wrangler deploy --config apps/worker/wrangler.jsonc
+npm run worker:dev
+npx --no-install wrangler deploy --config apps/worker/wrangler.jsonc
 ```
+
+`npm run worker:dev` dùng Wrangler đã pin trong repository, tự chọn cổng loopback khi `OTT_WORKER_PORT` để trống, và tắt inspector mặc định để tránh các dải cổng bị Windows loại trừ. `.env` chỉ dành cho cấu hình local không bí mật; `.dev.vars` chứa secret Worker local và không được commit. Không cần reset WinNAT hoặc thay đổi Windows dynamic port range để chạy dự án.
+
+Để chơi thủ công local, đặt `OTT_WORKER_PORT=8900`, `VITE_OTT_PLAYHTML_HOST=http://127.0.0.1:8900` và `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT=http://127.0.0.1:8900` trong `.env`, sau đó chạy Worker và web app ở hai terminal. Không dùng cổng động cho flow này vì static frontend cần biết Worker origin trước khi build/dev server khởi động.
 
 Local demo dùng minimal browser fork trong `vendor/playhtml-minimal/browser/`: một YProvider kết nối Worker, chờ initial sync rồi gửi các lệnh `ott:*` qua custom-message channel. Playwright đã xác nhận hai browser context có thể tạo/tham gia phòng và đồng bộ một nước đi hợp lệ. Đây không phải full upstream PlayHTML bundle.
 

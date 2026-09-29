@@ -18,7 +18,7 @@ Node ≥ 18. Cổng mặc định 3000 (`PORT`).
 
 ## Ranh giới module
 
-- `packages/game-core/src/config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, TIME_CONTROL, PORT. A (Đỏ) khởi tạo ở A3:C5; B (Xanh) là đối xứng 180° ở G5:I7.
+- `packages/game-core/src/config.js` — SIZE, TYPES, BEATS, GOAL, A_SETUP, TIME_CONTROL, PORT. A (Đỏ) khởi tạo ở khu vực E8:H5; B (Xanh) là đối xứng 180°.
 - `packages/game-core/src/rules.js` — `createInitialState`, `getLegalMoves`, `applyMove`, `detectWinner`, `publicState`. Không I/O.
 - `packages/game-core/src/room.js` — ghế A/B, `handleMove`, clock server-authoritative và grace reconnect.
 - `server.js` — chỉ file tĩnh, không chứa game WebSocket hay luật; phục vụ `apps/web/dist` sau `npm run build:web`, từ chối source/runtime private paths.
@@ -39,8 +39,8 @@ Không gọi ô thắng là “nhà vua”. Mỗi ô chỉ có một quân; khô
 - Đi 1 ô, 8 hướng.
 - Không vào ô có quân cùng phe.
 - Không vào ô có quân đối phương cùng loại.
-- Thua oẳn tù tì → quân đi bị loại, quân đứng yên.
-- A thắng trên a9, B thắng trên i1. Đứng ô thắng của đối phương không thắng.
+- Nước thua oẳn tù tì là nước không hợp lệ → không có quân nào bị loại, trạng thái không đổi.
+- A thắng trên a1, B thắng trên i9. Đứng ô thắng của đối phương không thắng.
 - Tuyệt chủng toàn bộ quân của một ghế → ghế kia thắng ngay.
 - Sau nước không thắng, nếu ghế kia không có nước hợp lệ thì người vừa đi thắng với `no_moves`; nếu có, lượt chuyển sang ghế kia.
 - Thế trận không cho bước 1 vào ô thắng của mình.

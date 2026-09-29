@@ -3,11 +3,11 @@ const https = require("node:https");
 const net = require("node:net");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { availablePort, readWorkerHost, workerOrigin, wranglerLauncher } = require("../../config/local-runtime");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const APP_PORT = 3000;
 const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`;
-const WRANGLER_VERSION = "4.141.0";
 const LOG_LIMIT = 32_000;
 
 function appendLog(target, chunk) {
@@ -23,18 +23,6 @@ function ensurePortFree(port) {
       reject(new Error(`Required browser-test port ${port} is already in use`));
     });
     socket.once("error", (error) => error.code === "ECONNREFUSED" ? resolve() : reject(error));
-  });
-}
-
-function availablePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : null;
-      server.close((error) => error ? reject(error) : port ? resolve(port) : reject(new Error("Could not reserve a Worker port")));
-    });
   });
 }
 
@@ -68,8 +56,12 @@ async function stopProcess(processInfo) {
 }
 
 function startProcess(command, args, env) {
-  const child = process.platform === "win32" && command === "npx"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", [command, ...args].join(" ")], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] })
+  const quote = (value) => {
+    const text = String(value);
+    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
+  };
+  const child = process.platform === "win32" && (command === "npx" || command === "npx.cmd")
+    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ")], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] })
     : spawn(command, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
   const logs = { stdout: "", stderr: "" };
   child.stdout.on("data", (chunk) => { logs.stdout = appendLog(logs.stdout, chunk); });
@@ -92,17 +84,20 @@ function workerReady(workerOrigin) {
 async function createBrowserDemoFixture() {
   await ensurePortFree(APP_PORT);
   if (!fs.existsSync(path.join(ROOT, "apps", "web", "dist", "index.html"))) throw new Error("Browser fixture requires the built React app; run npm run build:web first");
-  const workerPort = await availablePort();
-  const workerOrigin = `https://127.0.0.1:${workerPort}`;
+  const workerHost = readWorkerHost();
+  const workerPort = await availablePort(workerHost);
+  const origin = workerOrigin(workerHost, workerPort, "https");
   const envFile = path.join(ROOT, ".dev.vars");
   if (!fs.existsSync(envFile)) throw new Error("Browser fixture requires the ignored .dev.vars file used by Worker runtime tests");
+  fs.mkdirSync(path.join(ROOT, ".wrangler"), { recursive: true });
   const persistTo = fs.mkdtempSync(path.join(ROOT, ".wrangler", "browser-worker-"));
   const workerRuns = [];
   function startWorker() {
-    const current = startProcess("npx", [
-      "--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "demo",
+    const launcher = wranglerLauncher();
+    const current = startProcess(launcher.command, [
+      ...launcher.argsPrefix, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "demo",
       "--local", "--local-protocol", "https", "--env-file", envFile, "--persist-to", persistTo,
-      "--ip", "127.0.0.1", "--port", String(workerPort), "--show-interactive-dev-session=false",
+      "--ip", workerHost, "--port", String(workerPort), "--inspector-port", "0", "--show-interactive-dev-session=false",
     ], process.env);
     workerRuns.push(current);
     return current;
@@ -110,7 +105,7 @@ async function createBrowserDemoFixture() {
   let worker = startWorker();
   let app;
   try {
-    await waitFor(() => workerReady(workerOrigin), "Wrangler HTTPS Worker");
+    await waitFor(() => workerReady(origin), "Wrangler HTTPS Worker");
     app = startProcess(process.execPath, ["server.js"], { ...process.env, PORT: String(APP_PORT) });
     await waitFor(async () => {
       try {
@@ -128,7 +123,7 @@ async function createBrowserDemoFixture() {
   let stopped = false;
   return {
     appOrigin: APP_ORIGIN,
-    workerOrigin,
+    workerOrigin: origin,
     diagnostics() {
       return {
         workerStdout: workerRuns.map((run) => run.logs.stdout).join("\n"),
@@ -141,7 +136,7 @@ async function createBrowserDemoFixture() {
       if (stopped) throw new Error("Cannot restart a stopped browser fixture");
       await stopProcess(worker);
       worker = startWorker();
-      await waitFor(() => workerReady(workerOrigin), "restarted Wrangler HTTPS Worker");
+       await waitFor(() => workerReady(origin), "restarted Wrangler HTTPS Worker");
     },
     async stop() {
       if (stopped) return;

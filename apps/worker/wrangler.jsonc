@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "vars": {
+    "OTT_BROWSER_ORIGIN": "https://ottv2-two.vercel.app"
+  },
   "durable_objects": {
     "bindings": [
       {
