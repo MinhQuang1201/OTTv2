@@ -153,12 +153,23 @@ describe("DemoSession fixtures", () => {
     ]);
   });
 
-  it("keeps the finished spectator result neutral", () => {
+  it("exposes the winner for finished spectator scenario", () => {
     const snapshot = new DemoSession("spectator-finished").getSnapshot();
 
     expect(snapshot.phase).toBe("finished");
-    expect(snapshot.result).toEqual({ winner: null, reason: "goal" });
+    expect(snapshot.result).toEqual({ winner: "A", reason: "goal" });
     expect(snapshot.viewer).toEqual({ role: "spectator" });
+    expect(snapshot.events.at(-1)).toMatchObject({ type: "win", winner: "A", reason: "goal" });
+  });
+
+  it("rejects direct move APIs for spectator fixtures", async () => {
+    for (const scenario of ["spectator-active", "spectator-reconnecting"] as const) {
+      const session = new DemoSession(scenario);
+      expect(session.getLegalMoves({ x: 0, y: 2 })).toEqual([]);
+      const result = await session.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+      expect(result.accepted).toBe(false);
+      if (!result.accepted) expect(result.error.code).toBe("invalid_move");
+    }
   });
 
   it("models a missing spectator room as a typed unavailable error", () => {

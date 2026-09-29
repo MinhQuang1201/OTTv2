@@ -11,6 +11,7 @@ export const ROOM_UNAVAILABLE = "Phòng không khả dụng";
 export type StorageLike = {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+  list?<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
   delete?(key: string): Promise<void>;
   setAlarm?(deadline: number): Promise<void>;
   deleteAlarm?(): Promise<void>;
@@ -85,10 +86,22 @@ export class DurableRoomAdapter {
     try {
       const room = hydrateRoom(saved, roomId, roomDependencies(now, timing));
       const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
+      for (const seat of ["A", "B"] as const) {
+        if (saved.players?.[seat]?.connected && room.players?.[seat]) {
+          // hydrateRoom intentionally drops live socket references. Restore the
+          // persisted marker long enough for Room to issue a fresh grace window.
+          room.players[seat].connected = true;
+        }
+      }
       adapter.lastPayload = room.payload();
       if (await storage.get("allocationTerminalReason")) adapter.unavailable = true;
       const reconciliation = room.reconcileHydration(now());
-      if (reconciliation.seats.length || room.status === "waiting") await adapter.persist();
+      if (reconciliation.seats.length || room.status === "waiting") {
+        adapter.lastPayload = room.payload();
+        await adapter.persist();
+      } else {
+        adapter.lastPayload = room.payload();
+      }
       await adapter.scheduleAlarm();
       return adapter;
     } catch {
@@ -185,6 +198,14 @@ export class DurableRoomAdapter {
     for (const seat of ["A", "B"] as const) {
       const deadline = this.room.players[seat]?.reconnectDeadlineMs;
       if (typeof deadline === "number") deadlines.push(deadline);
+    }
+    if (storage.list) {
+      for (const prefix of ["spectate-nonce:", "attach-nonce:", "nonce:"]) {
+        const entries = await storage.list<number>({ prefix });
+        for (const value of entries.values()) {
+          if (typeof value === "number" && Number.isFinite(value)) deadlines.push(value);
+        }
+      }
     }
     const creatorDeadline = await storage.get<number>("creatorAttachDeadlineMs");
     if (this.room.status === "waiting" && !this.room.players.A && !(await storage.get("creatorAttachDeadlineConsumed")) && Number.isFinite(creatorDeadline)) {

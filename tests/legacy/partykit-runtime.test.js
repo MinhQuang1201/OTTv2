@@ -1,9 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const config = require("../packages/game-core/src/config");
-const { OttLobby } = require("../partykit/ott-lobby");
-const { PartyKitOttRoom } = require("../partykit/ott-room");
+const config = require("../../packages/game-core/src/config");
+const { OttLobby } = require("../../partykit/ott-lobby");
+const { PartyKitOttRoom } = require("../../partykit/ott-room");
 
 // This models only the documented named-party stub/socket boundary used by the
 // application. It is deliberately not a substitute for a PlayHTML runtime.

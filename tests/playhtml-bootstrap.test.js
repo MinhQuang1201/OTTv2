@@ -86,3 +86,107 @@ test("bootstrap rejects reuse of an initialized provider for a different room", 
     /reload before joining another room/i
   );
 });
+
+test("bootstrap disposed during pending init aborts and does not install global factory", async () => {
+  let resolveReady;
+  let closed = false;
+  const runtime = {
+    configure() {},
+    init() {
+      return {
+        ready: new Promise((resolve) => { resolveReady = resolve; }),
+        createCustomMessageChannel() { return { send() {}, subscribe() { return () => {}; }, close() {} }; },
+        close() { closed = true; }
+      };
+    },
+    reset() {}
+  };
+  const target = {};
+  const { createBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
+  const bootstrap = createBootstrap({ runtime, globalObject: target });
+  const pending = bootstrap({ host: "https://worker.example", room: "ott-room-a" });
+
+  await bootstrap.dispose();
+  assert.equal(closed, true);
+  assert.equal(target.OTT_PLAYHTML_CONNECTION_FACTORY, undefined);
+
+  resolveReady();
+  await assert.rejects(pending, /aborted/i);
+  assert.equal(target.OTT_PLAYHTML_CONNECTION_FACTORY, undefined);
+});
+
+test("rejected initialization cleans up state and allows subsequent bootstrap", async () => {
+  let shouldFail = true;
+  const runtime = {
+    configure() {},
+    init() {
+      if (shouldFail) {
+        throw new Error("runtime init failed");
+      }
+      return {
+        ready: Promise.resolve(),
+        createCustomMessageChannel() { return { send() {}, subscribe() { return () => {}; }, close() {} }; }
+      };
+    }
+  };
+  const target = {};
+  const { createBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
+  const bootstrap = createBootstrap({ runtime, globalObject: target });
+
+  await assert.rejects(bootstrap({ host: "https://worker.example", room: "ott-room-a" }), /runtime init failed/);
+
+  shouldFail = false;
+  const factory = await bootstrap({ host: "https://worker.example", room: "ott-room-b" });
+  assert.equal(typeof factory, "function");
+  assert.equal(target.OTT_PLAYHTML_CONNECTION_FACTORY, factory);
+});
+
+test("concurrent disposal calls reset only once and both resolve cleanly", async () => {
+  let resets = 0;
+  const runtime = {
+    configure() {},
+    init() {
+      return {
+        ready: Promise.resolve(),
+        createCustomMessageChannel() { return { send() {}, subscribe() { return () => {}; }, close() {} }; }
+      };
+    },
+    async reset() {
+      resets += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  const target = {};
+  const { createBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
+  const bootstrap = createBootstrap({ runtime, globalObject: target });
+  await bootstrap({ host: "https://worker.example", room: "ott-room-a" });
+
+  await Promise.all([bootstrap.dispose(), bootstrap.dispose(), bootstrap.dispose()]);
+  assert.equal(resets, 1);
+  assert.equal(target.OTT_PLAYHTML_CONNECTION_FACTORY, undefined);
+});
+
+test("rejected playhtml.ready cleans up playhtml instance and resets runtime", async () => {
+  let closed = false;
+  let resetCalled = false;
+  const runtime = {
+    configure() {},
+    init() {
+      return {
+        ready: Promise.reject(new Error("websocket failed to connect")),
+        createCustomMessageChannel() { return { send() {}, subscribe() { return () => {}; }, close() {} }; },
+        close() { closed = true; }
+      };
+    },
+    reset() { resetCalled = true; }
+  };
+  const target = {};
+  const { createBootstrap } = require("../packages/game-client/src/playhtml-bootstrap");
+  const bootstrap = createBootstrap({ runtime, globalObject: target });
+
+  await assert.rejects(bootstrap({ host: "https://worker.example", room: "ott-room-a" }), /websocket failed to connect/);
+  assert.equal(closed, true);
+  assert.equal(resetCalled, true);
+  assert.equal(target.OTT_PLAYHTML_CONNECTION_FACTORY, undefined);
+});
+

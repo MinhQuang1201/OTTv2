@@ -34,7 +34,7 @@ class FakeClient implements PlayhtmlGameClientLike {
 
 function sessionWith(client: FakeClient, now = () => 0) {
   const gateway = { available: true, createRoom: vi.fn(async () => allocation), joinRoom: vi.fn(async () => allocation) } as unknown as OnlineLobbyGateway;
-  const runtime = { bootstrap: vi.fn(async () => undefined), connectionFactory: vi.fn() };
+  const runtime = { bootstrap: vi.fn(async () => undefined), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
   return new OnlineSession({ gateway, runtime, clientFactory: () => client, host: "https://play.example", now, tickMs: 100 });
 }
 
@@ -42,6 +42,41 @@ describe("OnlineSession", () => {
   it("rejects an online snapshot with an invalid viewer seat", () => {
     const normalized = normalizeOnlineState({ ...state(1), you: "invalid" as never });
     expect(normalized).toBeNull();
+  });
+
+  it("preserves player viewerSeat identity and capabilities during waiting phase", () => {
+    const normalized = normalizeOnlineState({ ...state(1), status: "waiting", you: "A" });
+    expect(normalized).not.toBeNull();
+    expect(normalized?.snapshot.phase).toBe("waiting");
+    expect(normalized?.snapshot.viewerSeat).toBe("A");
+    expect(normalized?.snapshot.viewer).toEqual({ role: "player", seat: "A" });
+    expect(normalized?.snapshot.capabilities).toEqual({
+      canMove: true,
+      canLeaveGame: true,
+      canSpectate: false,
+    });
+  });
+
+  it("retains viewer identity in waiting phase while blocking moves and enabling player leave", async () => {
+    const client = new FakeClient();
+    const session = sessionWith(client);
+    await session.start({ mode: "online", intent: "create", playerName: "An" });
+    client.emit("state", { ...state(1), status: "waiting", you: "A" });
+
+    const snapshot = session.getSnapshot();
+    expect(snapshot.phase).toBe("waiting");
+    expect(snapshot.viewerSeat).toBe("A");
+    expect(snapshot.viewer).toEqual({ role: "player", seat: "A" });
+    expect(snapshot.capabilities).toEqual({ canMove: true, canLeaveGame: true, canSpectate: false });
+
+    expect(session.getLegalMoves({ x: 0, y: 2 })).toEqual([]);
+    const moveResult = await session.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    expect(moveResult.accepted).toBe(false);
+    expect(client.move).not.toHaveBeenCalled();
+
+    await session.leave();
+    expect(client.leave).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot().result).toEqual({ winner: "B", reason: "leave" });
   });
 
   it("maps public lifecycle events and delegates create/join without owning transport state", async () => {
@@ -110,5 +145,23 @@ describe("OnlineSession", () => {
     expect(client.close).toHaveBeenCalledTimes(1);
     client.emit("state", state(2, 2));
     expect(session.getSnapshot().board[0]?.position).toEqual({ x: 0, y: 2 });
+  });
+
+  it("does not create or attach a client when disposed during allocation", async () => {
+    let resolveAllocation!: (value: PlayhtmlAllocation) => void;
+    const allocationPromise = new Promise<PlayhtmlAllocation>((resolve) => { resolveAllocation = resolve; });
+    const clientFactory = vi.fn(() => new FakeClient());
+    const runtime = { bootstrap: vi.fn(async () => undefined), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const gateway = { available: true, createRoom: vi.fn(() => allocationPromise) } as unknown as OnlineLobbyGateway;
+    const session = new OnlineSession({ gateway, runtime, clientFactory, host: "https://play.example" });
+
+    const start = session.start({ mode: "online", intent: "create", playerName: "An" });
+    await Promise.resolve();
+    await session.dispose();
+    resolveAllocation(allocation);
+    await start;
+
+    expect(clientFactory).not.toHaveBeenCalled();
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
   });
 });

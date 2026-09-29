@@ -10,6 +10,7 @@ function fakeConnection() {
     connect() { handlers.open(); },
     send(message) { this.sent.push(message); },
     close() { handlers.close(); },
+    emit(event, payload) { handlers[event]?.(payload); },
     receive(message) { handlers.message(message); }
   };
 }
@@ -33,6 +34,18 @@ test("uses HTTPS allocation before PlayHTML attach and does not send lobby comma
 
   assert.deepEqual(requests, [["create", { name: "An" }]]);
   assert.deepEqual(connection.sent, [{ __ott: true, type: "ott:attach", roomId: "OTT-ROOM", ticket: "opaque-ticket" }]);
+});
+
+test("forwards provider reconnecting events through the game client", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection, storage: null });
+  const events = [];
+  client.on("reconnecting", (payload) => events.push(payload));
+
+  await client.connect();
+  connection.emit("reconnecting", { reason: "provider-status" });
+
+  assert.deepEqual(events, [{ reason: "provider-status" }]);
 });
 
 test("uses the runtime bootstrap registered after the UI client is constructed", async () => {
@@ -408,4 +421,304 @@ test("ignores envelope-less, malformed, and foreign authoritative snapshots", as
   assert.equal(client.roomId, "AB12");
   assert.equal(client.state.turn, "B");
   assert.deepEqual(states.map((message) => message.events), [[{ id: 7 }], []]);
+});
+
+test("accepts same-revision spectator count updates while deduplicating identical snapshots", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  // Initial state at revision 2 with spectatorCount: 0
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, spectatorCount: 0, state: { turn: "A" } }));
+  // Spectator joins: revision 2, spectatorCount: 1
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, spectatorCount: 1, state: { turn: "A" } }));
+  // Spectator leaves: revision 2, spectatorCount: 0
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, spectatorCount: 0, state: { turn: "A" } }));
+  // Duplicate snapshot: revision 2, spectatorCount: 0 (should be discarded)
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, spectatorCount: 0, state: { turn: "A" } }));
+
+  assert.equal(states.length, 3);
+  assert.equal(states[0].spectatorCount, 0);
+  assert.equal(states[1].spectatorCount, 1);
+  assert.equal(states[2].spectatorCount, 0);
+  assert.equal(client.spectatorCount, 0);
+});
+
+test("accepts same-revision connection status updates while deduplicating game moves and events", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  const playersInitial = { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } };
+  const playersBobDisconnected = { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: false } };
+  const playersBobReconnected = { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } };
+
+  // Initial state with event id 1
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, players: playersInitial, events: [{ id: 1 }], state: { turn: "A" } }));
+  // Bob disconnects at same revision, with event id 1 already seen
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, players: playersBobDisconnected, events: [{ id: 1 }], state: { turn: "A" } }));
+  // Duplicate of disconnected state (should be discarded)
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, players: playersBobDisconnected, events: [{ id: 1 }], state: { turn: "A" } }));
+  // Bob reconnects at same revision
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 2, players: playersBobReconnected, events: [{ id: 1 }], state: { turn: "A" } }));
+
+  assert.equal(states.length, 3);
+  assert.equal(states[0].players.B.connected, true);
+  assert.equal(states[1].players.B.connected, false);
+  assert.equal(states[2].players.B.connected, true);
+  // Event 1 was only emitted once, and deduplicated in subsequent same-revision states
+  assert.deepEqual(states.map((s) => s.events), [[{ id: 1 }], [], []]);
+});
+
+test("does not discard reconnect snapshot at last room revision", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  // Initial state at revision 5
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 5, state: { turn: "B" }, events: [{ id: 5 }] }));
+  assert.equal(states.length, 1);
+
+  // Network drops and reconnects
+  connection.close();
+  connection.connect();
+
+  // Server sends reconnect snapshot at unchanged revision 5
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 5, state: { turn: "B" }, events: [{ id: 5 }] }));
+
+  assert.equal(states.length, 2, "reconnect snapshot at same revision must be accepted");
+  assert.deepEqual(states[1].events, [], "already-seen events are deduplicated in reconnect snapshot");
+
+  // Subsequent duplicate at revision 5 without reconnect is discarded
+  connection.receive(ott({ type: "ott:state", roomId: "AB12", revision: 5, state: { turn: "B" }, events: [{ id: 5 }] }));
+  assert.equal(states.length, 2);
+});
+
+test("unwraps spectatorCount in projection for players and spectators across same-revision count updates", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+  const roomId = "ott-123e4567-e89b-12d3-a456-426614174000";
+
+  // Player projection with spectatorCount: 0
+  connection.receive(ott({
+    type: "ott:state",
+    roomId,
+    revision: 3,
+    state: {
+      roomId,
+      status: "playing",
+      revision: 3,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" },
+      events: [],
+      you: "A",
+      viewer: { role: "player", seat: "A" },
+      spectatorCount: 0,
+    },
+  }));
+
+  // Spectator joins: same-revision projection with spectatorCount: 1
+  connection.receive(ott({
+    type: "ott:state",
+    roomId,
+    revision: 3,
+    state: {
+      roomId,
+      status: "playing",
+      revision: 3,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" },
+      events: [],
+      you: "A",
+      viewer: { role: "player", seat: "A" },
+      spectatorCount: 1,
+    },
+  }));
+
+  assert.equal(states.length, 2);
+  assert.equal(states[0].spectatorCount, 0);
+  assert.equal(states[1].spectatorCount, 1);
+});
+
+test("accepts same-revision spectator count change and deduplicates prior game events in the same snapshot", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  // Initial state at revision 3 with move event id 10 and spectatorCount 0
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 3,
+    spectatorCount: 0,
+    events: [{ id: 10, type: "move" }],
+    state: { turn: "B" }
+  }));
+
+  // Spectator joins at revision 3 with same event id 10 and spectatorCount 1
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 3,
+    spectatorCount: 1,
+    events: [{ id: 10, type: "move" }],
+    state: { turn: "B" }
+  }));
+
+  // Spectator leaves at revision 3 with same event id 10 and spectatorCount 0
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 3,
+    spectatorCount: 0,
+    events: [{ id: 10, type: "move" }],
+    state: { turn: "B" }
+  }));
+
+  assert.equal(states.length, 3);
+  assert.equal(states[0].spectatorCount, 0);
+  assert.deepEqual(states[0].events, [{ id: 10, type: "move" }]);
+  assert.equal(states[1].spectatorCount, 1);
+  assert.deepEqual(states[1].events, [], "move event must be deduplicated on spectator join");
+  assert.equal(states[2].spectatorCount, 0);
+  assert.deepEqual(states[2].events, [], "move event must be deduplicated on spectator leave");
+});
+
+test("accepts reconnect snapshot triggered by resumed event at unchanged revision", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  // Initial state at revision 4 with event id 4
+  connection.receive(ott({
+    type: "ott:joined",
+    roomId: "AB12",
+    you: "A"
+  }));
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 4,
+    events: [{ id: 4 }],
+    state: { turn: "A" }
+  }));
+  assert.equal(states.length, 1);
+
+  // Reconnect handshake arrives with resumed: true
+  connection.receive(ott({
+    type: "ott:joined",
+    roomId: "AB12",
+    you: "A",
+    resumed: true
+  }));
+
+  // Server sends reconnect snapshot at unchanged revision 4
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 4,
+    events: [{ id: 4 }],
+    state: { turn: "A" }
+  }));
+
+  assert.equal(states.length, 2, "reconnect snapshot via resumed joined must be accepted");
+  assert.deepEqual(states[1].events, [], "already-seen events are deduplicated in resumed snapshot");
+
+  // Duplicate at revision 4 without reconnect is discarded
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: "AB12",
+    revision: 4,
+    events: [{ id: 4 }],
+    state: { turn: "A" }
+  }));
+  assert.equal(states.length, 2);
+});
+
+test("accepts reconnect snapshot after attachSpectator at unchanged revision", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection, storage: null });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  const room = "ott-123e4567-e89b-12d3-a456-426614174000";
+  // Initial spectator attach and snapshot at revision 2
+  await client.attachSpectator({ allocationId: "alloc-1", room, ticket: "ticket-1" });
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: room,
+    revision: 2,
+    spectatorCount: 1,
+    state: { turn: "A" }
+  }));
+  assert.equal(states.length, 1);
+
+  // Spectator re-attaches to the same room (reconnect)
+  await client.attachSpectator({ allocationId: "alloc-2", room, ticket: "ticket-2" });
+
+  // Server sends reconnect snapshot at unchanged revision 2
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: room,
+    revision: 2,
+    spectatorCount: 1,
+    state: { turn: "A" }
+  }));
+
+  assert.equal(states.length, 2, "spectator reconnect snapshot at same revision must be accepted");
+
+  // Duplicate without re-attaching is discarded
+  connection.receive(ott({
+    type: "ott:state",
+    roomId: room,
+    revision: 2,
+    spectatorCount: 1,
+    state: { turn: "A" }
+  }));
+  assert.equal(states.length, 2);
+});
+
+test("unwraps revision from projection when not present at top level", async () => {
+  const connection = fakeConnection();
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection, storage: null });
+  const states = [];
+  client.on("state", (message) => states.push(message));
+  await client.connect();
+
+  const roomId = "ott-123e4567-e89b-12d3-a456-426614174000";
+  // Snapshot where revision is only inside projection
+  connection.receive(ott({
+    type: "ott:state",
+    roomId,
+    state: {
+      roomId,
+      status: "playing",
+      revision: 5,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" },
+      events: [],
+      you: "A",
+      viewer: { role: "player", seat: "A" },
+      spectatorCount: 2,
+    },
+  }));
+
+  assert.equal(states.length, 1);
+  assert.equal(states[0].revision, 5);
+  assert.equal(client.stateRevision, 5);
+  assert.equal(client.spectatorCount, 2);
 });

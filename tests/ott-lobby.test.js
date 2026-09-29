@@ -216,3 +216,151 @@ test("removes waiting records whose game party is already terminal", async () =>
   assert.deepEqual(await lobby.listWaitingRooms(), []);
   assert.equal(await lobby.registry.get("ABCD"), undefined);
 });
+
+let loadedLobbyServer;
+function loadOttLobbyServer() {
+  if (!loadedLobbyServer) {
+    const { buildSync } = require("esbuild");
+    const path = require("node:path");
+    const Module = require("node:module");
+    const root = path.resolve(__dirname, "..");
+    const res = buildSync({
+      entryPoints: [path.join(root, "apps", "worker", "src", "lobby", "ott-lobby-server.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      write: false,
+      external: ["cloudflare:workers"],
+    });
+    const m = new Module("ott-lobby-server-test", module);
+    m.require = function(id) {
+      if (id === "cloudflare:workers") {
+        return { DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } } };
+      }
+      return Module.prototype.require.apply(this, arguments);
+    };
+    m._compile(res.outputFiles[0].text, "ott-lobby-server-test.js");
+    loadedLobbyServer = m.exports;
+  }
+  return loadedLobbyServer;
+}
+
+test("OttLobbyServer rate limits per action and client IP/identity, not globally", async () => {
+  const { OttLobbyServer } = loadOttLobbyServer();
+  const storageMap = new Map();
+  const ctx = {
+    storage: {
+      async get(k) { return storageMap.get(k); },
+      async put(k, v) { storageMap.set(k, v); },
+      async list(opts) {
+        const out = new Map();
+        for (const [k, v] of storageMap) {
+          if (!opts?.prefix || k.startsWith(opts.prefix)) out.set(k, v);
+        }
+        return out;
+      },
+      async transaction(cb) { return cb(ctx.storage); },
+    },
+  };
+  const env = { OTT_SPECTATOR_ENABLED: "true" };
+  const server = new OttLobbyServer(ctx, env);
+
+  // Client 1 sends /list
+  const req1 = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: { "cf-connecting-ip": "203.0.113.1" },
+    body: "{}",
+  });
+  const res1 = await server.fetch(req1);
+  assert.equal(res1.status, 200);
+
+  // Client 2 sends /list concurrently within 40ms - must NOT be blocked by Client 1
+  const req2 = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: { "cf-connecting-ip": "198.51.100.2" },
+    body: "{}",
+  });
+  const res2 = await server.fetch(req2);
+  assert.equal(res2.status, 200, "Client 2 must not be rate-limited by Client 1 request");
+
+  // Client 1 sends /list again immediately - MUST be rate limited
+  const req1Again = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: { "cf-connecting-ip": "203.0.113.1" },
+    body: "{}",
+  });
+  const res1Again = await server.fetch(req1Again);
+  assert.equal(res1Again.status, 429);
+  assert.deepEqual(await res1Again.json(), { error: "rate_limited" });
+
+  // Fallback edge headers (x-forwarded-for, x-real-ip, anonymous)
+  const reqForwarded = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: { "x-forwarded-for": "192.0.2.1, 10.0.0.1" },
+    body: "{}",
+  });
+  const resForwarded = await server.fetch(reqForwarded);
+  assert.equal(resForwarded.status, 200);
+
+  const reqRealIp = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: { "x-real-ip": "198.51.100.55" },
+    body: "{}",
+  });
+  const resRealIp = await server.fetch(reqRealIp);
+  assert.equal(resRealIp.status, 200);
+
+  const reqAnon = new Request("https://ott.internal/list", {
+    method: "POST",
+    headers: {},
+    body: "{}",
+  });
+  const resAnon = await server.fetch(reqAnon);
+  assert.equal(resAnon.status, 200);
+
+  // Client 1 rate-limited on /list can still perform different action /spectate without 429
+  const reqSpectate = new Request("https://ott.internal/spectate", {
+    method: "POST",
+    headers: { "cf-connecting-ip": "203.0.113.1" },
+    body: JSON.stringify({ id: "nonexistent-room" }),
+  });
+  const resSpectate = await server.fetch(reqSpectate);
+  assert.notEqual(resSpectate.status, 429, "Different action must not be blocked by rate limit on /list");
+
+  // Verify rate limit keys are partitioned per action and client identity
+  assert.equal(storageMap.has("rate:last:list:203.0.113.1"), true);
+  assert.equal(storageMap.has("rate:last:list:198.51.100.2"), true);
+  assert.equal(storageMap.has("rate:last:list:192.0.2.1"), true);
+  assert.equal(storageMap.has("rate:last:list:198.51.100.55"), true);
+  assert.equal(storageMap.has("rate:last:list:anonymous"), true);
+  assert.equal(storageMap.has("rate:last:spectate:203.0.113.1"), true);
+  assert.equal(storageMap.has("rate:last:list"), false, "Must not use global rate:last:list key");
+});
+
+test("OttLobbyServer alarm removes expired rate-limit keys", async () => {
+  const { OttLobbyServer } = loadOttLobbyServer();
+  const storageMap = new Map([
+    ["rate:last:list:expired", Date.now() - 61_000],
+    ["rate:last:join:fresh", Date.now()],
+  ]);
+  const alarms = [];
+  const ctx = {
+    storage: {
+      async get(k) { return storageMap.get(k); },
+      async put(k, v) { storageMap.set(k, v); },
+      async delete(k) { storageMap.delete(k); },
+      async list(opts) { return new Map([...storageMap].filter(([k]) => !opts?.prefix || k.startsWith(opts.prefix))); },
+      async setAlarm(deadline) { alarms.push(deadline); },
+      async deleteAlarm() {},
+      async transaction(cb) { return cb(ctx.storage); },
+    },
+  };
+  const server = new OttLobbyServer(ctx, { OTT_SPECTATOR_ENABLED: "true" });
+
+  await server.alarm();
+
+  assert.equal(storageMap.has("rate:last:list:expired"), false);
+  assert.equal(storageMap.has("rate:last:join:fresh"), true);
+  assert.equal(alarms.length, 1);
+});
+

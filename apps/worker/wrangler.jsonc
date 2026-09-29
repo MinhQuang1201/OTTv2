@@ -15,6 +15,10 @@
       {
         "name": "OTT_LOBBY",
         "class_name": "OttLobbyServer"
+      },
+      {
+        "name": "Lobby",
+        "class_name": "OttLobbyStreamServer"
       }
     ]
   },
@@ -26,6 +30,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["OttLobbyServer"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["OttLobbyStreamServer"]
     }
   ],
   "env": {
@@ -34,7 +42,8 @@
       "durable_objects": {
         "bindings": [
           { "name": "Main", "class_name": "OttGameServer" },
-          { "name": "OTT_LOBBY", "class_name": "OttLobbyServer" }
+          { "name": "OTT_LOBBY", "class_name": "OttLobbyServer" },
+          { "name": "Lobby", "class_name": "OttLobbyStreamServer" }
         ]
       },
       "vars": {
@@ -49,7 +58,8 @@
       "durable_objects": {
         "bindings": [
           { "name": "Main", "class_name": "OttGameServer" },
-          { "name": "OTT_LOBBY", "class_name": "OttLobbyServer" }
+          { "name": "OTT_LOBBY", "class_name": "OttLobbyServer" },
+          { "name": "Lobby", "class_name": "OttLobbyStreamServer" }
         ]
       },
       "vars": {

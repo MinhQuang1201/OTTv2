@@ -1,5 +1,5 @@
-import { useEffect, useReducer, useRef, useState } from "react";
-import type { DemoScenario, GameSession, GameResultView, GameSnapshot, SessionErrorView } from "../sessions/contract";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import type { DemoScenario, GameSession, GameResultView, GameSnapshot, SessionErrorView, StartGameOptions } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot";
 import { ScenarioSwitcher } from "../demo/ScenarioSwitcher";
@@ -12,6 +12,7 @@ import { GameScreen } from "../features/game/GameScreen";
 import { LocalSession } from "../sessions/local/LocalSession";
 import { AiSession } from "../sessions/ai/AiSession";
 import { OnlineSession } from "../sessions/online/OnlineSession";
+import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
@@ -30,6 +31,7 @@ export type AppState =
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
 export type OnlineSessionFactory = () => GameSession;
+export type SpectatorSessionFactory = () => GameSession;
 
 export function createDemoSession(scenario: DemoScenario): GameSession {
   return new DemoSession(isDemoScenario(scenario) ? scenario : DEFAULT_DEMO_SCENARIO);
@@ -86,24 +88,52 @@ export interface AppProps {
   readonly sessionFactory?: SessionFactory;
   readonly onlineGateway?: OnlineLobbyGateway;
   readonly onlineSessionFactory?: OnlineSessionFactory;
+  readonly spectatorSessionFactory?: SpectatorSessionFactory;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
   const sessionFactoryRef = useRef<SessionFactory>(sessionFactory);
   const generationRef = useRef(0);
+  const activeSessionRef = useRef<GameSession | null>(null);
+  const transitionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const isMountedRef = useRef(true);
+  const isFirstBootRef = useRef(true);
+
   const [activeSession, setActiveSession] = useState<{ readonly session: GameSession; readonly scenario: DemoScenario; readonly generation: number } | null>(null);
   const [waitingRooms, setWaitingRooms] = useState<{ status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string }>({ status: "loading" });
   const createOnlineSession = onlineSessionFactory ?? (() => new OnlineSession({ gateway: onlineGateway }));
+  const createSpectatorSession = spectatorSessionFactory ?? (() => new SpectatorSession({ gateway: onlineGateway }));
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
 
   useEffect(() => {
     sessionFactoryRef.current = sessionFactory;
   }, [sessionFactory]);
+
+  // Unmount cleanup: dispose the currently active session and prevent further transitions
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      generationRef.current += 1;
+      const current = activeSessionRef.current;
+      activeSessionRef.current = null;
+      if (current) {
+        try {
+          const disposal = current.dispose();
+          if (disposal && typeof (disposal as Promise<void>).then === "function") {
+            void (disposal as Promise<void>).catch(() => undefined);
+          }
+        } catch {
+          // ignore synchronous disposal error
+        }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (demo.enabled) {
@@ -147,31 +177,98 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     }
   }, [activeSession, observedSnapshot]);
 
-  useEffect(() => {
+  const transitionTo = useCallback((
+    factory: () => GameSession,
+    options: StartGameOptions,
+    scenario: DemoScenario,
+  ) => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
-    let active = true;
-    let session: GameSession | null = null;
     dispatch({ type: "boot", generation });
-    try {
-      session = sessionFactoryRef.current(demo.scenario);
-      setActiveSession({ session, scenario: demo.scenario, generation });
-      void session.start({ mode: "demo", scenario: demo.scenario }).catch((error: unknown) => {
-        if (!active || generationRef.current !== generation) return;
+    setActiveSession(null);
+
+    const createAndStart = () => {
+      if (!isMountedRef.current || generationRef.current !== generation) return;
+      let session: GameSession;
+      try {
+        session = factory();
+      } catch (error) {
+        if (isMountedRef.current && generationRef.current === generation) {
+          dispatch({
+            type: "error",
+            generation,
+            session: null,
+            snapshot: null,
+            error: safeSessionError(error),
+            scenario,
+          });
+        }
+        return;
+      }
+
+      activeSessionRef.current = session;
+      if (!isMountedRef.current || generationRef.current !== generation) {
+        activeSessionRef.current = null;
+        try {
+          const disposal = session.dispose();
+          if (disposal && typeof (disposal as Promise<void>).then === "function") {
+            void (disposal as Promise<void>).catch(() => undefined);
+          }
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      setActiveSession({ session, scenario, generation });
+
+      void session.start(options).catch((error: unknown) => {
+        if (!isMountedRef.current || generationRef.current !== generation) return;
         let snapshot: GameSnapshot | null = null;
-        try { snapshot = session?.getSnapshot() ?? null; } catch { /* retain the safe error state */ }
-        dispatch({ type: "error", generation, session, snapshot, error: safeSessionError(error), scenario: demo.scenario });
+        try { snapshot = session.getSnapshot(); } catch { /* retain safe error */ }
+        dispatch({
+          type: "error",
+          generation,
+          session,
+          snapshot,
+          error: safeSessionError(error),
+          scenario,
+        });
       });
-    } catch (error) {
-      if (active && generationRef.current === generation) dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: demo.scenario });
-    }
-    return () => {
-      active = false;
-      generationRef.current += 1;
-      setActiveSession((current) => current?.generation === generation ? null : current);
-      session?.dispose();
     };
-  }, [demo.scenario, restartToken]);
+
+    if (isFirstBootRef.current && !activeSessionRef.current) {
+      isFirstBootRef.current = false;
+      createAndStart();
+      return;
+    }
+
+    const runTransition = async () => {
+      const active = activeSessionRef.current;
+      activeSessionRef.current = null;
+      if (active) {
+        try {
+          await active.dispose();
+        } catch {
+          // ignore disposal error so subsequent session creation proceeds
+        }
+      }
+      if (!isMountedRef.current || generationRef.current !== generation) {
+        return;
+      }
+      createAndStart();
+    };
+
+    transitionQueueRef.current = transitionQueueRef.current.then(runTransition, runTransition);
+  }, []);
+
+  useEffect(() => {
+    transitionTo(
+      () => sessionFactoryRef.current(demo.scenario),
+      { mode: "demo", scenario: demo.scenario },
+      demo.scenario,
+    );
+  }, [demo.scenario, restartToken, transitionTo]);
 
   const onLobby = () => {
     setRestartToken((value) => value + 1);
@@ -179,40 +276,18 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   };
   const onRetry = () => setRestartToken((value) => value + 1);
   const onStartLocal = (names: [string, string]) => {
-    activeSession?.session.dispose();
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const session = new LocalSession();
-    dispatch({ type: "boot", generation });
-    setActiveSession({ session, scenario: "game-active-a", generation });
-    void session.start({ mode: "local", playerNames: names }).catch((error: unknown) => {
-      if (generationRef.current !== generation) return;
-      dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-active-a" });
-    });
+    transitionTo(() => new LocalSession(), { mode: "local", playerNames: names }, "game-active-a");
   };
   const onStartAi = (playerName: string) => {
-    activeSession?.session.dispose();
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const session = new AiSession();
-    dispatch({ type: "boot", generation });
-    setActiveSession({ session, scenario: "game-ai-thinking", generation });
-    void session.start({ mode: "ai", playerName }).catch((error: unknown) => {
-      if (generationRef.current !== generation) return;
-      dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-ai-thinking" });
-    });
+    transitionTo(() => new AiSession(), { mode: "ai", playerName }, "game-ai-thinking");
   };
-  const startOnline = (options: Extract<import("../sessions/contract").StartGameOptions, { mode: "online" }>) => {
-    activeSession?.session.dispose();
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const session = createOnlineSession();
-    dispatch({ type: "boot", generation });
-    setActiveSession({ session, scenario: "game-waiting", generation });
-    void session.start(options).catch((error: unknown) => {
-      if (generationRef.current !== generation) return;
-      dispatch({ type: "error", generation, session, snapshot: null, error: safeSessionError(error), scenario: "game-waiting" });
-    });
+  const startOnline = (options: Extract<StartGameOptions, { mode: "online" }>) => {
+    transitionTo(createOnlineSession, options, "game-waiting");
+  };
+  const startSpectator = (identity: PublicMatchIdentity) => {
+    onWatchMatch(identity);
+    if (demo.enabled) return;
+    transitionTo(createSpectatorSession, { mode: "spectator", allocationId: identity.allocationId, roomId: identity.roomId }, "game-active-a");
   };
 
   return (
@@ -241,7 +316,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 waitingRooms={waitingRooms}
                 onlineAvailable={onlineGateway.available}
                 demoEnabled={demo.enabled}
-                onWatchMatch={onWatchMatch}
+                onWatchMatch={startSpectator}
               />
             </ScreenBoundary>
           </div>
@@ -276,6 +351,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
     publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
+    allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
@@ -286,6 +362,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
     publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
+    allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
     onCreateOnline={onCreateOnline}
@@ -296,6 +373,16 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
 }
 
+/**
+ * Resolves the public match list state for the lobby.
+ *
+ * In demo mode under the "spectator-list" scenario, active match fixtures are supplied by the demo snapshot.
+ * In production (outside deterministic demos), live active-match discovery via the single-provider
+ * lobby stream (OttLobbyStreamServer) remains BLOCKED on the Task 7 upstream runtime gate.
+ *
+ * Rather than polling the HTTP control endpoint (which violates the single-provider lifecycle boundary),
+ * this cleanly reports "unavailable" without crashing or misleading the user.
+ */
 function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario): PublicMatchListState {
   if (demoEnabled && scenario === "spectator-list") return { status: "ready", matches: snapshot.publicMatches ?? [] };
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };

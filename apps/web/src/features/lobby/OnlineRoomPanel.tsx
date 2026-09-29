@@ -19,6 +19,7 @@ export interface OnlineRoomPanelProps {
   readonly onJoin: (playerName: string, roomId: string) => void;
   readonly onWatch?: (identity: PublicMatchIdentity) => void;
   readonly onRetryRooms?: () => void;
+  readonly allowDemoWatch?: boolean;
 }
 
 export function OnlineRoomPanel({
@@ -32,12 +33,14 @@ export function OnlineRoomPanel({
   onJoin,
   onWatch = () => undefined,
   onRetryRooms,
+  allowDemoWatch = false,
 }: OnlineRoomPanelProps) {
   const [uncontrolledName, setUncontrolledName] = useState(controlledName ?? "");
   const [roomId, setRoomId] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
   const name = controlledName ?? uncontrolledName;
   const isReady = availability === "online";
+  const canWatchMatches = isReady || allowDemoWatch;
 
   useEffect(() => {
     if (controlledName !== undefined) setUncontrolledName(controlledName);
@@ -79,7 +82,7 @@ export function OnlineRoomPanel({
         disabled={!isReady}
         onSelectRoom={(selectedRoomId) => { setRoomId(selectedRoomId); setRoomError(null); onJoin(name.trim(), selectedRoomId); }}
       />
-      <PublicMatchList state={publicMatches} disabled={!isReady} onWatch={onWatch} />
+      <PublicMatchList state={publicMatches} disabled={!canWatchMatches} onWatch={onWatch} />
     </Panel>
   );
 }

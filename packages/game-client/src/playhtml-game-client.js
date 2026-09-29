@@ -38,6 +38,31 @@
     return prototype === Object.prototype || prototype === null;
   }
 
+  function hasSpectatorCountChanged(prev, next) {
+    if (!Number.isInteger(next) || next < 0) return false;
+    if (!Number.isInteger(prev) || prev < 0) return true;
+    return next !== prev;
+  }
+
+  function hasConnectionChanged(prevPlayers, nextPlayers) {
+    if (!isPlainObject(nextPlayers)) return false;
+    if (!isPlainObject(prevPlayers)) return true;
+    for (const seat of ["A", "B"]) {
+      const prev = prevPlayers[seat];
+      const next = nextPlayers[seat];
+      if (Boolean(prev) !== Boolean(next)) return true;
+      if (Boolean(prev && prev.connected) !== Boolean(next && next.connected)) return true;
+      if (prev && next && prev.name !== next.name) return true;
+    }
+    return false;
+  }
+
+  function hasStatusChanged(prevStatus, nextStatus) {
+    if (typeof nextStatus !== "string") return false;
+    if (typeof prevStatus !== "string") return true;
+    return nextStatus !== prevStatus;
+  }
+
   class PlayhtmlGameClient {
     constructor(options) {
       options = options || {};
@@ -63,6 +88,10 @@
       this.attachingAllocation = false;
       this.autoResumeTimer = null;
       this.stateRevision = null;
+      this.spectatorCount = null;
+      this.players = null;
+      this.status = null;
+      this.reconnectSnapshotExpected = false;
       this.resumeRoomKey = "__last_room__";
       this.eventDedupeLimit = Number.isInteger(options.eventDedupeLimit) && options.eventDedupeLimit > 0
         ? options.eventDedupeLimit : 256;
@@ -107,6 +136,7 @@
         connection.on("open", () => this.handleOpen());
         connection.on("message", (message) => this.handleMessage(message));
         connection.on("close", () => this.handleClose());
+        connection.on("reconnecting", (event) => this.emit("reconnecting", event));
         connection.on("error", (error) => this.emit("error", error || { message: "Lỗi kết nối" }));
         if (typeof connection.connect === "function") return connection.connect();
       }).then(() => {
@@ -120,6 +150,9 @@
     handleOpen() {
       this.connected = true;
       this.reconnectAttempt = 0;
+      if (this.stateRevision !== null) {
+        this.reconnectSnapshotExpected = true;
+      }
       this.emit("open");
       if (!this.resumeContext && this.storage) {
         const roomId = normalizeRoomId(this.storage.getItem(this.resumeRoomKey));
@@ -135,6 +168,7 @@
 
     handleClose() {
       this.connected = false;
+      this.reconnectSnapshotExpected = true;
       this.emit("close");
       if (!this.intentionalClose && this.resumeContext) this.scheduleReconnect();
     }
@@ -156,20 +190,42 @@
         this.setRoomId(roomId);
         msg = { ...msg, roomId: this.roomId };
         this.you = msg.you;
-        if (msg.resumed) this.emit("resumed", msg);
+        if (msg.resumed) {
+          this.reconnectSnapshotExpected = true;
+          this.emit("resumed", msg);
+        }
       } else if (event === "state") {
         const projection = msg.state;
-        if (isPlainObject(projection) && projection.roomId !== undefined && projection.you !== undefined) {
-          if (normalizeRoomId(projection.roomId) !== normalizeRoomId(msg.roomId) ||
-            !["A", "B"].includes(projection.you) || !isPlainObject(projection.state)) return;
-          msg = {
-            ...msg,
-            status: projection.status,
-            players: projection.players,
-            events: projection.events,
-            you: projection.you,
-            state: projection.state,
-          };
+        if (isPlainObject(projection) && projection.roomId !== undefined && (projection.you !== undefined || (projection.viewer && projection.viewer.role === "spectator"))) {
+          if (normalizeRoomId(projection.roomId) !== normalizeRoomId(msg.roomId)) return;
+          if (projection.viewer && projection.viewer.role === "spectator") {
+            if (!isPlainObject(projection.state)) return;
+            msg = {
+              ...msg,
+              revision: Number.isInteger(msg.revision) ? msg.revision : projection.revision,
+              status: projection.status,
+              players: projection.players,
+              events: projection.events,
+              viewer: projection.viewer,
+              spectatorCount: projection.spectatorCount,
+              serverNow: projection.serverNow,
+              state: projection.state,
+            };
+          } else {
+            if (!["A", "B"].includes(projection.you) || !isPlainObject(projection.state)) return;
+            msg = {
+              ...msg,
+              revision: Number.isInteger(msg.revision) ? msg.revision : projection.revision,
+              status: projection.status,
+              players: projection.players,
+              events: projection.events,
+              you: projection.you,
+              viewer: projection.viewer,
+              spectatorCount: projection.spectatorCount,
+              serverNow: projection.serverNow,
+              state: projection.state,
+            };
+          }
         }
         if (!Number.isInteger(msg.revision) || msg.revision < 0 || !isPlainObject(msg.state) ||
           (msg.events !== undefined && (!Array.isArray(msg.events) || !msg.events.every((item) =>
@@ -178,15 +234,32 @@
         if (!roomId || (this.roomId && roomId !== this.roomId)) return;
         this.setRoomId(roomId);
         msg = { ...msg, roomId: this.roomId };
-        if (this.stateRevision !== null && msg.revision <= this.stateRevision) return;
+
+        const isReconnectSnapshot = Boolean(this.reconnectSnapshotExpected);
+        const isMetadataChange = hasSpectatorCountChanged(this.spectatorCount, msg.spectatorCount) ||
+          hasConnectionChanged(this.players, msg.players) ||
+          hasStatusChanged(this.status, msg.status);
+
+        if (this.stateRevision !== null) {
+          if (msg.revision < this.stateRevision) return;
+          if (msg.revision === this.stateRevision && !isReconnectSnapshot && !isMetadataChange) return;
+        }
+
+        this.reconnectSnapshotExpected = false;
         this.stateRevision = msg.revision;
         this.you = msg.you || this.you;
         this.state = msg.state;
+        if (msg.spectatorCount !== undefined) this.spectatorCount = msg.spectatorCount;
+        if (msg.players !== undefined) this.players = msg.players;
+        if (msg.status !== undefined) this.status = msg.status;
       } else if (event === "left") {
         this.clearResume();
         this.roomId = null;
         this.you = null;
         this.state = null;
+        this.spectatorCount = null;
+        this.players = null;
+        this.status = null;
         this.resetOrdering();
       } else if (event === "error" && this.resumeContext &&
         (msg.code === "invalid_token" || msg.code === "resume_rejected") &&
@@ -239,6 +312,7 @@
       this.intentionalClose = false;
       this.cancelAutoResume();
       this.clearResume();
+      this.resetOrdering();
       this.setRoomId(roomId);
       this.you = null;
       this.state = null;
@@ -265,6 +339,7 @@
       }
       this.intentionalClose = false;
       this.cancelAutoResume();
+      this.reconnectSnapshotExpected = true;
       this.resumeContext = { roomId, resumeCredential, allocationId: metadata.allocationId, seat: metadata.seat };
       const attempt = this.resumeContext;
       this.setRoomId(roomId);
@@ -321,6 +396,7 @@
       }
       const roomId = normalizeRoomId(allocation.room);
       this.setRoomId(roomId);
+      if (this.stateRevision !== null) this.reconnectSnapshotExpected = true;
       this.resumeContext = {
         roomId,
         resumeCredential: allocation.resumeCredential,
@@ -342,6 +418,28 @@
         this.attachingAllocation = false;
       }
     }
+
+    spectate(ticket) {
+      if (!this.roomId) return false;
+      if (this.stateRevision !== null) this.reconnectSnapshotExpected = true;
+      return this.send("spectate", { roomId: this.roomId, ticket });
+    }
+
+    async attachSpectator(allocation) {
+      if (!allocation || typeof allocation.room !== "string" || typeof allocation.ticket !== "string" || typeof allocation.allocationId !== "string") {
+        throw new Error("Phản hồi phân bổ phòng không hợp lệ");
+      }
+      const roomId = normalizeRoomId(allocation.room);
+      this.setRoomId(roomId);
+      this.intentionalClose = false;
+      if (this.stateRevision !== null) this.reconnectSnapshotExpected = true;
+      this.clearResume();
+      const bootstrap = this.playhtmlBootstrap || global.OTT_PLAYHTML_BOOTSTRAP;
+      if (typeof bootstrap === "function") await bootstrap({ host: this.playhtmlHost, room: allocation.room });
+      if (!this.connected) await this.connect();
+      return this.send("spectate", { roomId, ticket: allocation.ticket });
+    }
+
     move(from, to) {
       if (!validPoint(from) || !validPoint(to)) {
         this.emit("error", { message: "Tọa độ không hợp lệ" });
@@ -359,6 +457,9 @@
       this.roomId = null;
       this.you = null;
       this.state = null;
+      this.spectatorCount = null;
+      this.players = null;
+      this.status = null;
       this.resetOrdering();
       return sent;
     }
@@ -384,6 +485,10 @@
     }
     resetOrdering() {
       this.stateRevision = null;
+      this.spectatorCount = null;
+      this.players = null;
+      this.status = null;
+      this.reconnectSnapshotExpected = false;
       this.seenEventIds.clear();
       this.seenEventQueue = [];
     }

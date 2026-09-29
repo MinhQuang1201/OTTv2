@@ -8,7 +8,7 @@ import {
   parseOttMessage,
   type OttCommand,
 } from "../../../../packages/protocol/src/index.js";
-import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
+import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
 import { DurableRoomAdapter, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
 
 export interface OttCommandHandler {
@@ -89,6 +89,10 @@ export class OttGameServer extends YServer {
       return new Response("Not found", { status: 404 });
     }
     return super["fetch"](request);
+  }
+
+  protected now(): number {
+    return Date.now();
   }
 
   private transaction<T>(callback: (storage: DurableObjectTransaction) => Promise<T>): Promise<T> {
@@ -216,7 +220,7 @@ export class OttGameServer extends YServer {
   }
 
   private async dispatchOttMessage(connection: Connection, message: string): Promise<void> {
-    const now = Date.now();
+    const now = this.now();
     const previous = this.lastOttPacketMs.get(connection);
     this.lastOttPacketMs.set(connection, now);
     if (previous !== undefined && now - previous < MIN_OTT_PACKET_INTERVAL_MS) return;
@@ -225,6 +229,10 @@ export class OttGameServer extends YServer {
     // Non-OTT custom messages are intentionally isolated from upstream handlers.
     if (!parsed.ok) return;
     const command = parsed.value;
+    if (command.type === "ott:spectate" && this.ottEnv.OTT_SPECTATOR_ENABLED !== "true") {
+      this.sendError(connection, command.roomId, "spectate_rejected");
+      return;
+    }
     const role = command.type === "ott:attach" ? "player" : command.type === "ott:spectate" ? "spectator" : null;
     const reservation = role ? this.reserveRole(connection, role) : null;
     if (role && !reservation) {
@@ -455,6 +463,11 @@ export class OttGameServer extends YServer {
   }
 
   private async attachSpectator(connection: Connection, command: Extract<OttCommand, { type: "ott:spectate" }>, generation?: number): Promise<boolean> {
+    if (this.ottEnv.OTT_SPECTATOR_ENABLED !== "true") {
+      this.releasePendingRole(connection, generation);
+      this.sendError(connection, command.roomId, "spectate_rejected");
+      return false;
+    }
     const allocationId = await this.ctx.storage.get<string>("allocationId");
     const roomId = await this.ctx.storage.get<string>("roomId");
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return false;
@@ -463,6 +476,14 @@ export class OttGameServer extends YServer {
       this.sendError(connection, command.roomId, "spectate_rejected");
       return false;
     }
+    const adapter = await this.loadRoom();
+    if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return false;
+    if (!adapter || adapter.unavailable || !adapter.room || adapter.room.status !== "playing") {
+      this.releasePendingRole(connection, generation);
+      this.sendError(connection, command.roomId, "room_unavailable");
+      return false;
+    }
+    const now = this.now();
     const attachmentKey = this.attachmentKey(connection);
     const pending: AttachmentMetadata = { phase: "pending", role: "spectator", nonce: "" };
     const result = await verifyCapabilityTransaction(this.ottEnv.OTT_INTERNAL_SECRET, command.ticket, {
@@ -471,10 +492,15 @@ export class OttGameServer extends YServer {
       purpose: "spectate",
       role: "spectator",
     }, (callback) => this.transaction(callback), async (payload, storage) => {
+      await purgeExpiredNonces(storage, {
+        now,
+        prefixes: ["spectate-nonce", "attach-nonce"],
+        retainNonces: this.identityNonces.values(),
+      });
       pending.nonce = payload.nonce;
       await storage.put(attachmentKey, pending);
       return { accepted: true, value: true };
-    }, { noncePrefix: "spectate-nonce" });
+    }, { noncePrefix: "spectate-nonce", now });
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return false;
     if (!result.ok) {
       this.releasePendingRole(connection, generation);
@@ -483,6 +509,9 @@ export class OttGameServer extends YServer {
       }
       this.sendError(connection, command.roomId, result.reason === "replay" ? "spectate_replayed" : "spectate_rejected");
       return false;
+    }
+    try { await adapter.scheduleAlarm(); } catch {
+      // Nonce cleanup is best-effort; attachment authority remains durable.
     }
     try {
       await this.ctx.storage.put(attachmentKey, {
@@ -574,26 +603,113 @@ export class OttGameServer extends YServer {
     }
   }
 
-  private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined): Promise<boolean> {
+  private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined, excluded?: Connection): Promise<boolean> {
     const count = await this.spectatorCount();
-    const delivered = await Promise.all([...this.identities.keys()].map((connection) => this.sendProjection(connection, adapter, payload, count)));
-    return delivered.every(Boolean);
+    const delivered = await Promise.allSettled([...this.identities.keys()]
+      .filter((connection) => connection !== excluded)
+      .map((connection) => this.sendProjection(connection, adapter, payload, count)));
+    return delivered.every((result) => result.status === "fulfilled" && result.value);
+  }
+
+  private async publishPublicSummary(adapter: DurableRoomAdapter): Promise<void> {
+    if (this.ottEnv.OTT_SPECTATOR_ENABLED !== "true") return;
+    if (!this.ottEnv.OTT_LOBBY || !this.ottEnv.OTT_INTERNAL_SECRET) return;
+    const allocationId = await this.ctx.storage.get<string>("allocationId");
+    const roomId = await this.ctx.storage.get<string>("roomId");
+    if (!allocationId || !roomId || !adapter.room || !adapter.lastPayload) return;
+
+    let sequence = 0;
+    try {
+      sequence = await this.transaction(async (storage) => {
+        const current = (await storage.get<number>("public-summary-sequence")) ?? 0;
+        const next = current + 1;
+        await storage.put("public-summary-sequence", next);
+        return next;
+      });
+    } catch {
+      return;
+    }
+
+    const payload = adapter.lastPayload as Record<string, unknown>;
+    const spectatorCount = await this.spectatorCount();
+    const room = adapter.room;
+    const now = typeof room?.now === "function" ? room.now() : Date.now();
+
+    if (typeof room?.settleClock === "function") {
+      try {
+        room.settleClock(now, { commit: false });
+      } catch {
+        // Mock rooms or immutable states might not support settleClock
+      }
+    }
+
+    const playerA = room?.players?.A ?? (payload?.players as any)?.A;
+    const playerB = room?.players?.B ?? (payload?.players as any)?.B;
+
+    const clockState = room?.state?.clock ?? (payload?.state as any)?.clock;
+    const remainingA = clockState?.remainingMs?.A ?? (room as any)?.clock?.remainingA ?? 0;
+    const remainingB = clockState?.remainingMs?.B ?? (room as any)?.clock?.remainingB ?? 0;
+
+    let runningSeat: "A" | "B" | null = null;
+    if (clockState && "runningSeat" in clockState) {
+      runningSeat = (clockState.runningSeat === "A" || clockState.runningSeat === "B") ? clockState.runningSeat : null;
+    } else if (room?.state?.turn === "A" || room?.state?.turn === "B") {
+      runningSeat = room.state.turn;
+    } else if ((payload?.state as any)?.turn === "A" || (payload?.state as any)?.turn === "B") {
+      runningSeat = (payload.state as any).turn;
+    } else if ((room as any)?.runningSeat === "A" || (room as any)?.runningSeat === "B") {
+      runningSeat = (room as any).runningSeat;
+    }
+
+    const summary = {
+      allocationId,
+      roomId,
+      status: "playing",
+      players: {
+        A: {
+          seat: "A",
+          name: playerA?.name ?? (room as any)?.playerA?.name ?? "Người chơi A",
+          connected: Boolean(playerA?.connected ?? (room as any)?.playerA?.connected),
+          remainingMs: remainingA,
+        },
+        B: {
+          seat: "B",
+          name: playerB?.name ?? (room as any)?.playerB?.name ?? "Người chơi B",
+          connected: Boolean(playerB?.connected ?? (room as any)?.playerB?.connected),
+          remainingMs: remainingB,
+        },
+      },
+      spectatorCount,
+      serverNow: now,
+      runningSeat,
+    };
+
+    try {
+      const lobby = this.ottEnv.OTT_LOBBY.get(this.ottEnv.OTT_LOBBY.idFromName("lobby"));
+      await lobby.fetch(internalRequest(this.ottEnv.OTT_INTERNAL_SECRET, "/internal/active-update", {
+        allocationId,
+        roomId,
+        version: {
+          roomRevision: (payload.revision as number) ?? 0,
+          summarySequence: sequence,
+        },
+        summary,
+      }));
+    } catch {
+      // Non-fatal
+    }
   }
 
   private async publishCommitted(adapter: DurableRoomAdapter, outcome: CommittedRoomOutcome): Promise<void> {
     if (!outcome.terminalReason) {
       await this.broadcastState(adapter, outcome.payload);
+      await this.publishPublicSummary(adapter);
       return;
     }
-    let projected = false;
     try {
-      projected = await this.broadcastState(adapter, outcome.payload);
+      await this.broadcastState(adapter, outcome.payload);
     } catch {
-      projected = false;
-    }
-    if (!projected) {
-      await adapter.scheduleTerminalRetry(outcome.terminalReason);
-      return;
+      // Best-effort terminal broadcast failure must not block terminalization or Lobby cleanup.
     }
     try {
       await this.terminalizeAllocation(outcome.terminalReason);
@@ -605,18 +721,23 @@ export class OttGameServer extends YServer {
   }
 
   private async publishSpectatorInitial(connection: Connection, generation?: number): Promise<OttHandlerResult | void> {
-    const adapter = await this.loadRoom();
-    if (!adapter || adapter.unavailable || !adapter.room || !adapter.lastPayload) {
+    if (this.ottEnv.OTT_SPECTATOR_ENABLED !== "true") {
       await this.clearAttachment(connection, generation);
-      return { type: "ott:error", revision: 0, error: ROOM_UNAVAILABLE };
+      return { type: "ott:error", revision: 0, error: "spectate_rejected" };
+    }
+    const adapter = await this.loadRoom();
+    if (!adapter || adapter.unavailable || !adapter.room || !adapter.lastPayload || adapter.room.status !== "playing") {
+      await this.clearAttachment(connection, generation);
+      return { type: "ott:error", revision: 0, error: "room_unavailable" };
     }
     const spectatorCount = await this.spectatorCount();
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
     const payload = adapter.lastPayload as Record<string, unknown>;
-    const projected = await this.broadcastState(adapter, payload);
-    if (!projected) return;
+    const delivered = await this.sendProjection(connection, adapter, payload, spectatorCount);
+    await this.broadcastState(adapter, payload, connection);
+    await this.publishPublicSummary(adapter);
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
-    if (!this.identities.has(connection)) return;
+    if (!delivered || !this.identities.has(connection)) return;
     return {
       type: "ott:state",
       revision: payload.revision as number,
@@ -640,6 +761,28 @@ export class OttGameServer extends YServer {
     if (!capability) return false;
     this.attachCapabilities.set(connection, { ...capability, token: command.ticket });
     return capability.seat;
+  }
+
+  async purgeExpiredNonces(now = this.now()): Promise<number> {
+    return this.transaction((storage) => purgeExpiredNonces(storage, {
+      now,
+      prefixes: ["spectate-nonce", "attach-nonce", "nonce"],
+      retainNonces: this.identityNonces.values(),
+    }));
+  }
+
+  async alarm(): Promise<void> {
+    await this.purgeExpiredNonces();
+    const adapter = await this.loadRoom();
+    if (adapter && !adapter.unavailable) {
+      try { await adapter.scheduleAlarm(); } catch {
+        // Room lifecycle alarms remain best-effort after nonce cleanup.
+      }
+    }
+    const superAlarm = (YServer.prototype as any)?.alarm;
+    if (typeof superAlarm === "function") {
+      await superAlarm.call(this);
+    }
   }
 
   protected async consumeAttachCapabilityForTest(ticket: string): Promise<boolean> {
@@ -675,10 +818,13 @@ export class OttGameServer extends YServer {
       if (!this.isLiveGeneration(connection, generation)) return;
       await this.clearAttachment(connection, generation);
       if (!this.isLiveGeneration(connection, generation)) return;
-      if (identity?.role !== "player") {
+      if (identity?.role === "spectator") {
         const adapter = await this.loadRoom();
         if (!this.isLiveGeneration(connection, generation)) return;
-        if (adapter && !adapter.unavailable && adapter.room) await this.broadcastState(adapter);
+        if (adapter && !adapter.unavailable && adapter.room) {
+          await this.broadcastState(adapter);
+          await this.publishPublicSummary(adapter);
+        }
         return;
       }
       const adapter = await this.loadRoom();

@@ -93,6 +93,7 @@ export class OnlineSession implements GameSession {
       this.allocation = options.intent === "create"
         ? await this.gateway.createRoom(options.playerName)
         : await this.gateway.joinRoom(options.playerName, options.roomId);
+      if (this.disposed) return;
       if (!this.host) throw new Error("PlayHTML host is unavailable");
       this.client = this.clientFactory({
         connectionFactory: () => this.runtime.connectionFactory(),
@@ -101,6 +102,7 @@ export class OnlineSession implements GameSession {
       });
       this.bindClient(this.client);
       await this.client.attachAllocation(this.allocation);
+      if (this.disposed) return;
     } catch (cause) {
       this.fail(error("connection_failed", clientMessage(cause, "Không thể kết nối phòng online."), true));
     }
@@ -133,7 +135,7 @@ export class OnlineSession implements GameSession {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     if (this.clockTimer !== null) this.clearIntervalFn(this.clockTimer);
@@ -143,6 +145,9 @@ export class OnlineSession implements GameSession {
     try { this.client?.close(); } catch { /* ignore close errors */ }
     this.client = null;
     this.listeners.clear();
+    if (typeof this.runtime?.dispose === "function") {
+      await this.runtime.dispose();
+    }
   }
 
   private bindClient(client: PlayhtmlGameClientLike): void {

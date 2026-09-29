@@ -1,6 +1,6 @@
-import type { WaitingRoomView } from "../../shared/model/game";
+import type { PublicMatchView, WaitingRoomView } from "../../shared/model/game";
 import { createControlRequest, type ControlRequestOptions } from "./controlRequest";
-import type { PlayhtmlAllocation } from "./globals";
+import type { PlayhtmlAllocation, PlayhtmlSpectatorAllocation } from "./globals";
 
 export type OnlineGatewayError = Error & { readonly code?: string; readonly status?: number };
 
@@ -39,6 +39,13 @@ function validateAllocation(value: unknown): PlayhtmlAllocation {
   return allocation as unknown as PlayhtmlAllocation;
 }
 
+function validateSpectatorAllocation(value: unknown): PlayhtmlSpectatorAllocation {
+  if (!value || typeof value !== "object") throw unavailableError();
+  const allocation = value as Record<string, unknown>;
+  if (typeof allocation.allocationId !== "string" || typeof allocation.room !== "string" || typeof allocation.ticket !== "string") throw unavailableError();
+  return allocation as unknown as PlayhtmlSpectatorAllocation;
+}
+
 export class OnlineLobbyGateway {
   private readonly control: ReturnType<typeof createControlRequest> | null;
 
@@ -63,5 +70,27 @@ export class OnlineLobbyGateway {
   async joinRoom(playerName: string, roomId: string): Promise<PlayhtmlAllocation> {
     if (!this.control) throw unavailableError();
     return validateAllocation(await this.control("join", { name: playerName.trim(), allocationId: roomId.trim() }));
+  }
+
+  /**
+   * Diagnostic / test control endpoint for querying active matches.
+   *
+   * Note on production architecture:
+   * Production active-match discovery is designed to use a single-provider stream connection
+   * (OttLobbyStreamServer). It is NOT integrated into the App lobby because the Task 7 upstream
+   * runtime gate remains BLOCKED.
+   *
+   * This control endpoint must NOT be polled by the App shell or UI components, as doing so
+   * would violate the single-provider lifecycle and state authority rules.
+   */
+  async listActiveMatches(): Promise<readonly PublicMatchView[]> {
+    if (!this.control) throw unavailableError();
+    const payload = await this.control<{ matches?: unknown[] }>("active", {});
+    return Array.isArray(payload?.matches) ? (payload.matches as PublicMatchView[]) : [];
+  }
+
+  async getSpectatorTicket(allocationId: string): Promise<PlayhtmlSpectatorAllocation> {
+    if (!this.control) throw unavailableError();
+    return validateSpectatorAllocation(await this.control("spectate", { allocationId: allocationId.trim() }));
   }
 }

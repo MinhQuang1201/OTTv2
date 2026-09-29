@@ -35,6 +35,9 @@ function fakeStorage(initial = {}) {
     alarms,
     async get(key) { return values.get(key); },
     async put(key, value) { values.set(key, value); },
+    async list(options = {}) {
+      return new Map([...values].filter(([key]) => !options.prefix || key.startsWith(options.prefix)));
+    },
     async setAlarm(deadline) { alarms.push(deadline); values.set("alarm", deadline); },
     async deleteAlarm() { values.set("alarm", null); },
   };
@@ -251,4 +254,37 @@ test("hydration reconciles alarm from the original absolute creator deadline", a
   assert.equal(storage.values.get("alarm"), 700);
   assert.equal(storage.values.get("creatorAttachDeadlineMs"), 700);
   assert.ok(hydrated);
+});
+
+test("hydration refreshes lastPayload after reconciling live seats", async () => {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  let now = 100;
+  const storage = fakeStorage({ creatorName: "Alice", "seat-name:B": "Bob" });
+  const adapter = await DurableRoomAdapter.create("ott-hydration-payload", storage, () => now, { reconnectGraceMs: 1000 });
+  const playerA = { id: "hydration-a", open: true, send() {} };
+  const playerB = { id: "hydration-b", open: true, send() {} };
+  await adapter.attach(playerA, "A");
+  adapter.commitAttach(playerA);
+  await adapter.attach(playerB, "B");
+  adapter.commitAttach(playerB);
+  const persistedPayload = structuredClone(adapter.lastPayload);
+
+  now = 200;
+  const hydrated = await DurableRoomAdapter.load("ott-hydration-payload", storage, () => now, { reconnectGraceMs: 1000 });
+
+  assert.ok(hydrated);
+  assert.ok(hydrated.lastPayload.revision > persistedPayload.revision);
+  assert.equal(hydrated.lastPayload.players.A.connected, false);
+  assert.equal(hydrated.lastPayload.players.B.connected, false);
+  assert.equal(hydrated.lastPayload.state.clock.runningSeat, null);
+});
+
+test("nonce expiry participates in the shared earliest alarm", async () => {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const storage = fakeStorage({ "spectate-nonce:expired-soon": 450 });
+  const adapter = await DurableRoomAdapter.create("ott-nonce-alarm", storage, () => 100);
+
+  await adapter.scheduleAlarm();
+
+  assert.equal(storage.values.get("alarm"), 450);
 });

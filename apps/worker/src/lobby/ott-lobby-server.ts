@@ -19,9 +19,12 @@ type Allocation = {
   seats: number;
   status: "initializing" | "waiting" | "joining" | "playing" | "terminal";
   creatorAttachDeadlineMs: number;
+  summary?: unknown;
+  summaryVersion?: { roomRevision: number; summarySequence: number };
 };
 const MAX_BODY = 4096;
 const DEFAULT_CREATOR_ATTACH_TTL_MS = 60_000;
+const RATE_LIMIT_RETENTION_MS = 60_000;
 
 function configuredDuration(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -34,6 +37,18 @@ function cleanName(value: unknown): string | null {
   const name = value.replace(/<[^>]*>/g, "").trim().slice(0, 32);
   return name || null;
 }
+function clientIdentity(request: Request): string {
+  const cfConnectingIp = request.headers.get("cf-connecting-ip")?.trim();
+  if (cfConnectingIp) return cfConnectingIp.replace(/[^a-zA-Z0-9.:_-]/g, "_");
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first.replace(/[^a-zA-Z0-9.:_-]/g, "_");
+  }
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp.replace(/[^a-zA-Z0-9.:_-]/g, "_");
+  return "anonymous";
+}
 function publicAllocation(item: Allocation): unknown {
   return { id: item.id, roomId: item.roomId, players: item.seats, names: item.names };
 }
@@ -45,6 +60,27 @@ export class OttLobbyServer extends DurableObject<Env> {
   private async allocations(): Promise<Allocation[]> {
     const values = await this.ctx.storage.list<Allocation>({ prefix: "allocation:" });
     return [...values.values()];
+  }
+
+  private async scheduleRateLimitSweep(now = Date.now()): Promise<void> {
+    try {
+      await this.ctx.storage.setAlarm?.(now + RATE_LIMIT_RETENTION_MS);
+    } catch {
+      // Rate-limit cleanup must not turn a valid control request into an error.
+    }
+  }
+
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    const entries = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
+    for (const [key, value] of entries) {
+      if (typeof value !== "number" || now - value >= RATE_LIMIT_RETENTION_MS) {
+        await this.ctx.storage.delete(key);
+      }
+    }
+    const remaining = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
+    if (remaining.size) await this.scheduleRateLimitSweep(now);
+    else await this.ctx.storage.deleteAlarm?.();
   }
 
   private async rollbackJoinReservation(id: string): Promise<void> {
@@ -66,18 +102,32 @@ export class OttLobbyServer extends DurableObject<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname === "/internal/terminalize" && request.method === "POST") {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === "/internal/terminalize" && request.method === "POST") {
       return this.terminalize(request);
     }
-    const action = new URL(request.url).pathname.split("/").filter(Boolean).at(-1);
+    if (pathname === "/internal/active-update" && request.method === "POST") {
+      return this.handleActiveUpdate(request);
+    }
+    if (pathname === "/internal/public-active-snapshot") {
+      return this.handlePublicActiveSnapshot(request);
+    }
+    const action = pathname.split("/").filter(Boolean).at(-1);
     const body = await this.read(request);
-    if (!body || !["create", "list", "join", "resume"].includes(action ?? "")) return json({ error: "invalid_request" }, 400);
+    if (!body || !["create", "list", "join", "resume", "active", "spectate"].includes(action ?? "")) return json({ error: "invalid_request" }, 400);
     const now = Date.now();
-    const last = await this.ctx.storage.get<number>("rate:last");
+    const clientKey = clientIdentity(request);
+    const rateKey = `rate:last:${action}:${clientKey}`;
+    const last = await this.ctx.storage.get<number>(rateKey);
     if (last !== undefined && now - last < 40) return json({ error: "rate_limited" }, 429);
-    await this.ctx.storage.put("rate:last", now);
+    await this.ctx.storage.put(rateKey, now);
+    await this.scheduleRateLimitSweep(now);
     const list = await this.allocations();
     if (action === "list") return json({ rooms: list.filter((item) => item.status === "waiting").map(publicAllocation) });
+    if (action === "active") {
+      if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
+      return json({ matches: list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary) });
+    }
 
     const name = cleanName(body.name);
     if (action === "create") {
@@ -141,6 +191,22 @@ export class OttLobbyServer extends DurableObject<Env> {
     }
 
     const id = typeof body.allocationId === "string" ? body.allocationId : "";
+    if (action === "spectate") {
+      if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
+      if (!id) return json({ error: "invalid_request" }, 400);
+      const allocation = await this.ctx.storage.get<Allocation>(`allocation:${id}`);
+      if (!allocation || allocation.status !== "playing") return json({ error: "not_available" }, 409);
+      const ticketNonce = createCapabilityNonce();
+      const ticket = await issueCapability(this.env.OTT_INTERNAL_SECRET, {
+        allocationId: id,
+        roomId: allocation.roomId,
+        purpose: "spectate",
+        role: "spectator",
+        now,
+        nonce: ticketNonce,
+      });
+      return json({ allocationId: id, room: allocation.roomId, ticket });
+    }
     if (action === "resume") {
       if (!id || typeof body.resumeCredential !== "string") return json({ error: "resume_rejected" }, 401);
       const resumed = await this.transaction(async (storage) => {
@@ -229,6 +295,74 @@ export class OttLobbyServer extends DurableObject<Env> {
     return json({ error: "invalid_request" }, 400);
   }
 
+  private async notifyLobbyStream(catalogRevision: number, matches: unknown[]): Promise<void> {
+    if (!this.env.Lobby || !this.env.OTT_INTERNAL_SECRET) return;
+    try {
+      const stream = this.env.Lobby.get(this.env.Lobby.idFromName("ott-lobby-public"));
+      await stream.fetch(internalRequest(this.env.OTT_INTERNAL_SECRET, "/internal/active-update", {
+        catalogRevision,
+        matches,
+      }));
+    } catch {
+      // non-fatal
+    }
+  }
+
+  private async handleActiveUpdate(request: Request): Promise<Response> {
+    if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    let body: {
+      allocationId?: string;
+      roomId?: string;
+      version?: { roomRevision: number; summarySequence: number };
+      summary?: unknown;
+    };
+    try { body = await request.json(); } catch { return new Response("Bad request", { status: 400 }); }
+    if (typeof body.allocationId !== "string" || typeof body.roomId !== "string" || !body.version || typeof body.version.roomRevision !== "number" || typeof body.version.summarySequence !== "number" || !body.summary) {
+      return new Response("Bad request", { status: 400 });
+    }
+
+    const result = await this.transaction(async (storage) => {
+      const key = `allocation:${body.allocationId}`;
+      const allocation = await storage.get<Allocation>(key);
+      if (!allocation || allocation.roomId !== body.roomId || allocation.status === "terminal") {
+        return null;
+      }
+      const existing = allocation.summaryVersion;
+      if (existing) {
+        const isNewer =
+          body.version!.roomRevision > existing.roomRevision ||
+          (body.version!.roomRevision === existing.roomRevision && body.version!.summarySequence > existing.summarySequence);
+        if (!isNewer) return null;
+      }
+      allocation.summary = body.summary;
+      allocation.summaryVersion = body.version;
+      await storage.put(key, allocation);
+
+      const catalogRevision = ((await storage.get<number>("public-catalog-revision")) ?? 0) + 1;
+      await storage.put("public-catalog-revision", catalogRevision);
+      return catalogRevision;
+    });
+
+    if (result !== null) {
+      const list = await this.allocations();
+      const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
+      await this.notifyLobbyStream(result, matches);
+    }
+    return Response.json({ ok: true });
+  }
+
+  private async handlePublicActiveSnapshot(request: Request): Promise<Response> {
+    if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    const catalogRevision = (await this.ctx.storage.get<number>("public-catalog-revision")) ?? 0;
+    const list = await this.allocations();
+    const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
+    return Response.json({ catalogRevision, matches });
+  }
+
   private async terminalize(request: Request): Promise<Response> {
     if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
       return new Response("Forbidden", { status: 403 });
@@ -245,11 +379,21 @@ export class OttLobbyServer extends DurableObject<Env> {
       if (!allocation || allocation.roomId !== body.roomId) return "not_found";
       if (allocation.status === "terminal") return "already_terminal";
       allocation.status = "terminal";
+      delete allocation.summary;
+      delete allocation.summaryVersion;
       await storage.put(key, allocation);
       await deleteOwnerCredentials(storage, body.allocationId!);
-      return "terminalized";
+      const catalogRevision = ((await storage.get<number>("public-catalog-revision")) ?? 0) + 1;
+      await storage.put("public-catalog-revision", catalogRevision);
+      return { status: "terminalized", catalogRevision };
     });
     if (result === "not_found") return new Response("Not found", { status: 404 });
+    if (typeof result === "object" && result.status === "terminalized") {
+      const list = await this.allocations();
+      const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
+      await this.notifyLobbyStream(result.catalogRevision, matches);
+      return Response.json({ ok: true, result: result.status });
+    }
     return Response.json({ ok: true, result });
   }
 }

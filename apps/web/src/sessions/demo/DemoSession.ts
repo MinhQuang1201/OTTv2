@@ -58,12 +58,13 @@ export class DemoSession implements GameSession {
   }
 
   getLegalMoves(from: Position): readonly Position[] {
-    if (this.disposed || this.snapshot.result !== null || this.snapshot.phase === "finished") return [];
+    if (this.disposed || !this.snapshot.capabilities.canMove || this.snapshot.result !== null || this.snapshot.phase === "finished") return [];
     return this.allowedMoves.filter((move) => samePosition(move.from, from)).map((move) => ({ ...move.to }));
   }
 
   async move(from: Position, to: Position): Promise<MoveResult> {
     if (this.disposed) return { accepted: false, error: { code: "session_failed", message: "Phiên chơi đã kết thúc.", retryable: false } };
+    if (!this.snapshot.capabilities.canMove) return { accepted: false, error: { code: "invalid_move", message: "Khán giả không thể đi quân.", retryable: false } };
     if (this.snapshot.result !== null || this.snapshot.phase === "finished") {
       return { accepted: false, error: { code: "session_failed", message: "Ván đấu đã kết thúc.", retryable: false } };
     }

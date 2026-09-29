@@ -52,5 +52,5 @@ export interface GameSession {
   getLegalMoves(from: Position): readonly Position[];
   move(from: Position, to: Position): Promise<MoveResult>;
   leave(): Promise<void>;
-  dispose(): void;
+  dispose(): Promise<void> | void;
 }

@@ -97,6 +97,15 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
       if (this.failDelete) throw new Error("storage delete failed");
       values.delete(key);
     },
+    async list(options = {}) {
+      const out = new Map();
+      for (const [key, value] of values) {
+        if (!options.prefix || key.startsWith(options.prefix)) {
+          out.set(key, value);
+        }
+      }
+      return out;
+    },
     async transaction(callback) {
       if (this.failTransaction) throw new Error("transaction failed");
       const pending = new Map(values);
@@ -104,6 +113,15 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
         get: async (key) => pending.get(key),
         put: async (key, value) => pending.set(key, value),
         delete: async (key) => pending.delete(key),
+        list: async (options = {}) => {
+          const out = new Map();
+          for (const [key, value] of pending) {
+            if (!options.prefix || key.startsWith(options.prefix)) {
+              out.set(key, value);
+            }
+          }
+          return out;
+        },
       });
       values.clear();
       for (const [key, value] of pending) values.set(key, value);
@@ -115,7 +133,7 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
   };
   const server = Object.create(prototype);
   server.ctx = { storage };
-  server.ottEnv = { OTT_INTERNAL_SECRET: "test-secret" };
+  server.ottEnv = { OTT_INTERNAL_SECRET: "test-secret", OTT_SPECTATOR_ENABLED: "true" };
   server.lastOttPacketMs = new Map();
   server.identities = new Map();
   server.pendingIdentities = new Map();
@@ -1247,7 +1265,7 @@ test("spectator attach fans out the updated count to existing players and specta
   assert.deepEqual(states.map((message) => message.state.spectatorCount), [2, 2, 2]);
 });
 
-test("terminal projection failure schedules cleanup retry without marking Lobby complete", async () => {
+test("terminal projection failure proceeds with Lobby terminalization and marker", async () => {
   const { OttGameServer } = await gameModule();
   const fixture = gameFixture(OttGameServer.prototype);
   const calls = [];
@@ -1266,10 +1284,10 @@ test("terminal projection failure schedules cleanup retry without marking Lobby 
     terminalReason: "goal",
   });
 
-  assert.deepEqual(calls, [["retry", "goal"]]);
+  assert.deepEqual(calls, ["lobby", "marker"]);
 });
 
-test("bundled terminal send failure retries before Lobby cleanup and marker", async () => {
+test("bundled terminal send failure proceeds with Lobby terminalization and marker", async () => {
   const { OttGameServer } = await gameModule();
   const fixture = gameFixture(OttGameServer.prototype);
   const spectator = connection("terminal-send-retry-spectator");
@@ -1288,13 +1306,15 @@ test("bundled terminal send failure retries before Lobby cleanup and marker", as
   fixture.server.sendCustomMessage = () => { throw new Error("recipient send failed"); };
 
   await fixture.server.publishCommitted(adapter, outcome);
-  assert.deepEqual(calls, [["retry", "goal"]]);
+  assert.deepEqual(calls, ["lobby", "marker"]);
 
-  fixture.server.sendCustomMessage = (_connection, message) => {
-    calls.push(JSON.parse(message).type);
+  calls.length = 0;
+  fixture.server.terminalizeAllocation = async () => {
+    calls.push("lobby");
+    throw new Error("Lobby unavailable");
   };
   await fixture.server.publishCommitted(adapter, outcome);
-  assert.deepEqual(calls, [["retry", "goal"], "ott:state", "lobby", "marker"]);
+  assert.deepEqual(calls, ["lobby", ["retry", "goal"]]);
 });
 
 test("spectator promotion requires attachment serialization and cannot reuse a failed role", async () => {
@@ -1377,6 +1397,52 @@ test("spectator initial send failure retains the authenticated identity", async 
   assert.equal(closed, false);
 });
 
+test("spectator admission survives a failed projection to another connection", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const existing = connection("existing-player");
+  const spectator = connection("new-spectator");
+  fixture.server.identities.set(existing, { role: "player", seat: "A" });
+  fixture.server.identityNonces.set(existing, "existing-player-nonce");
+  fixture.values.set("attach-nonce:existing-player-nonce", Date.now() + 10_000);
+  fixture.server.roomLoad = Promise.resolve({
+    roomId: "ott-room-task6", room: { revision: 4, status: "playing", state: {} },
+    lastPayload: { roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 4, players: { A: null, B: null }, state: {}, events: [] },
+  });
+  let summaryPublished = false;
+  fixture.server.publishPublicSummary = async () => { summaryPublished = true; };
+  fixture.server.sendCustomMessage = (target, message) => {
+    if (target === existing) throw new Error("stale socket");
+    fixture.messages.push(JSON.parse(message));
+  };
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce: "spectator-fanout-01",
+  });
+
+  await fixture.server.dispatchOttMessage(spectator, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token }));
+
+  assert.equal(fixture.server.identities.has(spectator), true);
+  assert.equal(summaryPublished, true);
+  assert.equal(fixture.messages.some((message) => message.type === "ott:state"), true);
+});
+
+test("unauthenticated close does not rebroadcast room state", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const connectionWithoutIdentity = connection("unauthenticated");
+  let broadcasts = 0;
+  let summaries = 0;
+  fixture.server.roomLoad = Promise.resolve({ room: {}, unavailable: false });
+  fixture.server.broadcastState = async () => { broadcasts++; };
+  fixture.server.publishPublicSummary = async () => { summaries++; };
+
+  await fixture.server.handleClose(connectionWithoutIdentity, undefined);
+
+  assert.equal(broadcasts, 0);
+  assert.equal(summaries, 0);
+});
+
 test("committed terminal projection is sent before Lobby cleanup and marker persistence", async () => {
   const { OttGameServer } = await gameModule();
   const fixture = gameFixture(OttGameServer.prototype);
@@ -1428,6 +1494,310 @@ test("committed terminal projection is sent before Lobby cleanup and marker pers
   });
   assert.deepEqual(retryOrder, ["ott:state", "lobby-terminalize", "retry-alarm"]);
   assert.equal(fixture.values.get("terminalRetryReason"), "goal");
+});
+
+test("public match summary projection extracts correct player names, connectivity, clocks, and runningSeat", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const { Room } = require("../packages/game-core/src/room.js");
+  let currentTime = 1_000;
+  const room = new Room("ott-room-task6", { now: () => currentTime });
+  room.players.A = { name: "Alice", connected: true };
+  room.players.B = { name: "Bob", connected: false };
+  room.status = "playing";
+  room.state.clock = { remainingMs: { A: 450_000, B: 500_000 }, runningSeat: "A" };
+  room.clockAnchorMs = 1_000;
+  const adapter = {
+    roomId: "ott-room-task6",
+    room,
+    lastPayload: room.payload(),
+  };
+
+  currentTime = 1_100;
+  let updateBody = null;
+  fixture.server.ottEnv.OTT_LOBBY = {
+    idFromName() { return "lobby"; },
+    get() {
+      return {
+        async fetch(req) {
+          updateBody = JSON.parse(await req.text());
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      };
+    },
+  };
+
+  await fixture.server.publishPublicSummary(adapter);
+  assert.ok(updateBody, "Lobby active-update should be called");
+  assert.equal(updateBody.summary.players.A.name, "Alice");
+  assert.equal(updateBody.summary.players.A.connected, true);
+  assert.equal(updateBody.summary.players.A.remainingMs, 449_900);
+  assert.equal(updateBody.summary.players.B.name, "Bob");
+  assert.equal(updateBody.summary.players.B.connected, false);
+  assert.equal(updateBody.summary.players.B.remainingMs, 500_000);
+  assert.equal(updateBody.summary.runningSeat, "A");
+  assert.equal(updateBody.summary.status, "playing");
+});
+
+test("spectator ticket cannot attach to terminal room and does not consume ticket nonce", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 4, status: "done", state: { winner: "A", reason: "goal" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "done", serverNow: 100, revision: 4,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { winner: "A", reason: "goal" }, events: [],
+    },
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const spectator = connection("spectator-terminal-test");
+  const nonce = "spectator-terminal-nonce-001";
+  const token = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator", nonce,
+  });
+
+  await fixture.server.dispatchOttMessage(spectator, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token,
+  }));
+
+  assert.equal(fixture.server.identities.has(spectator), false, "Spectator identity must not be installed");
+  assert.equal(fixture.values.has(`spectate-nonce:${nonce}`), false, "Nonce must not be consumed for terminal room");
+  const lastMsg = fixture.messages.at(-1);
+  assert.equal(lastMsg.type, "ott:error");
+  assert.equal(lastMsg.error, "room_unavailable");
+});
+
+test("purgeExpiredNonces removes expired capability nonces while preserving unexpired nonces and active live attachments", async () => {
+  const { purgeExpiredNonces } = await authModule();
+  assert.equal(typeof purgeExpiredNonces, "function", "purgeExpiredNonces must be exported from internal-auth");
+
+  const values = new Map([
+    ["spectate-nonce:expired-unretained", 1000],
+    ["spectate-nonce:expired-retained", 1000],
+    ["spectate-nonce:unexpired", 3000],
+    ["attach-nonce:expired", 1000],
+    ["nonce:expired", 1000],
+    ["unrelated:key", "keep-me"],
+  ]);
+  const storage = {
+    async get(k) { return values.get(k); },
+    async put(k, v) { values.set(k, v); },
+    async delete(k) { values.delete(k); },
+    async list(opts = {}) {
+      const out = new Map();
+      for (const [k, v] of values) {
+        if (!opts.prefix || k.startsWith(opts.prefix)) out.set(k, v);
+      }
+      return out;
+    },
+  };
+
+  const purged = await purgeExpiredNonces(storage, {
+    now: 2000,
+    retainNonces: ["expired-retained"],
+  });
+
+  assert.equal(purged, 3, "Must purge exactly 3 expired unretained nonces");
+  assert.equal(values.has("spectate-nonce:expired-unretained"), false);
+  assert.equal(values.has("attach-nonce:expired"), false);
+  assert.equal(values.has("nonce:expired"), false);
+  assert.equal(values.has("spectate-nonce:expired-retained"), true, "Retained nonce must not be purged");
+  assert.equal(values.has("spectate-nonce:unexpired"), true, "Unexpired nonce must not be purged");
+  assert.equal(values.get("unrelated:key"), "keep-me", "Unrelated keys must not be touched");
+});
+
+test("OttGameServer purges expired capability nonces during repeated attach/close cycles while keeping storage bounded", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: { turn: "A" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 1,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+
+  let currentTime = 100_000;
+  fixture.server.now = () => currentTime;
+
+  // Cycle 1: Spectator 1 attaches at t = 100_000, ticket expires at 160_000
+  const spec1 = connection("spectator-bounded-1");
+  const token1 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-1-000001", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec1, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token1,
+  }));
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-1-000001"), true);
+
+  // Spectator 1 disconnects/closes
+  await fixture.server.handleClose(spec1, { role: "spectator" });
+  assert.equal(fixture.server.identities.has(spec1), false);
+
+  // Advance time past ticket 1 expiration
+  currentTime = 170_000;
+
+  // Cycle 2: Spectator 2 attaches at t = 170_000, ticket expires at 230_000
+  const spec2 = connection("spectator-bounded-2");
+  const token2 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-2-000002", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec2, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+
+  // Nonce 1 MUST be purged on attach, Nonce 2 must exist
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-1-000001"), false, "Expired cycle 1 nonce must be purged on attach");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-2-000002"), true, "Cycle 2 nonce must be stored");
+
+  // Spectator 2 disconnects
+  await fixture.server.handleClose(spec2, { role: "spectator" });
+
+  // Advance time past ticket 2 expiration
+  currentTime = 240_000;
+
+  // Cycle 3: Spectator 3 attaches
+  const spec3 = connection("spectator-bounded-3");
+  const token3 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-cycle-3-000003", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec3, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token3,
+  }));
+
+  // Nonce 2 MUST be purged, Nonce 3 must exist
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-2-000002"), false, "Expired cycle 2 nonce must be purged");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-cycle-3-000003"), true, "Cycle 3 nonce must be stored");
+
+  // Total spectate-nonce records in storage must be exactly 1, proving bounded storage!
+  const remainingNonces = [...fixture.values.keys()].filter((k) => k.startsWith("spectate-nonce:"));
+  assert.deepEqual(remainingNonces, ["spectate-nonce:nonce-cycle-3-000003"], "Storage must be bounded to only unexpired/live nonces");
+});
+
+test("live spectator attachment retains proof and spectator count even after capability ticket TTL expires", async () => {
+  const { OttGameServer } = await gameModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const adapter = {
+    roomId: "ott-room-task6",
+    room: { revision: 1, status: "playing", state: { turn: "A" } },
+    lastPayload: {
+      roomId: "ott-room-task6", status: "playing", serverNow: 100, revision: 1,
+      players: { A: { name: "Alice", connected: true }, B: { name: "Bob", connected: true } },
+      state: { turn: "A" }, events: [],
+    },
+    async scheduleAlarm() {},
+    async markTerminalized() {},
+  };
+  fixture.server.roomLoad = Promise.resolve(adapter);
+
+  let currentTime = 100_000;
+  fixture.server.now = () => currentTime;
+
+  // Spectator 1 attaches at t = 100_000 (ticket expires at 160_000)
+  const spec1 = connection("spectator-live-1");
+  const token1 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-1-00000001", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec1, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token1,
+  }));
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), true);
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 1);
+
+  // Time advances past ticket 1 expiration (t = 170_000), but Spectator 1 is STILL CONNECTED
+  currentTime = 170_000;
+
+  // Spectator 2 attaches at t = 170_000 (ticket expires at 230_000)
+  const spec2 = connection("spectator-live-2");
+  const token2 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-2-00000002", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec2, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+
+  // Spectator 1's nonce MUST NOT be purged because Spectator 1 is an active live attachment
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), true, "Live attachment nonce must be preserved");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-2-00000002"), true);
+  // Spectator count must be 2
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2, "Both spectators must be counted");
+
+  // Replay of unexpired token2 must be rejected with replay error
+  fixture.server.lastOttPacketMs.delete(spec2);
+  const spec2Replay = connection("spectator-live-2-replay");
+  await fixture.server.dispatchOttMessage(spec2Replay, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token2,
+  }));
+  assert.equal(fixture.messages.at(-1).error, "spectate_replayed", "Unexpired token replay must be rejected");
+
+  // Now Spectator 1 closes connection
+  await fixture.server.handleClose(spec1, { role: "spectator" });
+  assert.equal(fixture.server.identities.has(spec1), false);
+
+  // Advance time further and attach Spectator 3
+  currentTime = 180_000;
+  const spec3 = connection("spectator-live-3");
+  const token3 = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "spectate", role: "spectator",
+    nonce: "nonce-live-3-00000003", now: currentTime, ttlMs: 60_000,
+  });
+  await fixture.server.dispatchOttMessage(spec3, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:spectate", ticket: token3,
+  }));
+
+  // Now Spectator 1's nonce MUST be purged since Spectator 1 is closed and ticket expired
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-1-00000001"), false, "Closed expired spectator nonce must now be purged");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-2-00000002"), true, "Live spec2 nonce must still exist");
+  assert.equal(fixture.values.has("spectate-nonce:nonce-live-3-00000003"), true, "Fresh spec3 nonce must exist");
+  assert.equal(fixture.messages.at(-1).state.spectatorCount, 2, "Spectator count must now reflect 2 active spectators");
+});
+
+test("OttGameServer alarm sweeps expired capability nonces", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.now = () => 500_000;
+
+  // Manually seed expired and unexpired nonces
+  fixture.values.set("spectate-nonce:alarm-expired-1", 400_000);
+  fixture.values.set("spectate-nonce:alarm-expired-2", 450_000);
+  fixture.values.set("spectate-nonce:alarm-unexpired", 600_000);
+  fixture.values.set("attach-nonce:alarm-expired", 400_000);
+  fixture.values.set("attach-nonce:alarm-unexpired", 600_000);
+
+  assert.equal(typeof fixture.server.alarm, "function", "OttGameServer must define alarm method");
+  await fixture.server.alarm();
+
+  assert.equal(fixture.values.has("spectate-nonce:alarm-expired-1"), false);
+  assert.equal(fixture.values.has("spectate-nonce:alarm-expired-2"), false);
+  assert.equal(fixture.values.has("attach-nonce:alarm-expired"), false);
+  assert.equal(fixture.values.has("spectate-nonce:alarm-unexpired"), true);
+  assert.equal(fixture.values.has("attach-nonce:alarm-unexpired"), true);
+});
+
+test("OttGameServer reschedules the next room or nonce alarm after purging", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  let scheduled = 0;
+  fixture.server.roomLoad = Promise.resolve({ unavailable: false, scheduleAlarm: async () => { scheduled++; } });
+
+  await fixture.server.alarm();
+
+  assert.equal(scheduled, 1);
 });
 
 test("Worker uses separate Lobby and Game DO bindings without a process registry", () => {

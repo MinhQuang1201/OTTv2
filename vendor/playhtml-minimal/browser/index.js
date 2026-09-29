@@ -46,7 +46,7 @@ function createMinimalPlayhtml({ ready, provider }) {
     };
   }
 
-  return { ready, createCustomMessageChannel };
+  return { ready, createCustomMessageChannel, provider };
 }
 
 module.exports = { createMinimalPlayhtml };

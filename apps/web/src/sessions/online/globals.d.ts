@@ -15,6 +15,12 @@ export interface PlayhtmlAllocation {
   readonly resumeCredential: string;
 }
 
+export interface PlayhtmlSpectatorAllocation {
+  readonly allocationId: string;
+  readonly room: string;
+  readonly ticket: string;
+}
+
 export interface PlayhtmlGameClientLike {
   on(event: string, listener: (payload?: any) => void): (() => void) | void;
   attachAllocation(allocation: PlayhtmlAllocation): Promise<unknown>;
@@ -35,12 +41,19 @@ export interface PlayhtmlGameClientConstructor {
 }
 
 export interface PlayhtmlRuntimeLike {
-  configure(options: { host: string; room: string }): void;
+  configure(options: { host: string; room: string; party?: "main" | "lobby" }): void;
   init(): { readonly ready: Promise<unknown>; createCustomMessageChannel(): unknown; close?(): void };
+  reset?(): Promise<void> | void;
+}
+
+export interface PlayhtmlBootstrapInstance {
+  (config: { host: string; room: string; party?: "main" | "lobby" }): Promise<unknown>;
+  bootstrap?(config: { host: string; room: string; party?: "main" | "lobby" }): Promise<unknown>;
+  dispose?(): Promise<void> | void;
 }
 
 export interface PlayhtmlBootstrapLike {
-  createBootstrap(options: { runtime: PlayhtmlRuntimeLike; globalObject?: typeof globalThis }): (config: { host: string; room: string }) => Promise<unknown>;
+  createBootstrap(options: { runtime: PlayhtmlRuntimeLike; globalObject?: typeof globalThis }): PlayhtmlBootstrapInstance;
 }
 
 declare global {

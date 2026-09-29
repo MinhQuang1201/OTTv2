@@ -11323,7 +11323,7 @@ ${reason}`);
             }
           };
         }
-        return { ready, createCustomMessageChannel };
+        return { ready, createCustomMessageChannel, provider };
       }
       module.exports = { createMinimalPlayhtml };
     }
@@ -11335,7 +11335,8 @@ ${reason}`);
       var Y = (init_yjs(), __toCommonJS(yjs_exports));
       var YProvider = require_provider().default;
       var { createMinimalPlayhtml } = require_browser();
-      var ROOM_ID = /^ott-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      var GAME_ROOM_ID = /^ott-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      var LOBBY_ROOM_ID = /^ott-lobby-public$/;
       var configuration = null;
       var instance = null;
       function parseHost(value) {
@@ -11349,12 +11350,22 @@ ${reason}`);
         };
       }
       function configure(options) {
-        if (!options || typeof options.host !== "string" || typeof options.room !== "string" || !ROOM_ID.test(options.room)) {
+        if (!options || typeof options.host !== "string" || typeof options.room !== "string") {
           throw new TypeError("PlayHTML requires a host and canonical OTT room ID");
         }
+        const party = options.party || "main";
+        if (party === "main" && !GAME_ROOM_ID.test(options.room)) {
+          throw new TypeError("PlayHTML requires a host and canonical OTT room ID");
+        }
+        if (party === "lobby" && !LOBBY_ROOM_ID.test(options.room)) {
+          throw new TypeError("PlayHTML requires a valid lobby room ID");
+        }
+        if (party !== "main" && party !== "lobby") {
+          throw new TypeError("Unsupported party");
+        }
         const parsed = parseHost(options.host);
-        const next = { ...parsed, room: options.room };
-        if (configuration && (configuration.host !== next.host || configuration.protocol !== next.protocol || configuration.room !== next.room)) {
+        const next = { ...parsed, room: options.room, party };
+        if (configuration && (configuration.host !== next.host || configuration.protocol !== next.protocol || configuration.room !== next.room || configuration.party !== next.party)) {
           throw new Error("This page is already bound to another PlayHTML room; reload before joining another room");
         }
         configuration = next;
@@ -11364,7 +11375,7 @@ ${reason}`);
         if (instance) return instance;
         const doc2 = new Y.Doc();
         const provider = new YProvider(configuration.host, configuration.room, doc2, {
-          party: "main",
+          party: configuration.party,
           protocol: configuration.protocol,
           disableBc: true,
           resyncInterval: -1
@@ -11393,14 +11404,26 @@ ${reason}`);
         const playhtml = createMinimalPlayhtml({ ready, provider });
         instance = {
           ...playhtml,
+          provider,
           close() {
+            clearTimeout(readyTimeout);
             provider.destroy();
             instance = null;
           }
         };
         return instance;
       }
-      var runtime = { configure, init };
+      function reset() {
+        if (instance) {
+          try {
+            instance.close();
+          } catch (_) {
+          }
+          instance = null;
+        }
+        configuration = null;
+      }
+      var runtime = { configure, init, reset };
       if (typeof globalThis !== "undefined") globalThis.OTT_PLAYHTML_RUNTIME = runtime;
       module.exports = runtime;
     }

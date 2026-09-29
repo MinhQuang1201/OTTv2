@@ -1,9 +1,9 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { OttRoom } = require("../partykit/ott-room");
-const { PartyKitOttRoom } = require("../partykit/ott-room");
-const { serializeRoom, hydrateRoom } = require("../partykit/room-storage");
-const config = require("../packages/game-core/src/config");
+const { OttRoom } = require("../../partykit/ott-room");
+const { PartyKitOttRoom } = require("../../partykit/ott-room");
+const { serializeRoom, hydrateRoom } = require("../../partykit/room-storage");
+const config = require("../../packages/game-core/src/config");
 
 function connection(id) {
   const inbox = [];
@@ -290,7 +290,7 @@ describe("PartyKit authoritative room", () => {
 
   it("persists revision and next event id and rehydrates without live connections or timers", () => {
     const fixture = context();
-    const room = new (require("../packages/game-core/src/room").Room)("TEST", fixture.ctx);
+    const room = new (require("../../packages/game-core/src/room").Room)("TEST", fixture.ctx);
     room.revision = 7;
     room.nextEventId = 12;
     room.players.A = {
@@ -310,7 +310,7 @@ describe("PartyKit authoritative room", () => {
   });
 
   it("rejects malformed persisted room schemas closed", () => {
-    const room = new (require("../packages/game-core/src/room").Room)("TEST");
+    const room = new (require("../../packages/game-core/src/room").Room)("TEST");
     const saved = serializeRoom(room);
     const invalid = [
       ["status", { status: "unknown" }],
@@ -331,7 +331,7 @@ describe("PartyKit authoritative room", () => {
   });
 
   it("rejects a terminal room with a running clock", () => {
-    const room = new (require("../packages/game-core/src/room").Room)("TEST");
+    const room = new (require("../../packages/game-core/src/room").Room)("TEST");
     const saved = serializeRoom(room);
     saved.status = "done";
     saved.state.winner = "A";

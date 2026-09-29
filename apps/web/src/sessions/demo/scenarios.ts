@@ -136,7 +136,7 @@ function eventFor(scenario: DemoScenario): GameEventView | null {
     "result-disconnect-timeout": { winner: "B", reason: "disconnect_timeout" },
     "result-leave": { winner: "B", reason: "leave" },
     "spectator-list": undefined, "spectator-active": undefined,
-    "spectator-reconnecting": undefined, "spectator-finished": undefined,
+    "spectator-reconnecting": undefined, "spectator-finished": { winner: "A", reason: "goal" },
     "spectator-room-gone": undefined,
   };
   const result = reasons[scenario];
@@ -153,7 +153,7 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
   const isRoomGone = scenario === "spectator-room-gone";
   const event = eventFor(scenario);
   const result = isSpectatorFinished
-    ? { winner: null, reason: "goal" as const }
+    ? { winner: "A" as const, reason: "goal" as const }
     : event?.type === "win" ? { winner: event.winner, reason: event.reason } : null;
   const warning = scenario === "game-clock-warning";
   const reconnecting = scenario === "game-reconnecting" || scenario === "spectator-reconnecting";
@@ -207,7 +207,7 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
   });
   return freezeFixture({
     snapshot,
-    moves: isLobby || isResult || scenario === "game-waiting"
+    moves: isLobby || isResult || isSpectator || scenario === "game-waiting"
       ? []
       : scenario === "game-move-rejected"
         ? [REJECTED_MOVE]

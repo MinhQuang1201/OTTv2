@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +64,39 @@ describe("OnlineRoomPanel", () => {
     }] }} onWatch={vi.fn()} onCreate={vi.fn()} onJoin={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /Xem trận.*An.*Bình/i })).toBeDisabled();
+  });
+
+  it("allows active-match watching in demo mode while online is unavailable", async () => {
+    const user = userEvent.setup();
+    const onWatch = vi.fn();
+    render(<OnlineRoomPanel availability="unavailable" allowDemoWatch publicMatches={{ status: "ready", matches: [{
+      allocationId: "allocation-7",
+      roomId: "room-7",
+      status: "playing",
+      players: {
+        A: { seat: "A", name: "An", connected: true, remainingMs: 540_000 },
+        B: { seat: "B", name: "Bình", connected: true, remainingMs: 510_000 },
+      },
+      spectatorCount: 3,
+      serverNow: 1_790_000_000_000,
+      runningSeat: "A",
+    }] }} onWatch={onWatch} onCreate={vi.fn()} onJoin={vi.fn()} />);
+
+    const watchButton = screen.getByRole("button", { name: /Xem trận.*An.*Bình/i });
+    expect(watchButton).not.toBeDisabled();
+    await user.click(watchButton);
+    expect(onWatch).toHaveBeenCalledWith({ allocationId: "allocation-7", roomId: "room-7" });
+  });
+
+  it("leaves room creation and waiting-room selection disabled even when allowDemoWatch is true", () => {
+    render(<OnlineRoomPanel availability="unavailable" allowDemoWatch waitingRooms={{
+      status: "ready",
+      rooms: [{ roomId: "room-1", hostName: "Host", playerCount: 1, maxPlayers: 2 }],
+    }} onCreate={vi.fn()} onJoin={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Tạo phòng" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Vào phòng" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /room-1/i })).toBeDisabled();
   });
 
   it("keeps active matches separate and watches without submitting the player name", async () => {

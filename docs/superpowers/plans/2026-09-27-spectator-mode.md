@@ -735,6 +735,8 @@ rtk git commit -m "feat: support sequential provider sessions"
 
 **Prerequisite:** Tasks 7 and 9 passed with direct runtime evidence. Otherwise leave production integration disabled and retain deterministic demos only.
 
+> **Stop Rule Status (2026-09-27):** Task 7 runtime gate is explicitly **BLOCKED** on workerd cold hibernation evidence (`state.abort()` terminates sockets with code 1006). Therefore, this prerequisite is NOT satisfied. Production integration remains disabled (`publicMatchState()` returns `unavailable`), no live lobby subscription is connected in `App.tsx`, and Tasks 8-11 code remains experimental scaffolding. Overall status is **demo/authority complete, runtime blocked**.
+
 **Files:**
 - Create: `apps/web/src/sessions/spectator/SpectatorSession.ts`
 - Create: `apps/web/src/sessions/spectator/SpectatorSession.test.ts`
@@ -907,3 +909,13 @@ The implementation may end in one of two honest states:
 2. **Spectator acceptance complete:** All tasks and runtime gates pass, but production enablement still depends on the broader online rollout status owned by `docs/playhtml-upstream-lock.md`.
 
 Neither state permits inventing a fallback transport or claiming production readiness without the required evidence.
+
+### Current Recorded Plan Status (2026-09-27)
+
+**Current Status: demo/authority complete, runtime blocked (State 1)**
+
+- **Tasks 1-6:** Verified and complete. Viewer contracts, capability-driven UI, read-only board interaction, protocol parsing, and authority guarantees are fully passing in unit tests and deterministic demo scenarios (`?demo=spectator-*`).
+- **Task 7:** Evaluated and recorded as **BLOCKED** in `docs/playhtml-upstream-lock.md`. On pinned Wrangler `4.141.0` / workerd `1.20240718.0`, `state.abort()` terminates open client WebSockets with code 1006 rather than preserving them across DO eviction.
+- **Stop Rule Enforced:** Because Task 7 is blocked, Task 10's prerequisite is unmet. Production active discovery is intentionally disabled in the App shell (`publicMatchState()` returns `unavailable`), no live lobby subscription is established, and no two-profile browser acceptance is claimed.
+- **Tasks 8-11 Code:** Code written for active match discovery, lobby stream, provider rebinding, and spectator sessions is experimental scaffolding. Browser multi-profile acceptance was not executed/passed.
+- **Rollout Guard:** `OTT_SPECTATOR_ENABLED` remains disabled by default. Spectator mode fails closed.

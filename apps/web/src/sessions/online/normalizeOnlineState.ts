@@ -20,6 +20,7 @@ export interface OnlineStateMessage {
   readonly roomId?: string;
   readonly revision: number;
   readonly you?: Seat;
+  readonly viewer?: { readonly role: "player"; readonly seat: Seat } | { readonly role: "spectator" };
   readonly status?: "waiting" | "playing" | "done";
   readonly serverNow?: number;
   readonly players?: Partial<Record<Seat, { readonly name?: string; readonly connected?: boolean } | null>>;
@@ -125,17 +126,27 @@ export function normalizeOnlineState(message: OnlineStateMessage, receivedAt = D
     A: player(message.players?.A, "A", state),
     B: player(message.players?.B, "B", state),
   };
-  const viewerSeat = phase === "waiting" ? null : message.you ?? null;
-  const viewer = viewerSeat === null ? null : { role: "player" as const, seat: viewerSeat };
+  const isSpectator = message.viewer?.role === "spectator";
+  const viewerSeat = isSpectator ? null : message.you ?? null;
+  const viewer = isSpectator
+    ? { role: "spectator" as const }
+    : viewerSeat === null
+      ? null
+      : { role: "player" as const, seat: viewerSeat };
+  const capabilities = isSpectator
+    ? { canMove: false, canLeaveGame: false, canSpectate: true }
+    : viewer
+      ? { canMove: true, canLeaveGame: true, canSpectate: false }
+      : { canMove: false, canLeaveGame: false, canSpectate: false };
   const rawSpectatorCount = message.spectatorCount;
   const spectatorCount = typeof rawSpectatorCount === "number" && Number.isInteger(rawSpectatorCount) && rawSpectatorCount >= 0 ? rawSpectatorCount : 0;
   const snapshot: GameSnapshot = Object.freeze({
-    mode: "online",
+    mode: isSpectator ? "spectator" : "online",
     phase,
     boardRevision,
     viewer,
     viewerSeat,
-    capabilities: viewer ? { canMove: true, canLeaveGame: true, canSpectate: false } : { canMove: false, canLeaveGame: false, canSpectate: false },
+    capabilities,
     spectatorCount,
     turn: state.winner ? null : state.turn,
     board: Object.freeze(state.pieces.map((piece) => Object.freeze({ id: piece.id, seat: piece.player, type: piece.type, position: { x: piece.x, y: piece.y } }))),

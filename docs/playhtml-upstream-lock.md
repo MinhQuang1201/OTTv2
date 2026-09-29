@@ -358,9 +358,16 @@ Because the pinned runtime exposes no supported deterministic eviction hook
 that evicts the Game DO while keeping original client sockets open:
 
 - Task 7 spectator presence gate status is recorded as **BLOCKED**.
-- `OTT_SPECTATOR_ENABLED` remains absent/off in all environments.
+- `OTT_SPECTATOR_ENABLED` remains absent/off in all default environments.
 - Incomplete production presence reconstruction wiring was reverted.
 - Independently valid authority, protocol, and exact rollback snapshot
   protections from Tasks 5-6 and UI/demos from Tasks 1-4 are retained.
-- Implementation stops before Tasks 8-11 as mandated by the project gate.
+
+## Tasks 8-11 implementation status (2026-09-27)
+
+- **Task 8 (Active Discovery & Tickets):** Added `OttLobbyStreamServer` on `/parties/lobby/ott-lobby-public`, `spectate` ticket issuance via capability v2, durable catalog revision ordering, and fail-closed flag guard `OTT_SPECTATOR_ENABLED`.
+- **Task 9 (Sequential Provider Rebinding):** Added `runtime.reset()`, `RuntimeBridge.dispose()`, provider status forwarding (`open`/`close`/`reconnecting`), and rebuild of `vendor/playhtml-minimal/browser/runtime.js`.
+- **Task 10 (Spectator Session & App Integration):** Added `SpectatorSession`, read-only board protection, clock interpolation, ticket lifecycle generation handling, and App shell integration.
+- **Task 11 (Rollout Guard):** Production rollout remains **BLOCKED**; `OTT_SPECTATOR_ENABLED` is off by default and deterministic demos (`?demo=spectator-*`) remain the verified user-facing path.
+
 

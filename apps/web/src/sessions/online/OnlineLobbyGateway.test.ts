@@ -22,9 +22,41 @@ describe("OnlineLobbyGateway", () => {
     ]);
   });
 
+  it("lists active matches and requests spectator tickets", async () => {
+    const sampleMatch = {
+      allocationId: "alloc-1",
+      roomId: "ott-alloc-1",
+      status: "playing",
+      players: {
+        A: { seat: "A", name: "An", connected: true, remainingMs: 60000 },
+        B: { seat: "B", name: "Bình", connected: true, remainingMs: 60000 },
+      },
+      spectatorCount: 2,
+      serverNow: 1000,
+      runningSeat: "A",
+    };
+    const control = vi.fn()
+      .mockResolvedValueOnce({ matches: [sampleMatch] })
+      .mockResolvedValueOnce({ allocationId: "alloc-1", room: "ott-alloc-1", ticket: "spec-ticket" });
+    const gateway = new OnlineLobbyGateway({ control });
+
+    await expect(gateway.listActiveMatches()).resolves.toEqual([sampleMatch]);
+    await expect(gateway.getSpectatorTicket(" alloc-1 ")).resolves.toEqual({
+      allocationId: "alloc-1",
+      room: "ott-alloc-1",
+      ticket: "spec-ticket",
+    });
+    expect(control.mock.calls).toEqual([
+      ["active", {}],
+      ["spectate", { allocationId: "alloc-1" }],
+    ]);
+  });
+
   it("reports unavailable when no HTTPS control endpoint exists", async () => {
     const gateway = new OnlineLobbyGateway();
     expect(gateway.available).toBe(false);
     await expect(gateway.listRooms()).rejects.toMatchObject({ code: "online_unavailable" });
+    await expect(gateway.listActiveMatches()).rejects.toMatchObject({ code: "online_unavailable" });
+    await expect(gateway.getSpectatorTicket("alloc-1")).rejects.toMatchObject({ code: "online_unavailable" });
   });
 });

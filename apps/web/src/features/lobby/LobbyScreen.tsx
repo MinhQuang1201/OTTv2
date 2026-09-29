@@ -18,9 +18,10 @@ export interface LobbyScreenProps {
   readonly onCreateOnline: (playerName: string) => void;
   readonly onJoinOnline: (playerName: string, roomId: string) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
+  readonly allowDemoWatch?: boolean;
 }
 
-export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, onWatchMatch }: LobbyScreenProps) {
+export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, onWatchMatch, allowDemoWatch }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   useEffect(() => setPlayerName(readPlayerName()), []);
   const updateName = (value: string) => {
@@ -51,7 +52,7 @@ export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, o
             <ModeCard title="Đấu với AI" description="Bạn đi trước, AI phản hồi sau mỗi nước hợp lệ." actionLabel="Đánh với AI" variant="primary" onSelect={() => onStartAi(normalizedName)} />
           </div>
         </Panel>
-        <OnlineRoomPanel availability={onlineAvailability} waitingRooms={waitingRooms} publicMatches={publicMatches} playerName={playerName} onPlayerNameChange={updateName} showNameField={false} onCreate={onCreateOnline} onJoin={onJoinOnline} onWatch={onWatchMatch} />
+        <OnlineRoomPanel availability={onlineAvailability} waitingRooms={waitingRooms} publicMatches={publicMatches} playerName={playerName} onPlayerNameChange={updateName} showNameField={false} onCreate={onCreateOnline} onJoin={onJoinOnline} onWatch={onWatchMatch} allowDemoWatch={allowDemoWatch} />
       </div>
     </section>
   );

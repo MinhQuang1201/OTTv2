@@ -43,8 +43,10 @@ Tài liệu adapter PlayHTML: [http://localhost:3000/playhtml-game.html](http://
 
 Demo fixture có thể chọn bằng query key, ví dụ `?demo=result-goal`,
 `?demo=result-elimination`, `?demo=result-no-moves`, `?demo=result-timeout`,
-`?demo=result-disconnect-timeout`, `?demo=result-leave` hoặc
-`?demo=game-reconnecting`.
+`?demo=result-disconnect-timeout`, `?demo=result-leave`,
+`?demo=game-reconnecting`, hoặc các kịch bản khán giả: `?demo=spectator-list`,
+`?demo=spectator-active`, `?demo=spectator-reconnecting`, `?demo=spectator-finished`,
+`?demo=spectator-room-gone`.
 
 ## Luật tóm tắt
 
@@ -95,6 +97,7 @@ npm test
 `PORT` — cổng HTTP static, mặc định `3000`.
 `OTT_PLAYHTML_HOST` — endpoint self-hosted dành cho adapter; không đặt secret trong frontend.
 `OTT_PLAYHTML_CONTROL_ENDPOINT` — HTTPS Worker control endpoint for create/list/join/resume; bỏ trống thì online unavailable.
+`OTT_SPECTATOR_ENABLED` — cờ tính năng khán giả phía Worker, mặc định tắt (chỉ bật khi `"true"`).
 
 ## Online qua Cloudflare Worker
 

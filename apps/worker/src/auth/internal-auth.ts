@@ -35,6 +35,7 @@ export interface CapabilityTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
   delete?(key: string): Promise<void>;
+  list?<T>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   setAlarm?(scheduledTime: number | Date): Promise<void>;
   deleteAlarm?(): Promise<void>;
 }
@@ -608,6 +609,46 @@ export async function attachWithCapabilityRecovery<C, T extends { ok?: boolean }
     await adapter.reloadPersisted();
   }
   return result;
+}
+
+export const NONCE_PREFIXES = ["spectate-nonce", "attach-nonce", "nonce"] as const;
+
+export interface NoncePurgeOptions {
+  now?: number;
+  prefixes?: readonly string[] | string[];
+  retainNonces?: Iterable<string>;
+}
+
+/**
+ * Purge expired capability nonces while preserving replay protection for active nonces
+ * and proof required by live attachments.
+ */
+export async function purgeExpiredNonces(
+  storage: CapabilityTransaction,
+  options: NoncePurgeOptions = {},
+): Promise<number> {
+  if (typeof storage.list !== "function" || typeof storage.delete !== "function") return 0;
+  const now = options.now ?? Date.now();
+  const prefixes = options.prefixes ?? NONCE_PREFIXES;
+  const retain = new Set(options.retainNonces ?? []);
+  let purgedCount = 0;
+
+  for (const prefix of prefixes) {
+    const listPrefix = `${prefix}:`;
+    const entriesMap = await storage.list<unknown>({ prefix: listPrefix });
+    const entries = entriesMap instanceof Map ? entriesMap.entries() : Object.entries(entriesMap ?? {});
+    for (const [key, value] of entries) {
+      const nonce = key.slice(listPrefix.length);
+      if (retain.has(nonce)) continue;
+      const expiresAt = typeof value === "number" ? value : typeof (value as any)?.expiresAt === "number" ? (value as any).expiresAt : null;
+      if (expiresAt !== null && expiresAt <= now) {
+        await storage.delete(key);
+        purgedCount++;
+      }
+    }
+  }
+
+  return purgedCount;
 }
 
 export function internalRequest(secret: string, path: string, body: unknown): Request {
