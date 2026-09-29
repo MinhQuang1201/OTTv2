@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const rules = require("../packages/game-core/src/rules");
 const auth = read("apps/worker/src/auth/internal-auth.ts");
 const lobby = read("apps/worker/src/lobby/ott-lobby-server.ts");
 const game = read("apps/worker/src/game/ott-game-server.ts");
@@ -867,6 +868,37 @@ test("Game rejects browser control bypass and validates attach through authority
   assert.match(game, /OTT_INTERNAL_SECRET/);
   assert.match(game, /purpose: "attach"/);
   assert.match(game, /this\.identities\.get\(connection\)/);
+});
+
+test("hibernated player connections recover identity and can move after an idle wake", async () => {
+  const { OttGameServer } = await gameModule();
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.values.set("creatorName", "Alice");
+  fixture.values.set("seat-name:B", "Bob");
+  const now = Date.now();
+  const adapter = await DurableRoomAdapter.create("ott-room-task6", fixture.storage, () => now);
+  const playerA = connection("hibernated-player-A");
+  const playerB = connection("hibernated-player-B");
+  await adapter.attach(playerA, "A", "Alice");
+  await adapter.attach(playerB, "B", "Bob");
+  await adapter.move(playerA, rules.parseSquare("e8"), rules.parseSquare("d7"));
+
+  playerA.serializeAttachment({ ottViewer: { phase: "authenticated", role: "player", seat: "A", nonce: "hibernated-A-nonce" } });
+  playerB.serializeAttachment({ ottViewer: { phase: "authenticated", role: "player", seat: "B", nonce: "hibernated-B-nonce" } });
+  fixture.server.getConnections = () => [playerA, playerB];
+
+  await fixture.server.dispatchOttMessage(playerB, JSON.stringify({
+    __ott: true,
+    roomId: "ott-room-task6",
+    type: "ott:move",
+    from: rules.parseSquare("e2"),
+    to: rules.parseSquare("e1"),
+  }));
+
+  assert.deepEqual(fixture.server.identities.get(playerB), { role: "player", seat: "B" });
+  assert.equal(fixture.messages.some((message) => message.type === "ott:state"), true);
+  assert.equal(fixture.messages.length >= 2, true, "both hibernated players should receive the committed state");
 });
 
 test("Game uses one immutable role identity and checks it before capability verification", () => {

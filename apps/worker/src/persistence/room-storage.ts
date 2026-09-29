@@ -80,22 +80,29 @@ export class DurableRoomAdapter {
     this.room = room;
   }
 
-  static async load(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}): Promise<DurableRoomAdapter | null> {
+  static async load(roomId: string, storage: StorageLike, now: () => number, timing: RoomTiming = {}, liveConnections = new Map<"A" | "B", RoomConnection>()): Promise<DurableRoomAdapter | null> {
     const saved = await storage.get<any>(ROOM_KEY);
     if (saved === undefined) return null;
     try {
       const room = hydrateRoom(saved, roomId, roomDependencies(now, timing));
       const adapter = new DurableRoomAdapter(roomId, storage, now, room, timing);
+      const preservedSeats: ("A" | "B")[] = [];
       for (const seat of ["A", "B"] as const) {
         if (saved.players?.[seat]?.connected && room.players?.[seat]) {
           // hydrateRoom intentionally drops live socket references. Restore the
           // persisted marker long enough for Room to issue a fresh grace window.
           room.players[seat].connected = true;
+          const liveConnection = liveConnections.get(seat);
+          if (liveConnection) {
+            room.players[seat].connection = liveConnection;
+            adapter.remember(liveConnection);
+            preservedSeats.push(seat);
+          }
         }
       }
       adapter.lastPayload = room.payload();
       if (await storage.get("allocationTerminalReason")) adapter.unavailable = true;
-      const reconciliation = room.reconcileHydration(now());
+      const reconciliation = room.reconcileHydration(now(), preservedSeats);
       if (reconciliation.seats.length || room.status === "waiting") {
         adapter.lastPayload = room.payload();
         await adapter.persist();
@@ -131,6 +138,22 @@ export class DurableRoomAdapter {
   connection(id: string): RoomConnection | undefined { return this.connections.get(id); }
 
   connectionsSnapshot(): RoomConnection[] { return [...this.connections.values()]; }
+
+  restoreLiveConnection(connection: RoomConnection, seat: "A" | "B"): boolean {
+    if (this.unavailable || !this.room) return false;
+    const player = this.room.players?.[seat];
+    if (!player) return false;
+    const changed = player.connection !== connection || player.connected !== true || player.reconnectDeadlineMs !== null;
+    player.connection = connection;
+    player.connected = true;
+    player.reconnectDeadlineMs = null;
+    this.remember(connection);
+    if (this.room.status === "playing" && !this.room.state.winner && !this.room.state.clock.runningSeat) {
+      this.room.state.clock.runningSeat = this.room.state.turn;
+      this.room.clockAnchorMs = this.now();
+    }
+    return changed;
+  }
 
   /** Finalize an attach only after the Game authority has persisted connection metadata. */
   commitAttach(connection: RoomConnection): void {

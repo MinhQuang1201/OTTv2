@@ -337,6 +337,31 @@ test("OttLobbyServer rate limits per action and client IP/identity, not globally
   assert.equal(storageMap.has("rate:last:list"), false, "Must not use global rate:last:list key");
 });
 
+test("OttLobbyServer fails closed when the internal secret is missing", async () => {
+  const { OttLobbyServer } = loadOttLobbyServer();
+  const storageMap = new Map();
+  const ctx = {
+    storage: {
+      async get(k) { return storageMap.get(k); },
+      async put(k, v) { storageMap.set(k, v); },
+      async list(opts) {
+        return new Map([...storageMap].filter(([k]) => !opts?.prefix || k.startsWith(opts.prefix)));
+      },
+      async transaction(cb) { return cb(ctx.storage); },
+    },
+  };
+  const server = new OttLobbyServer(ctx, {});
+
+  const response = await server.fetch(new Request("https://ott.internal/control/create", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Alice" }),
+  }));
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "authority_unavailable" });
+});
+
 test("OttLobbyServer alarm removes expired rate-limit keys", async () => {
   const { OttLobbyServer } = loadOttLobbyServer();
   const storageMap = new Map([

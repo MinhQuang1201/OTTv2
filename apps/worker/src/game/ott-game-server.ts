@@ -250,7 +250,7 @@ export class OttGameServer extends YServer {
     try {
       const roomId = await this.ctx.storage.get<string>("roomId");
       if (!roomId || command.roomId !== roomId || (reservation && !this.isCurrentReservation(connection, reservation))) return;
-      const existingIdentity = this.identities.get(connection) ?? this.pendingIdentities.get(connection);
+      const existingIdentity = this.getIdentity(connection) ?? this.pendingIdentities.get(connection);
       if (command.type === "ott:attach") {
         const seat = await this.validateAttach(connection, command, reservation?.generation);
         if (!seat || !reservation || !this.isCurrentReservation(connection, reservation)) return;
@@ -296,6 +296,7 @@ export class OttGameServer extends YServer {
     if (!adapter || adapter.unavailable || !adapter.room) {
       return { type: "ott:error", revision: 0, error: ROOM_UNAVAILABLE };
     }
+    await this.rebindLiveConnections(adapter);
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
     try {
       let result: any;
@@ -360,7 +361,7 @@ export class OttGameServer extends YServer {
         };
       }
       if (committed) await this.publishCommitted(adapter, committed);
-      const identity = this.identities.get(connection);
+      const identity = this.getIdentity(connection);
       const viewer = identity ?? { role: "player", seat: "A" } as const;
       const payload = (committed?.payload ?? adapter.lastPayload) as Record<string, unknown> | null | undefined;
       if (!payload) return { type: "ott:error", revision: adapter.room.revision, error: ROOM_UNAVAILABLE };
@@ -379,8 +380,9 @@ export class OttGameServer extends YServer {
 
   private async loadRoom(): Promise<DurableRoomAdapter | null> {
     if (!this.roomLoad) {
+      const liveConnections = this.livePlayerConnections();
       this.roomLoad = this.ctx.storage.get<string>("roomId").then((roomId) => roomId
-        ? DurableRoomAdapter.load(roomId, this.ctx.storage, () => Date.now(), this.roomTiming())
+        ? DurableRoomAdapter.load(roomId, this.ctx.storage, () => Date.now(), this.roomTiming(), liveConnections)
         : null).then((adapter) => {
         this.roomAdapter = adapter;
         return adapter;
@@ -421,7 +423,7 @@ export class OttGameServer extends YServer {
   }
 
   private reserveRole(connection: Connection, role: "player" | "spectator"): RoleReservation | null {
-    if (this.closedConnections.has(connection) || this.identities.has(connection) || this.pendingIdentities.has(connection) || this.roleReservations.has(connection)) return null;
+    if (this.closedConnections.has(connection) || this.getIdentity(connection) || this.pendingIdentities.has(connection) || this.roleReservations.has(connection)) return null;
     let resolve!: () => void;
     const completed = new Promise<void>((finish) => { resolve = finish; });
     const reservation = { role, generation: this.ensureConnectionGeneration(connection), completed, resolve };
@@ -542,6 +544,48 @@ export class OttGameServer extends YServer {
     return `${ATTACHMENT_PREFIX}${connection.id}`;
   }
 
+  private getIdentity(connection: Connection): RoomViewer | undefined {
+    const existing = this.identities.get(connection) ?? this.pendingIdentities.get(connection);
+    if (existing) return existing;
+    if (typeof connection.deserializeAttachment !== "function") return undefined;
+    let attachment: { ottViewer?: AttachmentMetadata } | null;
+    try {
+      attachment = connection.deserializeAttachment() as { ottViewer?: AttachmentMetadata } | null;
+    } catch {
+      return undefined;
+    }
+    const viewer = attachment?.ottViewer;
+    if (!viewer || viewer.phase !== "authenticated" || typeof viewer.nonce !== "string" || !viewer.nonce) return undefined;
+    let identity: RoomViewer;
+    if (viewer.role === "spectator") identity = { role: "spectator" };
+    else if (viewer.role === "player" && (viewer.seat === "A" || viewer.seat === "B")) identity = { role: "player", seat: viewer.seat };
+    else return undefined;
+    this.identities.set(connection, identity);
+    this.identityNonces.set(connection, viewer.nonce);
+    return identity;
+  }
+
+  private livePlayerConnections(): Map<"A" | "B", Connection> {
+    const live = new Map<"A" | "B", Connection>();
+    if (typeof this.getConnections !== "function") return live;
+    for (const connection of this.getConnections()) {
+      const identity = this.getIdentity(connection);
+      if (identity?.role === "player") live.set(identity.seat, connection);
+    }
+    return live;
+  }
+
+  private async rebindLiveConnections(adapter: DurableRoomAdapter): Promise<void> {
+    let changed = false;
+    for (const [seat, connection] of this.livePlayerConnections()) {
+      changed = adapter.restoreLiveConnection(connection, seat) || changed;
+    }
+    if (changed) {
+      await adapter.persist();
+      await adapter.scheduleAlarm();
+    }
+  }
+
   private installIdentity(connection: Connection, identity: RoomViewer, nonce: string, generation?: number): boolean {
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return false;
     try {
@@ -586,7 +630,7 @@ export class OttGameServer extends YServer {
   }
 
   private async sendProjection(connection: Connection, adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined, spectatorCount: number): Promise<boolean> {
-    const viewer = this.identities.get(connection);
+    const viewer = this.getIdentity(connection);
     if (!viewer || !payload) return false;
     try {
       this.sendCustomMessage(connection, JSON.stringify({
@@ -604,8 +648,10 @@ export class OttGameServer extends YServer {
   }
 
   private async broadcastState(adapter: DurableRoomAdapter, payload: Record<string, unknown> | null | undefined = adapter.lastPayload as Record<string, unknown> | null | undefined, excluded?: Connection): Promise<boolean> {
+    const connections = typeof this.getConnections === "function" ? [...this.getConnections()] : [...this.identities.keys()];
+    for (const connection of connections) this.getIdentity(connection);
     const count = await this.spectatorCount();
-    const delivered = await Promise.allSettled([...this.identities.keys()]
+    const delivered = await Promise.allSettled(connections
       .filter((connection) => connection !== excluded)
       .map((connection) => this.sendProjection(connection, adapter, payload, count)));
     return delivered.every((result) => result.status === "fulfilled" && result.value);
@@ -804,7 +850,7 @@ export class OttGameServer extends YServer {
     reason: string,
     wasClean: boolean,
   ): void {
-    const identity = this.identities.get(connection) ?? this.pendingIdentities.get(connection);
+    const identity = this.getIdentity(connection) ?? this.pendingIdentities.get(connection);
     const reservation = this.roleReservations.get(connection);
     const generation = this.invalidateConnection(connection);
     void this.enqueueRoomOperation(() => this.handleClose(connection, identity, reservation, generation)).catch(() => undefined);
