@@ -7,7 +7,8 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "OTT_BROWSER_ORIGIN": "https://ottv2-two.vercel.app"
+    "OTT_BROWSER_ORIGIN": "https://ottv2-two.vercel.app",
+    "OTT_SPECTATOR_ENABLED": "true"
   },
   "durable_objects": {
     "bindings": [

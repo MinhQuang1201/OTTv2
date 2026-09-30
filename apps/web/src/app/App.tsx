@@ -14,8 +14,11 @@ import { AiSession } from "../sessions/ai/AiSession";
 import { OnlineSession } from "../sessions/online/OnlineSession";
 import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
+import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/online/OnlineLobbyStream";
+import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runtimeBridge";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
+import { AppLifecycleCoordinator, type AppLifecycleOptions } from "./AppLifecycleCoordinator";
 import styles from "./app.module.css";
 import type { PublicMatchIdentity, PublicMatchListState } from "../features/spectator/PublicMatchList";
 
@@ -32,6 +35,7 @@ export type AppState =
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
 export type OnlineSessionFactory = () => GameSession;
 export type SpectatorSessionFactory = () => GameSession;
+export type OnlineLobbyStreamFactory = (runtime: RuntimeBridge) => OnlineLobbyStream;
 
 export function createDemoSession(scenario: DemoScenario): GameSession {
   return new DemoSession(isDemoScenario(scenario) ? scenario : DEFAULT_DEMO_SCENARIO);
@@ -89,49 +93,71 @@ export interface AppProps {
   readonly onlineGateway?: OnlineLobbyGateway;
   readonly onlineSessionFactory?: OnlineSessionFactory;
   readonly spectatorSessionFactory?: SpectatorSessionFactory;
+  readonly runtime?: RuntimeBridge;
+  readonly onlineLobbyStreamFactory?: OnlineLobbyStreamFactory;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
   const sessionFactoryRef = useRef<SessionFactory>(sessionFactory);
   const generationRef = useRef(0);
   const activeSessionRef = useRef<GameSession | null>(null);
-  const transitionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isMountedRef = useRef(true);
-  const isFirstBootRef = useRef(true);
-
+  const lobbyStreamUnsubscribeRef = useRef<(() => void) | null>(null);
+  const lifecycleTokenRef = useRef(0);
+  const [initialRuntimeOwner] = useState<RuntimeBridge>(() => runtimeDependency ?? createRuntimeBridge());
+  const runtimeDependencyRef = useRef(runtimeDependency);
+  const runtimeOwnerRef = useRef<RuntimeBridge>(initialRuntimeOwner);
+  const coordinatorRef = useRef<AppLifecycleCoordinator | null>(null);
+  const createLobbyStream = (runtime: RuntimeBridge) => (onlineLobbyStreamFactory ?? ((owner) => new OnlineLobbyStream({ runtime: owner, disposeRuntime: false })))(runtime);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = new AppLifecycleCoordinator({
+      runtime: initialRuntimeOwner,
+      gateway: onlineGateway,
+      createLobbyStream,
+    });
+  }
   const [activeSession, setActiveSession] = useState<{ readonly session: GameSession; readonly scenario: DemoScenario; readonly generation: number } | null>(null);
+  const [lobbyStreamSnapshot, setLobbyStreamSnapshot] = useState<OnlineLobbyStreamSnapshot | null>(null);
   const [waitingRooms, setWaitingRooms] = useState<{ status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string }>({ status: "loading" });
-  const createOnlineSession = onlineSessionFactory ?? (() => new OnlineSession({ gateway: onlineGateway }));
-  const createSpectatorSession = spectatorSessionFactory ?? (() => new SpectatorSession({ gateway: onlineGateway }));
+  const createOnlineSession = onlineSessionFactory ?? (() => new OnlineSession({ gateway: onlineGateway, runtime: runtimeOwnerRef.current, disposeRuntime: false }));
+  const createSpectatorSession = spectatorSessionFactory ?? (() => new SpectatorSession({ gateway: onlineGateway, runtime: runtimeOwnerRef.current, disposeRuntime: false }));
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
 
   useEffect(() => {
     sessionFactoryRef.current = sessionFactory;
   }, [sessionFactory]);
 
-  // Unmount cleanup: dispose the currently active session and prevent further transitions
   useEffect(() => {
+    if (runtimeDependencyRef.current !== runtimeDependency) {
+      runtimeDependencyRef.current = runtimeDependency;
+      runtimeOwnerRef.current = runtimeDependency ?? createRuntimeBridge();
+    }
+    coordinatorRef.current?.updateDependencies({
+      runtime: runtimeOwnerRef.current,
+      gateway: onlineGateway,
+      createLobbyStream,
+    });
+  }, [runtimeDependency, onlineGateway, onlineLobbyStreamFactory]);
+
+  // The coordinator is the only owner allowed to release the shared runtime.
+  useEffect(() => {
+    const lifecycleToken = ++lifecycleTokenRef.current;
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       generationRef.current += 1;
-      const current = activeSessionRef.current;
       activeSessionRef.current = null;
-      if (current) {
-        try {
-          const disposal = current.dispose();
-          if (disposal && typeof (disposal as Promise<void>).then === "function") {
-            void (disposal as Promise<void>).catch(() => undefined);
-          }
-        } catch {
-          // ignore synchronous disposal error
-        }
-      }
+      lobbyStreamUnsubscribeRef.current?.();
+      lobbyStreamUnsubscribeRef.current = null;
+      queueMicrotask(() => {
+        if (lifecycleTokenRef.current !== lifecycleToken) return;
+        void coordinatorRef.current?.dispose().catch(() => undefined);
+      });
     };
   }, []);
 
@@ -179,87 +205,60 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
 
   const transitionTo = useCallback((
     factory: () => GameSession,
-    options: StartGameOptions,
+    options: AppLifecycleOptions,
     scenario: DemoScenario,
+    openLobbyStream = false,
   ) => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     dispatch({ type: "boot", generation });
     setActiveSession(null);
+    lobbyStreamUnsubscribeRef.current?.();
+    lobbyStreamUnsubscribeRef.current = null;
+    setLobbyStreamSnapshot(null);
 
-    const createAndStart = () => {
+    const coordinator = coordinatorRef.current;
+    if (!coordinator) return;
+    const bindLobbyStream = (stream: OnlineLobbyStream | null, _streamGeneration: number) => {
       if (!isMountedRef.current || generationRef.current !== generation) return;
-      let session: GameSession;
-      try {
-        session = factory();
-      } catch (error) {
-        if (isMountedRef.current && generationRef.current === generation) {
-          dispatch({
-            type: "error",
-            generation,
-            session: null,
-            snapshot: null,
-            error: safeSessionError(error),
-            scenario,
-          });
-        }
-        return;
+      lobbyStreamUnsubscribeRef.current?.();
+      lobbyStreamUnsubscribeRef.current = null;
+      setLobbyStreamSnapshot(stream?.getSnapshot() ?? null);
+      if (stream) {
+        lobbyStreamUnsubscribeRef.current = stream.subscribe(() => {
+          if (!isMountedRef.current || generationRef.current !== generation) return;
+          setLobbyStreamSnapshot(stream.getSnapshot());
+        });
       }
+    };
+    const lobbyTransition = {
+      factory: () => sessionFactoryRef.current(DEFAULT_DEMO_SCENARIO),
+      options: { mode: "demo" as const, scenario: DEFAULT_DEMO_SCENARIO },
+      onSession: (session: GameSession) => {
+        if (!isMountedRef.current || generationRef.current !== generation) return;
+        activeSessionRef.current = session;
+        setActiveSession({ session, scenario: DEFAULT_DEMO_SCENARIO, generation });
+      },
+    };
 
-      activeSessionRef.current = session;
-      if (!isMountedRef.current || generationRef.current !== generation) {
-        activeSessionRef.current = null;
-        try {
-          const disposal = session.dispose();
-          if (disposal && typeof (disposal as Promise<void>).then === "function") {
-            void (disposal as Promise<void>).catch(() => undefined);
-          }
-        } catch {
-          // ignore
-        }
-        return;
-      }
-
-      setActiveSession({ session, scenario, generation });
-
-      void session.start(options).catch((error: unknown) => {
+    void coordinator.transition({
+      factory,
+      options,
+      openLobbyStream: openLobbyStream && !demo.enabled,
+      lobby: options.mode === "spectator" ? lobbyTransition : undefined,
+      onSession: (session) => {
+        if (!isMountedRef.current || generationRef.current !== generation) return;
+        activeSessionRef.current = session;
+        setActiveSession({ session, scenario, generation });
+      },
+      onLobbyStream: bindLobbyStream,
+      onError: (cause, session) => {
         if (!isMountedRef.current || generationRef.current !== generation) return;
         let snapshot: GameSnapshot | null = null;
-        try { snapshot = session.getSnapshot(); } catch { /* retain safe error */ }
-        dispatch({
-          type: "error",
-          generation,
-          session,
-          snapshot,
-          error: safeSessionError(error),
-          scenario,
-        });
-      });
-    };
-
-    if (isFirstBootRef.current && !activeSessionRef.current) {
-      isFirstBootRef.current = false;
-      createAndStart();
-      return;
-    }
-
-    const runTransition = async () => {
-      const active = activeSessionRef.current;
-      activeSessionRef.current = null;
-      if (active) {
-        try {
-          await active.dispose();
-        } catch {
-          // ignore disposal error so subsequent session creation proceeds
-        }
-      }
-      if (!isMountedRef.current || generationRef.current !== generation) {
-        return;
-      }
-      createAndStart();
-    };
-
-    transitionQueueRef.current = transitionQueueRef.current.then(runTransition, runTransition);
+        try { snapshot = session?.getSnapshot() ?? null; } catch { /* retain safe error */ }
+        dispatch({ type: "error", generation, session, snapshot, scenario, error: safeSessionError(cause) });
+      },
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -267,6 +266,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       () => sessionFactoryRef.current(demo.scenario),
       { mode: "demo", scenario: demo.scenario },
       demo.scenario,
+      true,
     );
   }, [demo.scenario, restartToken, transitionTo]);
 
@@ -287,7 +287,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const startSpectator = (identity: PublicMatchIdentity) => {
     onWatchMatch(identity);
     if (demo.enabled) return;
-    transitionTo(createSpectatorSession, { mode: "spectator", allocationId: identity.allocationId, roomId: identity.roomId }, "game-active-a");
+    transitionTo(createSpectatorSession, { mode: "spectator", allocationId: identity.allocationId, roomId: identity.roomId }, "spectator-active");
   };
 
   return (
@@ -314,6 +314,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onCreateOnline={(name) => startOnline({ mode: "online", intent: "create", playerName: name })}
                 onJoinOnline={(name, roomId) => startOnline({ mode: "online", intent: "join", playerName: name, roomId })}
                 waitingRooms={waitingRooms}
+                lobbyStream={lobbyStreamSnapshot}
                 onlineAvailable={onlineGateway.available}
                 demoEnabled={demo.enabled}
                 onWatchMatch={startSpectator}
@@ -326,7 +327,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, onlineAvailable, demoEnabled, onWatchMatch }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -334,6 +335,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   readonly onCreateOnline: (name: string) => void;
   readonly onJoinOnline: (name: string, roomId: string) => void;
   readonly waitingRooms: { status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string };
+  readonly lobbyStream: OnlineLobbyStreamSnapshot | null;
   readonly onlineAvailable: boolean;
   readonly demoEnabled: boolean;
   readonly onWatchMatch: (identity: PublicMatchIdentity) => void;
@@ -350,7 +352,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream)}
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
@@ -361,7 +363,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream)}
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
@@ -377,14 +379,17 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
  * Resolves the public match list state for the lobby.
  *
  * In demo mode under the "spectator-list" scenario, active match fixtures are supplied by the demo snapshot.
- * In production (outside deterministic demos), live active-match discovery via the single-provider
- * lobby stream (OttLobbyStreamServer) remains BLOCKED on the Task 7 upstream runtime gate.
- *
- * Rather than polling the HTTP control endpoint (which violates the single-provider lifecycle boundary),
- * this cleanly reports "unavailable" without crashing or misleading the user.
+ * In production (outside deterministic demos), active matches come only from the
+ * coordinator-owned single-provider lobby stream. No control endpoint polling is used.
  */
-function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario): PublicMatchListState {
+function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario, lobbyStream: OnlineLobbyStreamSnapshot | null): PublicMatchListState {
   if (demoEnabled && scenario === "spectator-list") return { status: "ready", matches: snapshot.publicMatches ?? [] };
+  if (!demoEnabled && lobbyStream) {
+    if (lobbyStream.status === "ready") return { status: "ready", matches: lobbyStream.matches };
+    if (lobbyStream.status === "loading" || lobbyStream.status === "reconnecting") return { status: "loading" };
+    if (lobbyStream.status === "error") return { status: "error", message: lobbyStream.message ?? "Online lobby stream gặp lỗi." };
+    return { status: "unavailable", message: lobbyStream.message ?? "Danh sách trận đang diễn ra hiện không khả dụng." };
+  }
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 

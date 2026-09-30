@@ -18,8 +18,11 @@ const sessionFixture: GameSession = {
 
 const spectatorStart: StartGameOptions = {
   mode: "spectator",
-  allocationId: "allocation-a",
-  roomId: "room-a",
+  allocation: {
+    allocationId: "allocation-a",
+    room: "room-a",
+    ticket: "ticket-a",
+  },
 };
 
 const publicMatchFixture: PublicMatchView = {

@@ -81,22 +81,40 @@ function workerReady(workerOrigin) {
   });
 }
 
-async function createBrowserDemoFixture() {
+async function createBrowserDemoFixture(options = {}) {
+  const spectator = options.spectator === true;
+  const externalAppOrigin = process.env.OTT_BROWSER_RUNTIME_APP_ORIGIN;
+  const externalWorkerOrigin = process.env.OTT_BROWSER_RUNTIME_WORKER_ORIGIN;
+  if (externalAppOrigin && externalWorkerOrigin) {
+    return {
+      appOrigin: externalAppOrigin,
+      workerOrigin: externalWorkerOrigin,
+      diagnostics: () => ({ workerStdout: "", workerStderr: "", appStdout: "", appStderr: "" }),
+      async stop() {},
+    };
+  }
   await ensurePortFree(APP_PORT);
   if (!fs.existsSync(path.join(ROOT, "apps", "web", "dist", "index.html"))) throw new Error("Browser fixture requires the built React app; run npm run build:web first");
   const workerHost = readWorkerHost();
   const workerPort = await availablePort(workerHost);
   const origin = workerOrigin(workerHost, workerPort, "https");
   const envFile = path.join(ROOT, ".dev.vars");
-  if (!fs.existsSync(envFile)) throw new Error("Browser fixture requires the ignored .dev.vars file used by Worker runtime tests");
+  if (!spectator && !fs.existsSync(envFile)) throw new Error("Browser fixture requires the ignored .dev.vars file used by Worker runtime tests");
+  const envFileArgs = fs.existsSync(envFile) ? ["--env-file", envFile] : [];
   fs.mkdirSync(path.join(ROOT, ".wrangler"), { recursive: true });
   const persistTo = fs.mkdtempSync(path.join(ROOT, ".wrangler", "browser-worker-"));
   const workerRuns = [];
+  const workerConfig = spectator
+    ? "apps/worker/wrangler.spectator-test.jsonc"
+    : "apps/worker/wrangler.jsonc";
   function startWorker() {
     const launcher = wranglerLauncher();
+    const configArgs = spectator
+      ? ["--config", workerConfig]
+      : ["--config", workerConfig, "--env", "demo"];
     const current = startProcess(launcher.command, [
-      ...launcher.argsPrefix, "dev", "--config", "apps/worker/wrangler.jsonc", "--env", "demo",
-      "--local", "--local-protocol", "https", "--env-file", envFile, "--persist-to", persistTo,
+      ...launcher.argsPrefix, "dev", ...configArgs,
+      "--local", "--local-protocol", "https", ...envFileArgs, "--persist-to", persistTo,
       "--ip", workerHost, "--port", String(workerPort), "--inspector-port", "0", "--show-interactive-dev-session=false",
     ], process.env);
     workerRuns.push(current);

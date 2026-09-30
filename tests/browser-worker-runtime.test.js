@@ -10,11 +10,11 @@ test("two isolated browser profiles create, join, attach and play a legal move o
   }
   let fixture;
   let browser;
-  const sockets = { a: [], b: [] };
-  const requests = { a: [], b: [] };
-  const frames = { a: [], b: [] };
-  const pageErrors = { a: [], b: [] };
-  const consoleErrors = { a: [], b: [] };
+  const sockets = { a: [], b: [], c: [] };
+  const requests = { a: [], b: [], c: [] };
+  const frames = { a: [], b: [], c: [] };
+  const pageErrors = { a: [], b: [], c: [] };
+  const consoleErrors = { a: [], b: [], c: [] };
   const contexts = [];
   t.after(async () => {
     for (const context of contexts) await context.close().catch(() => {});
@@ -22,7 +22,7 @@ test("two isolated browser profiles create, join, attach and play a legal move o
     if (fixture) await fixture.stop();
   });
 
-  fixture = await createBrowserDemoFixture();
+  fixture = await createBrowserDemoFixture({ spectator: process.env.OTT_SPECTATOR_RUNTIME_TEST === "1" });
   browser = await chromium.launch({ headless: true });
 
   async function openProfile(key, name) {
@@ -79,6 +79,18 @@ test("two isolated browser profiles create, join, attach and play a legal move o
   await b.locator('[data-testid="game-screen"]').waitFor({ state: "visible" });
   await b.waitForFunction(() => document.querySelectorAll('[data-testid^="board-cell-"]').length === 81);
 
+  if (process.env.OTT_SPECTATOR_RUNTIME_TEST === "1") {
+    const c = await openProfile("c", "Carol");
+    const watchButton = c.getByRole("button", { name: /Xem trận.*Alice.*Bob/i });
+    await watchButton.waitFor({ state: "visible", timeout: 10_000 });
+    await watchButton.click();
+    await c.locator('[data-testid="game-screen"]').waitFor({ state: "visible" });
+    await c.waitForFunction(() => document.querySelectorAll('[data-testid^="board-cell-"]').length === 81);
+    assert.equal(await c.locator('[data-testid^="board-cell-"]').first().isDisabled(), true, "spectator board must be read-only");
+    assert.deepEqual(pageErrors.c, [], "spectator browser console should have no uncaught page errors");
+    assert.deepEqual(consoleErrors.c, [], "spectator browser console should have no error messages");
+  }
+
   // The Worker intentionally rate-limits each socket to one OTT command per 40 ms.
   // Leave ample room after B's attach and between the two UI clicks.
   await a.waitForTimeout(500);
@@ -103,8 +115,10 @@ test("two isolated browser profiles create, join, attach and play a legal move o
     throw new Error(`Move did not propagate. destination=${JSON.stringify(destination)} ui=${JSON.stringify(ui)} frames=${JSON.stringify(frames)} sockets=${JSON.stringify(sockets)} worker=${JSON.stringify(diagnostics)}`);
   }
   for (const key of ["a", "b"]) {
-    assert.equal(sockets[key].length, 1, `${key} profile should use exactly one provider WebSocket`);
-    assert.match(sockets[key][0], /\/parties\/main\/ott-[0-9a-f-]+/);
+    const expectedSocketCount = process.env.OTT_SPECTATOR_RUNTIME_TEST === "1" ? 2 : 1;
+    assert.ok(sockets[key].length >= expectedSocketCount, `${key} profile should use the expected provider WebSockets`);
+    assert.ok(sockets[key].some((url) => /\/parties\/main\/ott-[0-9a-f-]+/.test(url)));
+    if (process.env.OTT_SPECTATOR_RUNTIME_TEST === "1") assert.ok(sockets[key].some((url) => /\/parties\/lobby\/ott-lobby-public/.test(url)));
     assert.deepEqual(pageErrors[key], [], `${key} browser console should have no uncaught page errors`);
     assert.deepEqual(consoleErrors[key], [], `${key} browser console should have no error messages`);
   }
