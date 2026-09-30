@@ -38,6 +38,22 @@ describe("runtimeBridge", () => {
     expect(bridge.connectionFactory).toThrow("connection is not ready");
   });
 
+  it("reuses an injected lifecycle owner without creating another runtime", async () => {
+    const owner = {
+      bootstrap: vi.fn(async () => undefined),
+      connectionFactory: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const bridge = createRuntimeBridge({ lifecycleOwner: owner });
+
+    expect(bridge).toBe(owner);
+    await bridge.bootstrap({ host: "https://play.example", room: "ott-lobby-public", party: "lobby" });
+    await bridge.dispose();
+    expect(owner.bootstrap).toHaveBeenCalledTimes(1);
+    expect(owner.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("disposes and allows rebinding to a different room", async () => {
     const ready = Promise.resolve({ ready: true });
     const runtime = { configure: vi.fn(), init: vi.fn(() => ({ ready, createCustomMessageChannel: vi.fn() })), reset: vi.fn() };

@@ -16,13 +16,18 @@ export interface RuntimeBridge {
   readonly dispose: () => Promise<void>;
 }
 
+export type RuntimeLifecycleOwner = RuntimeBridge;
+
 export interface RuntimeBridgeDependencies {
+  /** Reuse an App-owned lifecycle instead of creating a second runtime owner. */
+  readonly lifecycleOwner?: RuntimeLifecycleOwner;
   readonly runtime?: NonNullable<typeof globalThis.OTT_PLAYHTML_RUNTIME>;
   readonly bootstrapFactory?: NonNullable<typeof globalThis.PlayhtmlBootstrap>;
   readonly globalObject?: typeof globalThis;
 }
 
 export function createRuntimeBridge(deps: RuntimeBridgeDependencies = {}): RuntimeBridge {
+  if (deps.lifecycleOwner) return deps.lifecycleOwner;
   const target = deps.globalObject ?? globalThis;
   const runtime = deps.runtime ?? target.OTT_PLAYHTML_RUNTIME;
   const bootstrapApi = deps.bootstrapFactory ?? target.PlayhtmlBootstrap;

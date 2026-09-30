@@ -2,9 +2,9 @@ import type { Position, Seat } from "../../shared/model/game";
 
 export interface OnlineConnection {
   on(event: "open" | "close" | "reconnecting" | "resumed" | "error" | "message", listener: (payload?: unknown) => void): void;
-  send(message: unknown): void;
+  send(message: unknown): void | Promise<void>;
   connect?(): Promise<void> | void;
-  close?(): void;
+  close?(): Promise<void> | void;
 }
 
 export interface PlayhtmlAllocation {

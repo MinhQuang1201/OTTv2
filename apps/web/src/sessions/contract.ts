@@ -5,6 +5,7 @@ import type {
   Seat,
   SessionErrorView,
 } from "../shared/model/game";
+import type { PlayhtmlSpectatorAllocation } from "./online/globals";
 
 export type {
   ConnectionState,
@@ -39,7 +40,10 @@ export type StartGameOptions =
       readonly playerName: string;
       readonly roomId: string;
      }
-  | { readonly mode: "spectator"; readonly allocationId: string; readonly roomId: string };
+  | {
+      readonly mode: "spectator";
+      readonly allocation: PlayhtmlSpectatorAllocation;
+    };
 
 export type MoveResult =
   | { readonly accepted: true }

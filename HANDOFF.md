@@ -1,5 +1,184 @@
 # Bàn giao: Review PlayHTML Authoritative Rollout
 
+## Handoff Tiếp Tục Public Match Stream (2026-09-30)
+
+### Mục Tiêu
+
+Đang triển khai tính năng để Người 3 nhìn thấy trận đang diễn ra trong sảnh và mở spectator read-only. Thiết kế đã được duyệt tại:
+
+- `docs/superpowers/specs/2026-09-29-public-match-stream-design.md`
+- `docs/superpowers/plans/2026-09-29-public-match-stream.md`
+
+Người dùng yêu cầu **không tạo worktree riêng**, nên toàn bộ thay đổi nằm trong workspace hiện tại.
+
+### Trạng Thái Task
+
+- **Task 1: Public match contract:** đã triển khai và đã qua spec review + code-quality review.
+- **Task 2: Lobby catalog retry/resync:** phần implementation đã xong và đã qua spec review; code-quality review còn findings cần sửa.
+- **Task 3: Browser lobby stream adapter:** implementation đã xong; spec review còn findings cần sửa; chưa chạy code-quality review cuối.
+- **Task 4: App/session lifecycle integration:** đã triển khai; còn cần xử lý riêng race review khi dispose runtime đang pending rồi được reuse.
+- **Task 5: Runtime và three-profile coverage:** local spectator runtime **PASS** với A tạo, B join, C read-only.
+- **Task 6: Security/lifecycle gates:** deterministic suite và production CORS/fail-closed checks **PASS**; spectator đã bật production sau smoke test.
+- **Task 7: Build/deploy checkpoints:** Worker và Vercel production đã deploy; alias Vercel không đổi.
+- **Production spectator:** đã **ENABLED** với `OTT_SPECTATOR_ENABLED=true`.
+- **Deploy:** Worker `d1d44b8e-9fd0-4cc8-a3cd-cec43ba0047d`; Vercel alias `https://ottv2-two.vercel.app`.
+- **Commit:** mục này ghi nhận trạng thái trước commit; commit cuối được ghi
+  nhận trong git history sau bước verification.
+
+### Trạng Thái Hiện Tại Và Vấn Đề Còn Lại (2026-09-30)
+
+Đây là trạng thái authoritative mới nhất; các mục review lịch sử ở phía dưới
+được giữ lại để truy nguyên quyết định và không được dùng thay cho mục này.
+
+#### Đã Xác Nhận
+
+- Spectator production đang **ENABLED** bằng `OTT_SPECTATOR_ENABLED=true`.
+- Worker production: `https://ottv2-minimal.haixcxt.workers.dev`.
+- Worker version: `d1d44b8e-9fd0-4cc8-a3cd-cec43ba0047d`.
+- Vercel production giữ nguyên alias `https://ottv2-two.vercel.app`.
+- Production browser acceptance với spectator đã PASS: A tạo phòng, B tham gia,
+  C xem read-only, provider/public lobby stream hoạt động, không có lỗi console.
+
+#### Vấn Đề Còn Lại
+
+1. **Chưa có evidence hibernation/eviction thực tế.** Chưa chứng minh được
+   Durable Object bị eviction/hibernation rồi reconnect vẫn giữ đúng room state,
+   seat, spectator state và authoritative revision. Đây là gap runtime lớn nhất.
+2. **Manual acceptance chưa chạy.** Automated production browser acceptance đã
+   PASS, nhưng manual acceptance với các browser profile độc lập chưa được ghi
+   nhận. Không suy diễn manual PASS từ automated test.
+3. **Tám test Node vẫn skip.** Các test cần `.dev.vars` với secret thật và
+   placeholder manual acceptance chưa chạy trong môi trường hiện tại.
+4. **Clean install còn peer conflict upstream.** `npm ci` không có cờ bổ sung
+   fail do `y-partyserver@2.2.0` yêu cầu `@cloudflare/workers-types` v4 trong
+   khi Wrangler/PartyServer kéo v5. Verification hiện dùng
+   `npm ci --legacy-peer-deps`. `@testing-library/dom@10.4.2` đã được khai báo
+   trực tiếp để `@testing-library/react` cài đủ peer dependency.
+5. **Dependency audit còn cảnh báo.** Full audit báo 8 vulnerabilities; audit
+   production dependency báo 4 vấn đề trong `esbuild`/`undici`. Chưa chạy
+   `npm audit fix --force` vì có thể kéo breaking change vào PartyKit/Miniflare.
+6. **Một số tài liệu lịch sử còn ghi trạng thái cũ** như production disabled,
+   Worker typecheck blocked hoặc online initialization blocked. Các đoạn đó là
+   historical rationale; nếu cần handoff ngắn gọn, phải cập nhật chúng để không
+   mâu thuẫn với mục trạng thái hiện tại ở trên.
+
+#### Verification Mới Nhất
+
+- `npm test`: **266 passed, 8 skipped, 0 failed**.
+- `npm run test:web`: **314 passed, 0 failed**.
+- `npm run typecheck:web`: **PASS**.
+- `npx tsc -p apps/worker/tsconfig.json --noEmit`: **PASS**.
+- `npm run test:worker:spectator`: **40 passed, 0 failed**.
+- `npm run build:web`: **PASS**.
+- `npm run test:browser-worker:spectator` với production app/Worker origins:
+  **1 passed, 0 failed**.
+- `git diff --check`: **PASS**.
+
+### Files Đã Thay Đổi
+
+Các file do implementation hiện tại chạm tới:
+
+- `packages/protocol/src/index.ts`
+- `apps/web/src/shared/model/game.ts`
+- `apps/web/src/shared/model/publicMatch.test.ts`
+- `apps/worker/src/lobby/public-match.ts`
+- `apps/worker/src/lobby/ott-lobby-server.ts`
+- `apps/worker/src/lobby/ott-lobby-stream-server.ts`
+- `apps/web/src/sessions/online/globals.d.ts`
+- `apps/web/src/sessions/online/runtimeBridge.ts`
+- `apps/web/src/sessions/online/runtimeBridge.test.ts`
+- `apps/web/src/sessions/online/OnlineLobbyStream.ts`
+- `apps/web/src/sessions/online/OnlineLobbyStream.test.ts`
+- `tests/spectator-test-worker.test.js`
+
+Tài liệu được tạo:
+
+- `docs/superpowers/specs/2026-09-29-public-match-stream-design.md`
+- `docs/superpowers/plans/2026-09-29-public-match-stream.md`
+
+
+#### Task 1
+
+- Shared protocol có public-match types/envelope/parser/validator.
+- Kiểm tra revision, canonical IDs, `status: "playing"`, player fields, bounds, duplicate IDs, private fields và UTF-8 payload tối đa 8 KB.
+- Worker normalization tại `apps/worker/src/lobby/public-match.ts`.
+- Web model dùng shared `PublicMatchView` thay vì contract divergent.
+
+#### Task 2
+
+- `OttLobbyServer` validate summary trước khi lưu/fan-out.
+- Có retry/resync durable theo revision, backoff bounded và retry exhaustion state bounded.
+- Alarm Lobby đã multiplex rate-limit cleanup và catalog retry.
+- Terminal removal được giữ để retry.
+- Internal body limits dùng capped UTF-8 reader.
+- `OttLobbyStreamServer` validate catalog, load durable cache sau cold wake và dùng exact `__YPS:` framing để quan sát lỗi `connection.send()`.
+- Stream resend bounded; disabled spectator alarm xóa pending resend và không retry.
+- `waitUntil()` đã được thêm cho async subscribe resync.
+
+#### Task 3
+
+- Đã tạo `OnlineLobbyStream` dùng runtime seam, party `lobby`, room `ott-lobby-public`.
+- Không dùng raw WebSocket hoặc polling `/control/active`.
+- Có catalog validation, immutable snapshot, generation guards, pre-open unavailable mapping, reconnect/error state, subscribe retry và concurrent disposal promise.
+- `runtimeBridge` đã có lifecycle-owner seam.
+
+### Findings Cần Xử Lý Trước Khi Đi Tiếp
+
+#### Task 2 Quality Review
+
+1. Nếu `loadCachedCatalog()` hoặc `currentPublicCatalog()` throw sau khi retry record đã claim, phải restore retry record; hiện có nguy cơ mất retry.
+2. `scheduleAlarm()` cần race-safe. Read rồi `setAlarm/deleteAlarm` không được phép xóa alarm mới hơn do scheduler cũ.
+3. `/control/active` phải đi qua `currentPublicCatalog()`/normalization, không trả raw persisted summary; thêm test summary có private fields.
+4. Thêm test storage failure sau claim và interleaving scheduler/notification.
+
+#### Task 3 Spec Review
+
+1. Provider đã connected hiện không được hỗ trợ đúng: `connect()` resolve nhưng không phát `open`; adapter đang chờ `open` nên có thể không subscribe.
+2. Subscribe bị reject có thể treo vì chờ một `open` event lần nữa vốn không đến.
+3. Message có thể được nhận trước khi subscribe thành công hoặc sau close; cần chặn message theo connection/generation/subscribed state.
+
+Không tiếp tục Task 4 cho đến khi các findings trên được sửa và cả hai review stage của Task 2/3 đều APPROVED.
+
+### Verification Đã Báo Cáo
+
+Kết quả do subagents báo cáo, cần chạy lại fresh trước khi kết luận cuối:
+
+- Task 1 web contract: 13 tests passed.
+- Task 2 focused Worker: các lần chạy cuối báo 26 tests passed; full Node suite báo 252 passed, 8 skipped.
+- Task 3 focused adapter: 10 tests passed; full web suite báo 256 passed.
+- Web typecheck/build và `git diff --check` đã được báo PASS ở các checkpoint cuối.
+- Worker typecheck: các checkpoint đầu báo thiếu `@cloudflare/workers-types`; checkpoint quality cuối báo đã PASS. Cần chạy lại để xác nhận trạng thái hiện tại.
+- Chưa có evidence supported hibernation thực tế hoặc manual three-profile production acceptance.
+
+### Thay Đổi Có Sẵn Từ Trước
+
+Không được revert hoặc chỉnh sửa nếu không liên quan:
+
+- `tests/rules.test.js` đã modified trước đó.
+- `TEST_REPORT.md` đã tồn tại dưới dạng untracked trước implementation.
+
+### Cách Tiếp Tục Ngày Mai
+
+1. Sửa Task 2 findings bằng subagent riêng; chạy spec review rồi code-quality review lại.
+2. Sửa Task 3 findings bằng subagent riêng; chạy spec review rồi code-quality review.
+3. Task 2/3 approved thì triển khai Task 4: App transition coordinator, truyền exact `PlayhtmlSpectatorAllocation` trước game bootstrap, và nối `OnlineLobbyStream` vào lobby UI.
+4. Triển khai Task 5 với fixture riêng dùng `apps/worker/wrangler.spectator-test.jsonc`; không dùng normal `wrangler.jsonc --env test/demo` cho spectator.
+5. Chạy Task 6 gates. Nếu chưa có supported hibernation evidence, giữ production disabled.
+6. Chỉ sau khi đủ evidence mới chạy Task 7 deploy Worker rồi build/deploy Vercel.
+
+Lệnh verification chính:
+
+```powershell
+rtk npm test
+rtk npm run test:web
+rtk npm run typecheck:web
+rtk npx --no-install tsc -p apps/worker/tsconfig.json --noEmit
+rtk npm run build:web
+rtk git diff --check
+```
+
+Không dùng `git reset`, `git checkout --`, hoặc lệnh dọn worktree để xử lý các thay đổi có sẵn.
+
 **Ngày review:** 2026-09-25  
 **Phạm vi:** Thay đổi chưa commit triển khai theo `docs/superpowers/plans/2026-09-25-playhtml-fork-blocker-resolution.md`.  
 **Kết luận:** Không thể triển khai production. Trạng thái online PlayHTML/PartyKit là **BLOCKED** cho đến khi các evidence gate dưới đây được thực hiện và ghi nhận. Không suy diễn production readiness từ bridge/mock hoặc từ test deterministic.
@@ -249,3 +428,108 @@ Không đánh dấu online production hoàn tất cho đến khi tất cả đi�
 ## Ghi Nhận Verification
 
 Trước khi đổi bất kỳ trạng thái nào, ghi ngày, commit/revision, phiên bản Node/PartyKit/PlayHTML, host chạy thử, command đầy đủ và kết quả cho từng gate. Tối thiểu phải chạy `node --check` cho runtime files, `npm test`, `git diff --check` và denylist HTTP test. Evidence PartyKit hiện có chỉ xác nhận `Stub.socket()` trả `WebSocket` và `Server.onMessage` không có authenticated inter-party origin/route metadata; nó không mở Task 4. Khi Task 4 hoặc Task 5 còn BLOCKED, còn phải chứng minh blocked mode: không có authoritative online initialization/transport được cấu hình giả, UI báo unavailable rõ ràng, và local/AI vẫn hoạt động. Chỉ sau Task 4, Task 5 và Task 6 có evidence trực tiếp mới chạy two-profile acceptance; scenario nào chưa chạy phải ghi là chưa chạy, không suy ra PASS từ coverage khác.
+
+## Handoff Tiếp Tục Sau Phiên 2026-09-30
+
+### Trạng Thái Phiên
+
+- Task 1: đã triển khai và review trước phiên này.
+- Task 2: đã sửa findings về lobby catalog retry/race/normalization/cache. Focused Worker suite cuối được báo cáo **39/39 PASS**; không còn finding chức năng sau review.
+- Task 3: đã sửa lifecycle của `OnlineLobbyStream`, gồm connected-without-open, subscribe rejection, generation/message gating, reconnect overlap, source replacement, disposal và bounded retry. Review cuối được báo cáo **APPROVED**.
+- Task 4: đã triển khai phần lớn App/session lifecycle integration, nhưng **CHƯA APPROVED**.
+- Task 5/6/7: chưa triển khai/verify; production spectator vẫn **DISABLED/BLOCKED**.
+- Không tạo commit trong phiên này.
+
+### Files Task 4 Đã Chạm
+
+- `apps/web/src/app/AppLifecycleCoordinator.ts` (mới)
+- `apps/web/src/app/App.tsx`, `apps/web/src/app/App.test.tsx`
+- `apps/web/src/sessions/contract.ts`, `apps/web/src/sessions/contract.test.ts`
+- `apps/web/src/sessions/online/OnlineSession.ts`, `OnlineSession.test.ts`
+- `apps/web/src/sessions/online/runtimeBridge.ts`, `runtimeBridge.test.ts`, `globals.d.ts`
+- `apps/web/src/sessions/spectator/SpectatorSession.ts`, `SpectatorSession.test.ts`
+
+Task 2/3 files and tests remain uncommitted as listed above. Do not revert existing changes such as `tests/rules.test.js` and `TEST_REPORT.md`.
+
+### Task 4 Đã Đạt Được
+
+- Có coordinator dùng chung runtime, serialize các transition và fallback lobby.
+- Spectator initial path dùng allocation đã validate, lấy ticket trước game bootstrap; reconnect có ticket dedupe.
+- Attach spectator yêu cầu API hợp lệ và kết quả thành công.
+- Có generation guards cho transition, ticket, client callback; terminal/leave cleanup và clock gating đã được bổ sung.
+- App dùng `OnlineLobbyStream` thay vì polling `/control/active`; stream được truyền runtime facade không sở hữu để tránh tự dispose shared runtime.
+- Local/AI/demo vẫn có đường chạy riêng; không bật `OTT_SPECTATOR_ENABLED` và không thêm raw WebSocket/fake transport.
+- Subagent báo cáo web suite cuối **302 PASS**, typecheck/build/diff check PASS. Đây là checkpoint do subagent báo cáo, controller cần chạy lại sau khi tiếp tục.
+
+### Findings Còn Mở Trước Khi Ghi Task 4 APPROVED
+
+Review cuối yêu cầu sửa các lỗi sau. Implementer đã nhận danh sách nhưng phiên bị dừng trước khi hoàn tất vòng sửa; không giả định các mục này đã được sửa.
+
+1. `OnlineSession` có thể nhận kết quả create/join sau `dispose()`, gán `allocation` chứa `resumeCredential` rồi giữ lại. Cần guard trước assignment và clear allocation trong cleanup.
+2. Coordinator failure cleanup có thể gọi release trên ownership mutable và dispose nhầm runtime/session của generation mới. Cleanup phải capture ownership token và serialized/ownership-safe.
+3. `OnlineSession` sau `leave()`/`gameover` còn nhận state callback trễ, có thể resurrect `finished` thành `playing`. Cần invalidate transport generation và guard `applyState`/callbacks.
+4. `OnlineSession.start()` lặp/concurrent có thể attach allocation cũ vào room mới; cần start epoch/serialization và reset toàn bộ per-room state: revision, event IDs, fingerprint, board revision, raw state, snapshot.
+5. Runtime dependency retirement theo chuỗi A -> B -> A có thể dispose runtime đang được chọn lại; phải recheck current dependency trước disposal.
+6. `OnlineLobbyStream` khi reconnect thay source chưa chắc đóng/await mọi connection cũ; cần track toàn bộ owned sources và dispose tất cả.
+7. `SpectatorSession` repeated start có thể bootstrap runtime chồng nhau trước khi bootstrap cũ settle; cần serialize start/cleanup.
+
+### Verification Checkpoint
+
+Controller đã chạy fresh trước vòng Task 4 cuối:
+
+- `rtk npm test`: **265 passed, 8 skipped, 0 failed**.
+- `rtk npm run test:web`: **268 passed, 27 files** ở checkpoint trước Task 4 remediation.
+- `rtk npm run typecheck:web`: PASS.
+- `rtk npm run build:web`: PASS.
+- `rtk git diff --check`: PASS.
+- `rtk npx --no-install tsc -p apps/worker/tsconfig.json --noEmit`: **BLOCKED** trước compile bởi `TS2688`, thiếu `../../node_modules/playhtml/node_modules/@cloudflare/workers-types`.
+
+Sau các remediation Task 4, subagent báo cáo web suite 302 tests PASS, nhưng controller chưa chạy lại fresh sau checkpoint đó. Khi tiếp tục, chạy lại tối thiểu:
+
+```powershell
+rtk npm test
+rtk npm run test:web
+rtk npm run typecheck:web
+rtk npx --no-install tsc -p apps/worker/tsconfig.json --noEmit
+rtk npm run build:web
+rtk git diff --check
+```
+
+### Tiếp Tục Đề Xuất
+
+1. Đọc lại các file Task 4 hiện tại và sửa 7 findings ở trên bằng TDD, không tạo worktree/commit nếu chưa được yêu cầu.
+2. Chạy spec review rồi code-quality review lại Task 4; chỉ ghi APPROVED khi cả hai không còn finding.
+3. Chạy lại full verification và ghi rõ Worker typecheck blocker nếu dependency vẫn thiếu.
+4. Không triển khai Task 5/6/7, không bật spectator production, và không ghi production-ready/two-profile acceptance PASS khi chưa có evidence runtime trực tiếp.
+
+## Cập Nhật Nhanh Sau Phiên 2026-09-30
+
+- Đã thêm command riêng cho spectator runtime:
+  - `npm run test:worker:spectator`
+  - `npm run test:browser-worker:spectator`
+- `tests/worker-runtime/fixture.js` hỗ trợ chọn `wrangler.spectator-test.jsonc` mà không dùng `--env demo`; production config không bị bật spectator.
+- Browser runtime test có nhánh spectator three-profile: A tạo, B vào, C thấy trận, mở read-only và kiểm tra ô cờ bị disable.
+- Deterministic spectator Worker suite: **39/39 PASS**.
+- Full Node suite: **265 PASS, 8 SKIP, 0 FAIL**. Các test runtime cần `.dev.vars` vẫn skip.
+- Full web suite: **314 PASS, 27 files**.
+- Web build: **PASS**; production bundle không chứa `OTT_INTERNAL_SECRET`, test secret hoặc probe secret.
+- Static denylist và spectator fail-closed tests: **PASS** trong full Node suite.
+- Browser spectator runtime command ban đầu bị chặn bởi fixture `.dev.vars`; sau khi tách spectator fixture, three-profile runtime đã **PASS**.
+- Worker typecheck vẫn **BLOCKED** trước compile do thiếu `../../node_modules/playhtml/node_modules/@cloudflare/workers-types` (`TS2688`).
+- `git diff --check`: **PASS**.
+- Production spectator vẫn **DISABLED/BLOCKED**; local three-profile runtime đã PASS nhưng chưa ghi production spectator acceptance PASS.
+
+## Evidence Deploy 2026-09-30
+
+- Spectator deterministic suite: **39/39 PASS**.
+- Local spectator browser runtime: **PASS** với three-profile flow A tạo, B join, C xem read-only; C không thể thao tác ô cờ.
+- Production Worker deployed at `https://ottv2-minimal.haixcxt.workers.dev`.
+- Production Worker version: `d1d44b8e-9fd0-4cc8-a3cd-cec43ba0047d`.
+- Production Worker `/control/active` with origin `https://ottv2-two.vercel.app`: **HTTP 200**, body `{"matches":[]}`.
+- Production spectator lobby path is no longer fail-closed; it reaches the enabled public lobby route.
+- Production frontend deployment: `https://ottv2-ixbkhp8k6-lap-trinh-mang.vercel.app`.
+- Production alias unchanged: `https://ottv2-two.vercel.app`, **HTTP 200**.
+- Bundle `apps/web/dist`: no `OTT_INTERNAL_SECRET`, test secret, or probe secret matches.
+- Production browser spectator runtime: **PASS** with A tạo phòng, B tham gia, C xem read-only trên `https://ottv2-two.vercel.app` và Worker production.
+- `OTT_SPECTATOR_ENABLED` is enabled in production; C's board was disabled and no browser errors occurred.
+- Rollback targets: Vercel deployment URL above and Worker version ID above.

@@ -3,7 +3,11 @@ const { spawnSync } = require("node:child_process");
 const result = spawnSync(process.execPath, ["--test", "tests/browser-worker-runtime.test.js"], {
   cwd: process.cwd(),
   stdio: "inherit",
-  env: { ...process.env, OTT_BROWSER_RUNTIME_TEST: "1" },
+  env: {
+    ...process.env,
+    OTT_BROWSER_RUNTIME_TEST: "1",
+    OTT_SPECTATOR_RUNTIME_TEST: process.argv.includes("--spectator") ? "1" : process.env.OTT_SPECTATOR_RUNTIME_TEST,
+  },
 });
 
 if (result.error) throw result.error;

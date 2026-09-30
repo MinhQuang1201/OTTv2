@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App, createDemoSession, safeSessionError, type AppState, type SessionFactory } from "./App";
 import { ScreenBoundary } from "./ScreenBoundary";
@@ -8,6 +9,7 @@ import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import type { DemoScenario } from "../shared/model/game";
+import { AppLifecycleCoordinator } from "./AppLifecycleCoordinator";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -581,7 +583,7 @@ describe("App shell lifecycle", () => {
 
     unmount();
 
-    expect(onlineSessionDisposed).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onlineSessionDisposed).toHaveBeenCalledTimes(1));
   });
 
   it("respects single-provider boundary: does not poll listActiveMatches when Task 7 is blocked", async () => {
@@ -596,5 +598,622 @@ describe("App shell lifecycle", () => {
 
     expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
     expect(listActiveMatches).not.toHaveBeenCalled();
+  });
+
+  it("survives StrictMode effect replay and disposes the runtime only on real unmount", async () => {
+    const runtime = {
+      bootstrap: vi.fn(async () => undefined),
+      connectionFactory: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const onlineSessionFactory = vi.fn(() => fakeSession().session);
+    const gateway = { available: true, listRooms: vi.fn(async () => ({ available: true, rooms: [] })) } as unknown as OnlineLobbyGateway;
+    const { unmount } = render(
+      <StrictMode>
+        <App initialScenario="lobby-default" runtime={runtime} onlineGateway={gateway} onlineSessionFactory={onlineSessionFactory} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby"));
+    expect(runtime.dispose).not.toHaveBeenCalled();
+    const user = (await import("@testing-library/user-event")).default.setup();
+    await user.type(screen.getByRole("textbox", { name: "Tên của bạn" }), "An");
+    await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+    await waitFor(() => expect(onlineSessionFactory).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await waitFor(() => expect(runtime.dispose).toHaveBeenCalledTimes(1));
+  });
+
+  it("replaces a runtime owner after commit without stranding the previous owner", async () => {
+    const firstRuntime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const secondRuntime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const gateway = { available: false, listRooms: vi.fn(async () => ({ available: false, rooms: [] })) } as unknown as OnlineLobbyGateway;
+    const view = render(<App initialScenario="lobby-default" runtime={firstRuntime} onlineGateway={gateway} />);
+
+    view.rerender(<App initialScenario="lobby-default" runtime={secondRuntime} onlineGateway={gateway} />);
+
+    await waitFor(() => expect(firstRuntime.dispose).toHaveBeenCalledTimes(1));
+    expect(secondRuntime.dispose).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("closes the lobby stream before requesting a spectator ticket and passes the exact allocation to the session", async () => {
+    const events: string[] = [];
+    const allocation = Object.freeze({ allocationId: "alloc-1", room: "room-1", ticket: "ticket-1" });
+    const stream = {
+      start: vi.fn(async () => { events.push("stream-start"); }),
+      dispose: vi.fn(async () => { events.push("stream-dispose"); }),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+    };
+    const session = fakeSession();
+    session.session.start = vi.fn(async (options) => {
+      events.push("session-start");
+      expect(options).toEqual({ mode: "spectator", allocation });
+      expect((options as { readonly allocation: unknown }).allocation).toBe(allocation);
+    });
+    const runtime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => { events.push("runtime-dispose"); }) };
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: runtime as any,
+      gateway: { getSpectatorTicket: vi.fn(async () => { events.push("ticket"); return allocation; }) } as any,
+      createLobbyStream: () => stream as any,
+    });
+
+    await coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await coordinator.transition({
+      factory: () => session.session,
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      onSession: (next) => expect(next).toBe(session.session),
+      onLobbyStream: () => undefined,
+    });
+
+    expect(events.indexOf("stream-dispose")).toBeLessThan(events.indexOf("ticket"));
+    expect(events.indexOf("ticket")).toBeLessThan(events.indexOf("session-start"));
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+    expect(stream.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reopens the lobby stream when the spectator ticket fails and ignores stale transition callbacks", async () => {
+    const callbacks: string[] = [];
+    const streams = [0, 1].map(() => ({
+      start: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+    }));
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: { getSpectatorTicket: vi.fn(async () => { throw new Error("ticket failed"); }) } as any,
+      createLobbyStream: () => streams.shift() as any,
+    });
+
+    await coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => callbacks.push("old-session"),
+      onLobbyStream: () => callbacks.push("old-stream"),
+    });
+    const staleTransition = coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      onSession: () => callbacks.push("stale-session"),
+      onLobbyStream: () => callbacks.push("reopened-stream"),
+    });
+    const currentTransition = coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => callbacks.push("current-session"),
+      onLobbyStream: () => callbacks.push("current-stream"),
+    });
+
+    await Promise.all([staleTransition, currentTransition]);
+    expect(callbacks).not.toContain("stale-session");
+    expect(callbacks).not.toContain("reopened-stream");
+    expect(callbacks).toContain("current-session");
+    expect(callbacks).toContain("current-stream");
+  });
+
+  it("reopens a fresh lobby stream after a current spectator ticket failure", async () => {
+    const firstStream = {
+      start: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+    };
+    const reopenedStream = {
+      start: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 2 })),
+    };
+    const lobbySession = fakeSession().session;
+    const spectatorFactory = vi.fn(() => fakeSession().session);
+    let streamCount = 0;
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: { getSpectatorTicket: vi.fn(async () => { throw new Error("ticket failed"); }) } as any,
+      createLobbyStream: () => streamCount++ === 0 ? firstStream as any : reopenedStream as any,
+    });
+
+    await coordinator.transition({
+      factory: () => lobbySession,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await coordinator.transition({
+      factory: spectatorFactory,
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      lobby: {
+        factory: () => lobbySession,
+        options: { mode: "demo", scenario: "lobby-default" },
+      },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    expect(firstStream.dispose).toHaveBeenCalledTimes(1);
+    expect(reopenedStream.start).toHaveBeenCalledTimes(1);
+    expect(spectatorFactory).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a transition supplies an unvalidated spectator allocation", async () => {
+    const sessionFactory = vi.fn(() => fakeSession().session);
+    const getSpectatorTicket = vi.fn(async () => ({
+      allocationId: "alloc-1",
+      room: "room-1",
+      ticket: "ticket-1",
+    }));
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: { getSpectatorTicket } as any,
+      createLobbyStream: () => ({
+        start: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+        getSnapshot: vi.fn(() => ({ status: "unavailable", matches: [], catalogRevision: -1 })),
+      }) as any,
+    });
+
+    await coordinator.transition({
+      factory: sessionFactory,
+      options: { mode: "spectator", allocation: { allocationId: "alloc-1", room: "room-1" } } as any,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    expect(getSpectatorTicket).not.toHaveBeenCalled();
+    expect(sessionFactory).not.toHaveBeenCalled();
+  });
+
+  it("does not create fallback lobby providers after a stale ticket failure", async () => {
+    let rejectTicket!: (error: Error) => void;
+    const getSpectatorTicket = vi.fn(() => new Promise<never>((_, reject) => { rejectTicket = reject; }));
+    const lobbyFactory = vi.fn(() => fakeSession().session);
+    const createLobbyStream = vi.fn(() => ({
+      start: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+    })) as any;
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: { getSpectatorTicket } as any,
+      createLobbyStream,
+    });
+    const transition = coordinator.transition({
+      factory: () => { throw new Error("stale spectator factory must not run"); },
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      lobby: {
+        factory: lobbyFactory,
+        options: { mode: "demo", scenario: "lobby-default" },
+      },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    await Promise.resolve();
+    const disposal = coordinator.dispose();
+    rejectTicket(new Error("stale ticket failure"));
+    await Promise.all([transition, disposal]);
+
+    expect(lobbyFactory).not.toHaveBeenCalled();
+    expect(createLobbyStream).not.toHaveBeenCalled();
+  });
+
+  it("does not let a hung spectator ticket block a newer transition or dispose", async () => {
+    let resolveTicket!: (value: unknown) => void;
+    const ticket = new Promise((resolve) => { resolveTicket = resolve; });
+    const spectatorFactory = vi.fn(() => fakeSession().session);
+    const replacementFactory = vi.fn(() => fakeSession().session);
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: { getSpectatorTicket: vi.fn(() => ticket) } as any,
+      createLobbyStream: () => { throw new Error("not used"); },
+    });
+
+    const spectatorTransition = coordinator.transition({
+      factory: spectatorFactory,
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await Promise.resolve();
+    const replacementTransition = coordinator.transition({
+      factory: replacementFactory,
+      options: { mode: "demo", scenario: "lobby-default" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    await replacementTransition;
+    expect(replacementFactory).toHaveBeenCalledTimes(1);
+    await coordinator.dispose();
+    resolveTicket({ allocationId: "alloc-1", room: "room-1", ticket: "late-ticket" });
+    await spectatorTransition;
+    expect(spectatorFactory).not.toHaveBeenCalled();
+  });
+
+  it("does not let a hung session start block a newer transition or disposal", async () => {
+    let resolveHungStart!: () => void;
+    const hungStart = new Promise<void>((resolve) => { resolveHungStart = resolve; });
+    const started: string[] = [];
+    let sessionCount = 0;
+    const makeSession = (name: string): GameSession => ({
+      getSnapshot: () => new DemoSession("lobby-default").getSnapshot(),
+      subscribe: () => () => undefined,
+      start: async () => {
+        started.push(name);
+        if (name === "hung") await hungStart;
+      },
+      getLegalMoves: () => [],
+      move: async () => ({ accepted: false, error: { code: "invalid_move", message: "err", retryable: false } }),
+      leave: async () => undefined,
+      dispose: vi.fn(async () => undefined),
+    });
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: {} as any,
+      createLobbyStream: () => { throw new Error("not used"); },
+    });
+
+    const first = coordinator.transition({
+      factory: () => makeSession(sessionCount++ === 0 ? "hung" : "replacement"),
+      options: { mode: "demo", scenario: "lobby-default" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await Promise.resolve();
+    const second = coordinator.transition({
+      factory: () => makeSession("replacement-2"),
+      options: { mode: "demo", scenario: "game-active-a" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(started).toContain("replacement-2");
+    } finally {
+      resolveHungStart();
+      await Promise.all([first, second, coordinator.dispose()]);
+    }
+  });
+
+  it("does not let a hung lobby stream start block a newer transition", async () => {
+    let resolveStreamStart!: () => void;
+    const hungStreamStart = new Promise<void>((resolve) => { resolveStreamStart = resolve; });
+    const streams = [
+      {
+        start: vi.fn(() => hungStreamStart),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+        getSnapshot: vi.fn(() => ({ status: "loading", matches: [], catalogRevision: -1 })),
+      },
+      {
+        start: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+        getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+      },
+    ];
+    const started: string[] = [];
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: {} as any,
+      createLobbyStream: () => streams.shift() as any,
+    });
+
+    const first = coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => { started.push("first"); },
+      onLobbyStream: () => undefined,
+    });
+    await Promise.resolve();
+    const second = coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "game-active-a" },
+      onSession: () => { started.push("second"); },
+      onLobbyStream: () => undefined,
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(started).toContain("second");
+    } finally {
+      resolveStreamStart();
+      await Promise.all([first, second, coordinator.dispose()]);
+    }
+  });
+
+  it("disposes failed session and stream ownership after reporting errors", async () => {
+    const runtime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const session = fakeSession();
+    const sessionError = new Error("session start failed");
+    session.session.start = vi.fn(async () => { throw sessionError; });
+    const stream = {
+      start: vi.fn(async () => { throw new Error("stream start failed"); }),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "loading", matches: [], catalogRevision: -1 })),
+    };
+    const errors: unknown[] = [];
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: runtime as any,
+      gateway: {} as any,
+      createLobbyStream: () => stream as any,
+    });
+
+    await coordinator.transition({
+      factory: () => session.session,
+      options: { mode: "online", intent: "create", playerName: "A" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+      onError: (cause) => errors.push(cause),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(errors).toContain(sessionError);
+    expect(session.controls.dispose).toHaveBeenCalledTimes(1);
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+
+    const streamErrors: unknown[] = [];
+    await coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+      onError: (cause) => streamErrors.push(cause),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(streamErrors[0]).toBeInstanceOf(Error);
+    expect(stream.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older start failure dispose a reused session owner", async () => {
+    let rejectFirstStart!: (cause: Error) => void;
+    const session = fakeSession();
+    session.session.start = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_, reject) => { rejectFirstStart = reject; }))
+      .mockResolvedValueOnce(undefined);
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: {} as any,
+      createLobbyStream: () => { throw new Error("not used"); },
+    });
+
+    const first = coordinator.transition({ factory: () => session.session, options: { mode: "demo", scenario: "lobby-default" }, onSession: () => undefined, onLobbyStream: () => undefined });
+    await Promise.resolve();
+    await coordinator.transition({ factory: () => session.session, options: { mode: "demo", scenario: "game-active-a" }, onSession: () => undefined, onLobbyStream: () => undefined });
+    session.controls.dispose.mockClear();
+    rejectFirstStart(new Error("stale start failure"));
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(session.controls.dispose).not.toHaveBeenCalled();
+  });
+
+  it("waits for stale owner disposal before reusing the same session", async () => {
+    let rejectFirstStart!: (cause: Error) => void;
+    let resolveDispose!: () => void;
+    const session = fakeSession();
+    session.session.start = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_, reject) => { rejectFirstStart = reject; }))
+      .mockResolvedValue(undefined);
+    session.session.dispose = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveDispose = resolve; }))
+      .mockResolvedValue(undefined);
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: {} as any,
+      createLobbyStream: () => { throw new Error("not used"); },
+    });
+
+    const first = coordinator.transition({
+      factory: () => session.session,
+      options: { mode: "online", intent: "create", playerName: "A" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await first;
+    rejectFirstStart(new Error("stale start failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.session.dispose).toHaveBeenCalledTimes(1);
+
+    const second = coordinator.transition({
+      factory: () => session.session,
+      options: { mode: "online", intent: "create", playerName: "B" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.session.start).toHaveBeenCalledTimes(1);
+
+    resolveDispose();
+    await second;
+    expect(session.session.start).toHaveBeenCalledTimes(2);
+    await coordinator.dispose();
+  });
+
+  it("does not let an older stream start failure dispose a reused stream owner", async () => {
+    let rejectFirstStart!: (cause: Error) => void;
+    const stream = {
+      start: vi.fn()
+        .mockImplementationOnce(() => new Promise<void>((_, reject) => { rejectFirstStart = reject; }))
+        .mockResolvedValueOnce(undefined),
+      dispose: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "loading", matches: [], catalogRevision: -1 })),
+    };
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) } as any,
+      gateway: {} as any,
+      createLobbyStream: () => stream as any,
+    });
+
+    const first = coordinator.transition({ factory: () => fakeSession().session, options: { mode: "demo", scenario: "lobby-default" }, openLobbyStream: true, onSession: () => undefined, onLobbyStream: () => undefined });
+    await Promise.resolve();
+    await coordinator.transition({ factory: () => fakeSession().session, options: { mode: "demo", scenario: "game-active-a" }, openLobbyStream: true, onSession: () => undefined, onLobbyStream: () => undefined });
+    stream.dispose.mockClear();
+    rejectFirstStart(new Error("stale stream failure"));
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stream.dispose).not.toHaveBeenCalled();
+  });
+
+  it("passes a non-owning runtime facade to custom lobby streams", async () => {
+    const runtime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    let streamRuntime: any;
+    const stream = {
+      start: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => { await streamRuntime.dispose(); }),
+      subscribe: vi.fn(() => () => undefined),
+      getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })),
+    };
+    const coordinator = new AppLifecycleCoordinator({
+      runtime: runtime as any,
+      gateway: {} as any,
+      createLobbyStream: (owner) => { streamRuntime = owner; return stream as any; },
+    });
+
+    await coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await coordinator.dispose();
+
+    expect(stream.dispose).toHaveBeenCalledTimes(1);
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses updated gateway and lobby stream dependencies for later transitions", async () => {
+    const runtime = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const firstGateway = { getSpectatorTicket: vi.fn(async () => { throw new Error("stale gateway"); }) };
+    const secondGateway = { getSpectatorTicket: vi.fn(async () => ({ allocationId: "alloc-1", room: "room-1", ticket: "ticket-1" })) };
+    const firstStream = { start: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined), getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 1 })) };
+    const secondStream = { start: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined), getSnapshot: vi.fn(() => ({ status: "ready", matches: [], catalogRevision: 2 })) };
+    const firstFactory = vi.fn(() => firstStream as any);
+    const secondFactory = vi.fn(() => secondStream as any);
+    const startedOptions: unknown[] = [];
+    const session = fakeSession().session;
+    session.start = vi.fn(async (options) => { startedOptions.push(options); });
+    const coordinator = new AppLifecycleCoordinator({ runtime: runtime as any, gateway: firstGateway as any, createLobbyStream: firstFactory });
+    coordinator.updateDependencies({ runtime, gateway: secondGateway as any, createLobbyStream: secondFactory });
+
+    await coordinator.transition({
+      factory: () => session,
+      options: { mode: "spectator", allocationId: "alloc-1", roomId: "room-1" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await coordinator.transition({
+      factory: () => fakeSession().session,
+      options: { mode: "demo", scenario: "lobby-default" },
+      openLobbyStream: true,
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+
+    expect(firstGateway.getSpectatorTicket).not.toHaveBeenCalled();
+    expect(secondGateway.getSpectatorTicket).toHaveBeenCalledWith("alloc-1");
+    expect(startedOptions[0]).toEqual({ mode: "spectator", allocation: { allocationId: "alloc-1", room: "room-1", ticket: "ticket-1" } });
+    expect(firstFactory).not.toHaveBeenCalled();
+    expect(secondFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retire the currently selected runtime during A-to-B-to-A replacement", async () => {
+    const runtimeA = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const runtimeB = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const coordinator = new AppLifecycleCoordinator({ runtime: runtimeA as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+
+    coordinator.updateDependencies({ runtime: runtimeB as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+    coordinator.updateDependencies({ runtime: runtimeA as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+    await coordinator.transition({ factory: () => fakeSession().session, options: { mode: "demo", scenario: "lobby-default" }, onSession: () => undefined, onLobbyStream: () => undefined });
+
+    expect(runtimeA.dispose).not.toHaveBeenCalled();
+    expect(runtimeB.dispose).toHaveBeenCalledTimes(1);
+    await coordinator.dispose();
+  });
+
+  it("disposes an idle runtime after dependency replacement", async () => {
+    const runtimeA = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const runtimeB = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const coordinator = new AppLifecycleCoordinator({ runtime: runtimeA as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+
+    coordinator.updateDependencies({ runtime: runtimeB as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(runtimeA.dispose).toHaveBeenCalledTimes(1);
+    expect(runtimeB.dispose).not.toHaveBeenCalled();
+    await coordinator.dispose();
+  });
+
+  it("waits for an in-flight runtime retirement before reusing that runtime", async () => {
+    let resolveDispose!: () => void;
+    const retirement = new Promise<void>((resolve) => { resolveDispose = resolve; });
+    const runtimeA = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(() => retirement) };
+    const runtimeB = { bootstrap: vi.fn(), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const started: string[] = [];
+    const session = fakeSession();
+    session.session.start = vi.fn(async () => { started.push("started"); });
+    const coordinator = new AppLifecycleCoordinator({ runtime: runtimeA as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+
+    coordinator.updateDependencies({ runtime: runtimeB as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+    await Promise.resolve();
+    expect(runtimeA.dispose).toHaveBeenCalledTimes(1);
+
+    coordinator.updateDependencies({ runtime: runtimeA as any, gateway: {} as any, createLobbyStream: () => { throw new Error("not used"); } });
+    const transition = coordinator.transition({
+      factory: () => session.session,
+      options: { mode: "online", intent: "create", playerName: "An" },
+      onSession: () => undefined,
+      onLobbyStream: () => undefined,
+    });
+    await Promise.resolve();
+    expect(started).toEqual([]);
+
+    resolveDispose();
+    await transition;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["started"]);
+    await coordinator.dispose();
   });
 });

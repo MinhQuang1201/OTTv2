@@ -16,6 +16,8 @@ export interface OnlineSessionDependencies {
   readonly clearInterval?: (handle: ReturnType<typeof globalThis.setInterval>) => void;
   readonly tickMs?: number;
   readonly host?: string;
+  /** App-managed sessions leave shared runtime disposal to their lifecycle owner. */
+  readonly disposeRuntime?: boolean;
 }
 
 const initialSnapshot: GameSnapshot = Object.freeze({
@@ -42,6 +44,7 @@ export class OnlineSession implements GameSession {
   private readonly clearIntervalFn: NonNullable<OnlineSessionDependencies["clearInterval"]>;
   private readonly tickMs: number;
   private readonly host: string;
+  private readonly disposeRuntime: boolean;
   private readonly listeners = new Set<() => void>();
   private snapshot: GameSnapshot = initialSnapshot;
   private client: PlayhtmlGameClientLike | null = null;
@@ -55,6 +58,8 @@ export class OnlineSession implements GameSession {
   private receivedAt = 0;
   private clockTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private clientUnsubscribers: Array<() => void> = [];
+  private lifecycleGeneration = 0;
+  private clientBindingGeneration = 0;
   private disposed = false;
 
   constructor(deps: OnlineSessionDependencies = {}) {
@@ -71,6 +76,7 @@ export class OnlineSession implements GameSession {
     this.clearIntervalFn = deps.clearInterval ?? ((handle) => globalThis.clearInterval(handle));
     this.tickMs = deps.tickMs ?? 250;
     this.host = deps.host ?? globalThis.OTT_PLAYHTML_HOST ?? globalThis.OTT_PLAYHTML_CONTROL_ENDPOINT ?? "";
+    this.disposeRuntime = deps.disposeRuntime ?? true;
   }
 
   getSnapshot = (): GameSnapshot => this.snapshot;
@@ -83,6 +89,9 @@ export class OnlineSession implements GameSession {
 
   async start(options: StartGameOptions): Promise<void> {
     if (this.disposed || options.mode !== "online") return;
+    this.cleanupTransport();
+    this.resetRoomState();
+    const generation = ++this.lifecycleGeneration;
     if (!this.gateway.available) {
       this.fail(error("online_unavailable", "Online hiện không khả dụng."));
       return;
@@ -90,20 +99,24 @@ export class OnlineSession implements GameSession {
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "preparing", connection: "connecting", error: null });
     this.publish();
     try {
-      this.allocation = options.intent === "create"
+      const allocation = options.intent === "create"
         ? await this.gateway.createRoom(options.playerName)
         : await this.gateway.joinRoom(options.playerName, options.roomId);
-      if (this.disposed) return;
+      if (!this.isCurrentGeneration(generation)) return;
+      this.allocation = allocation;
       if (!this.host) throw new Error("PlayHTML host is unavailable");
-      this.client = this.clientFactory({
+      const client = this.clientFactory({
         connectionFactory: () => this.runtime.connectionFactory(),
         playhtmlBootstrap: (config: { host: string; room: string }) => this.runtime.bootstrap(config),
         playhtmlHost: this.host,
       });
-      this.bindClient(this.client);
-      await this.client.attachAllocation(this.allocation);
-      if (this.disposed) return;
+      if (!this.isCurrentGeneration(generation)) return;
+      this.client = client;
+      this.bindClient(client, generation);
+      if (await client.attachAllocation(allocation) !== true) throw new Error("Online attach was not accepted");
+      if (!this.isCurrentGeneration(generation)) return;
     } catch (cause) {
+      if (!this.isCurrentGeneration(generation)) return;
       this.fail(error("connection_failed", clientMessage(cause, "Không thể kết nối phòng online."), true));
     }
   }
@@ -128,6 +141,8 @@ export class OnlineSession implements GameSession {
   async leave(): Promise<void> {
     if (this.disposed) return;
     try { this.client?.leave(); } catch { /* a closed transport is already left */ }
+    this.cleanupTransport();
+    this.stopClockTimer();
     if (this.snapshot.phase !== "finished") {
       const winner: Seat | null = this.snapshot.viewerSeat === "A" ? "B" : this.snapshot.viewerSeat === "B" ? "A" : null;
       this.snapshot = Object.freeze({ ...this.snapshot, phase: "finished", turn: null, result: { winner, reason: "leave" as const }, pendingMove: false, connection: "offline" });
@@ -138,21 +153,21 @@ export class OnlineSession implements GameSession {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.clockTimer !== null) this.clearIntervalFn(this.clockTimer);
-    this.clockTimer = null;
-    for (const unsubscribe of this.clientUnsubscribers) unsubscribe();
-    this.clientUnsubscribers = [];
-    try { this.client?.close(); } catch { /* ignore close errors */ }
-    this.client = null;
+    this.cleanupTransport();
     this.listeners.clear();
-    if (typeof this.runtime?.dispose === "function") {
+    if (this.disposeRuntime && typeof this.runtime?.dispose === "function") {
       await this.runtime.dispose();
     }
   }
 
-  private bindClient(client: PlayhtmlGameClientLike): void {
+  private bindClient(client: PlayhtmlGameClientLike, lifecycleGeneration: number): void {
+    const bindingGeneration = ++this.clientBindingGeneration;
+    const isCurrentSource = () => !this.disposed && this.client === client && lifecycleGeneration === this.lifecycleGeneration && bindingGeneration === this.clientBindingGeneration;
     const bind = (name: string, callback: (payload?: unknown) => void) => {
-      const unsubscribe = client.on(name, callback);
+      const unsubscribe = client.on(name, (payload) => {
+        if (!isCurrentSource()) return;
+        callback(payload);
+      });
       if (typeof unsubscribe === "function") this.clientUnsubscribers.push(unsubscribe);
     };
     bind("open", () => this.setConnection("online"));
@@ -171,7 +186,7 @@ export class OnlineSession implements GameSession {
   }
 
   private applyState(payload: unknown): void {
-    if (!payload || typeof payload !== "object") return;
+    if (this.disposed || this.snapshot.phase === "finished" || !this.client || !payload || typeof payload !== "object") return;
     const message = payload as OnlineStateMessage;
     if (!Number.isInteger(message.revision) || message.revision <= this.serverRevision) return;
     const normalized = normalizeOnlineState(message, this.performanceNow(), this.boardRevision);
@@ -188,7 +203,12 @@ export class OnlineSession implements GameSession {
     });
     const resultEvents = [...this.snapshot.events, ...newEvents];
     this.snapshot = Object.freeze({ ...normalized.snapshot, boardRevision: this.boardRevision, events: resultEvents, pendingMove: false, connection: "online" });
-    this.startClockTimer();
+    if (this.snapshot.phase === "finished") {
+      this.cleanupTransport();
+      this.snapshot = Object.freeze({ ...this.snapshot, connection: "offline" });
+    } else {
+      this.startClockTimer();
+    }
     this.publish();
   }
 
@@ -201,6 +221,8 @@ export class OnlineSession implements GameSession {
     if (reason !== "goal" && reason !== "elimination" && reason !== "no_moves" && reason !== "timeout" && reason !== "disconnect_timeout" && reason !== "leave") return;
     const event: GameEventView = { id: this.nextEventId++, type: "win", winner: winner ?? "A", reason };
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "finished", turn: null, result: { winner, reason }, events: [...this.snapshot.events, event], pendingMove: false });
+    this.cleanupTransport();
+    this.snapshot = Object.freeze({ ...this.snapshot, connection: "offline" });
     this.publish();
   }
 
@@ -221,14 +243,60 @@ export class OnlineSession implements GameSession {
 
   private setConnection(connection: GameSnapshot["connection"]): void {
     if (this.disposed) return;
+    if (connection !== "online") {
+      this.stopClockTimer();
+      this.rawState = null;
+    }
     this.snapshot = Object.freeze({ ...this.snapshot, connection });
+    if (connection === "online" && this.snapshot.phase === "playing") this.startClockTimer();
     this.publish();
   }
 
   private fail(sessionError: SessionErrorView): void {
     if (this.disposed) return;
+    this.cleanupTransport();
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "error", connection: "unavailable", viewer: null, viewerSeat: null, capabilities: { canMove: false, canLeaveGame: false, canSpectate: false }, error: sessionError, pendingMove: false });
     this.publish();
+  }
+
+  private stopClockTimer(): void {
+    if (this.clockTimer !== null) {
+      try { this.clearIntervalFn(this.clockTimer); } catch { /* continue transport cleanup */ }
+      this.clockTimer = null;
+    }
+  }
+
+  private cleanupTransport(): void {
+    this.lifecycleGeneration += 1;
+    this.clientBindingGeneration += 1;
+    this.stopClockTimer();
+    this.allocation = null;
+    this.rawState = null;
+    this.receivedAt = 0;
+    const unsubscribers = this.clientUnsubscribers;
+    this.clientUnsubscribers = [];
+    for (const unsubscribe of unsubscribers) {
+      try { unsubscribe(); } catch { /* continue transport cleanup */ }
+    }
+    const client = this.client;
+    this.client = null;
+    try { client?.close(); } catch { /* continue transport cleanup */ }
+  }
+
+  private resetRoomState(): void {
+    this.allocation = null;
+    this.rawState = null;
+    this.serverRevision = -1;
+    this.lastFingerprint = "";
+    this.boardRevision = 0;
+    this.nextEventId = 1;
+    this.eventIds.clear();
+    this.receivedAt = 0;
+    this.snapshot = initialSnapshot;
+  }
+
+  private isCurrentGeneration(generation: number): boolean {
+    return !this.disposed && generation === this.lifecycleGeneration;
   }
 
   private publish(): void {

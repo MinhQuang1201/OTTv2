@@ -22,11 +22,13 @@ Luong online:
 
 - Vercel project: `lap-trinh-mang/ottv2`.
 - Frontend production: <https://ottv2-two.vercel.app>.
-- Deployment gan nhat da o trang thai `Ready`.
+- Deployment gan nhat da o trang thai `Ready`: `https://ottv2-ixbkhp8k6-lap-trinh-mang.vercel.app`.
+- Production alias van giu nguyen: `https://ottv2-two.vercel.app`.
 - Vercel Deployment Protection da tat de URL co the truy cap cong khai.
-- Cloudflare Worker production chua duoc deploy.
-- Cloudflare Wrangler chua dang nhap trong moi truong deploy.
-- Frontend hien chua co `VITE_OTT_PLAYHTML_HOST` va `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT`, nen online van unavailable.
+- Cloudflare Worker production da deploy: `https://ottv2-minimal.haixcxt.workers.dev`.
+- Worker version hien tai: `d1d44b8e-9fd0-4cc8-a3cd-cec43ba0047d`.
+- Frontend production da build voi `VITE_OTT_PLAYHTML_HOST` va `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT` tro toi Worker production.
+- `OTT_SPECTATOR_ENABLED` da bat trong production sau production browser smoke test.
 - Ban deploy Vercel hien tai duoc build tu worktree dang co thay doi chua commit.
 
 ## Yeu cau
@@ -139,7 +141,7 @@ Khong dat `OTT_INTERNAL_SECRET` vao:
 - URL, query string, page data, PlayHTML state hoac log.
 - `wrangler.jsonc` trong repository.
 
-`OTT_SPECTATOR_ENABLED` nen de trong hoac dat khac `"true"` cho production cho den khi co du evidence rollout spectator. Khong dung env `test` hoac `demo` de deploy production.
+`OTT_SPECTATOR_ENABLED` hien dat `"true"` trong top-level production `wrangler.jsonc`. Khong dung env `test` hoac `demo` de deploy production.
 
 ## Giai doan 4: Deploy Worker
 

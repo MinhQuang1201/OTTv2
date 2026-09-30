@@ -1,5 +1,9 @@
+import type { PublicMatchView as ProtocolPublicMatchView } from "../../../../../packages/protocol/src/index";
+
 /** The two player seats in a game. */
 export type Seat = "A" | "B";
+
+export type { PublicMatchView } from "../../../../../packages/protocol/src/index";
 
 /** Canonical piece kinds used by the game rules. */
 export type PieceType = "dam" | "la" | "keo";
@@ -46,16 +50,6 @@ export interface ViewerCapabilities {
   readonly canMove: boolean;
   readonly canLeaveGame: boolean;
   readonly canSpectate: boolean;
-}
-
-export interface PublicMatchView {
-  readonly allocationId: string;
-  readonly roomId: string;
-  readonly status: "playing";
-  readonly players: Readonly<Record<Seat, Pick<PlayerView, "seat" | "name" | "connected" | "remainingMs">>>;
-  readonly spectatorCount: number;
-  readonly serverNow: number;
-  readonly runningSeat: Seat | null;
 }
 
 export type SessionMode = "demo" | "local" | "ai" | "online" | "spectator";
@@ -173,7 +167,7 @@ export interface GameSnapshot {
   readonly aiThinking: boolean;
   readonly roomId: string | null;
   readonly waitingRooms?: readonly WaitingRoomView[];
-  readonly publicMatches?: readonly PublicMatchView[];
+  readonly publicMatches?: readonly ProtocolPublicMatchView[];
   readonly result: GameResultView | null;
   readonly events: readonly GameEventView[];
   readonly error: SessionErrorView | null;

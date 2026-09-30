@@ -11,6 +11,14 @@ import {
   withInitializationRollback,
   retrySeatUpdateRequest,
 } from "../auth/internal-auth.js";
+import {
+  normalizePublicMatchSummary,
+} from "./public-match.js";
+import {
+  validatePublicMatchCatalog,
+  MAX_OTT_PAYLOAD_BYTES,
+  type PublicMatchView,
+} from "../../../../packages/protocol/src/index.js";
 
 type Allocation = {
   id: string;
@@ -25,6 +33,64 @@ type Allocation = {
 const MAX_BODY = 4096;
 const DEFAULT_CREATOR_ATTACH_TTL_MS = 60_000;
 const RATE_LIMIT_RETENTION_MS = 60_000;
+const PUBLIC_CATALOG_NOTIFY_KEY = "public-catalog-notify";
+const PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX = "public-catalog-notify-claim:";
+const PUBLIC_CATALOG_EXHAUSTED_KEY = "public-catalog-notify-exhausted";
+const PUBLIC_CATALOG_LEGACY_EXHAUSTED_PREFIX = "public-catalog-notify-exhausted:";
+const PUBLIC_CATALOG_DELIVERED_KEY = "public-catalog-delivered-revision";
+const PUBLIC_CATALOG_MAX_ATTEMPTS = 4;
+const PUBLIC_CATALOG_RETRY_BASE_MS = 1_000;
+const PUBLIC_CATALOG_RETRY_MAX_MS = 30_000;
+const PUBLIC_CATALOG_CLAIM_LEASE_MS = 60_000;
+
+type CatalogNotification = {
+  catalogRevision: number;
+  attempt: number;
+  nextAttemptMs: number;
+  terminalRemovalPending: boolean;
+};
+
+type CatalogNotificationClaim = CatalogNotification & {
+  claimToken: string;
+  leaseUntilMs: number;
+};
+
+function catalogClaimKey(catalogRevision: number): string {
+  return `${PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX}${catalogRevision}`;
+}
+
+function catalogNotificationRecord(claim: CatalogNotificationClaim): CatalogNotification {
+  const { claimToken: _claimToken, leaseUntilMs: _leaseUntilMs, ...record } = claim;
+  return record;
+}
+
+async function readCappedUtf8Body(request: Request, maxBytes: number): Promise<string | null> {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length < 0 || length > maxBytes) return null;
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let totalBytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } catch {
+    return null;
+  }
+}
 
 function configuredDuration(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -62,11 +128,51 @@ export class OttLobbyServer extends DurableObject<Env> {
     return [...values.values()];
   }
 
-  private async scheduleRateLimitSweep(now = Date.now()): Promise<void> {
+  private alarmScheduleTail?: Promise<void>;
+
+  private async scheduleAlarm(): Promise<void> {
+    const previous = this.alarmScheduleTail ?? Promise.resolve();
+    let release!: () => void;
+    this.alarmScheduleTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
     try {
-      await this.ctx.storage.setAlarm?.(now + RATE_LIMIT_RETENTION_MS);
+      const now = Date.now();
+      let nextDeadline: number | undefined;
+      const legacyExhausted = await this.ctx.storage.list({ prefix: PUBLIC_CATALOG_LEGACY_EXHAUSTED_PREFIX });
+      for (const key of legacyExhausted.keys()) await this.ctx.storage.delete(key);
+      const rateEntries = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
+      for (const value of rateEntries.values()) {
+        const deadline = typeof value === "number" && Number.isFinite(value)
+          ? value + RATE_LIMIT_RETENTION_MS
+          : now;
+        nextDeadline = nextDeadline === undefined ? deadline : Math.min(nextDeadline, deadline);
+      }
+      const notification = this.env.OTT_SPECTATOR_ENABLED === "true"
+        ? await this.ctx.storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY)
+        : undefined;
+      const claims = this.env.OTT_SPECTATOR_ENABLED === "true"
+        ? await this.ctx.storage.list<CatalogNotificationClaim>({ prefix: PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX })
+        : undefined;
+      if (notification && notification.attempt < PUBLIC_CATALOG_MAX_ATTEMPTS && Number.isFinite(notification.nextAttemptMs)) {
+        nextDeadline = nextDeadline === undefined
+          ? notification.nextAttemptMs
+          : Math.min(nextDeadline, notification.nextAttemptMs);
+      }
+      for (const claim of claims?.values() ?? []) {
+        if (Number.isFinite(claim.leaseUntilMs)) {
+          nextDeadline = nextDeadline === undefined
+            ? claim.leaseUntilMs
+            : Math.min(nextDeadline, claim.leaseUntilMs);
+        }
+      }
+      if (nextDeadline === undefined) await this.ctx.storage.deleteAlarm?.();
+      else await this.ctx.storage.setAlarm?.(nextDeadline);
     } catch {
-      // Rate-limit cleanup must not turn a valid control request into an error.
+      // Alarm scheduling must not turn a valid control request into an error.
+    } finally {
+      release();
     }
   }
 
@@ -78,9 +184,211 @@ export class OttLobbyServer extends DurableObject<Env> {
         await this.ctx.storage.delete(key);
       }
     }
-    const remaining = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
-    if (remaining.size) await this.scheduleRateLimitSweep(now);
-    else await this.ctx.storage.deleteAlarm?.();
+    if (this.env.OTT_SPECTATOR_ENABLED !== "true") {
+      await this.ctx.storage.delete(PUBLIC_CATALOG_NOTIFY_KEY);
+      const claims = await this.ctx.storage.list({ prefix: PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX });
+      for (const key of claims.keys()) await this.ctx.storage.delete(key);
+      await this.ctx.storage.delete(PUBLIC_CATALOG_EXHAUSTED_KEY);
+    }
+    await this.deliverCatalogNotification(now);
+    await this.scheduleAlarm();
+  }
+
+  private async enqueueCatalogNotification(
+    storage: DurableObjectStorage | DurableObjectTransaction,
+    catalogRevision: number,
+    terminalRemovalPending: boolean,
+    now = Date.now(),
+  ): Promise<void> {
+    const existing = await storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY);
+    const claimed = await storage.get<CatalogNotificationClaim>(catalogClaimKey(catalogRevision));
+    if (existing && existing.catalogRevision > catalogRevision) return;
+    if (claimed && claimed.catalogRevision >= catalogRevision) return;
+    const exhausted = await storage.get<CatalogNotification>(PUBLIC_CATALOG_EXHAUSTED_KEY);
+    if (exhausted && exhausted.catalogRevision <= catalogRevision) await storage.delete(PUBLIC_CATALOG_EXHAUSTED_KEY);
+    await storage.put(PUBLIC_CATALOG_NOTIFY_KEY, {
+      catalogRevision,
+      attempt: 0,
+      nextAttemptMs: now,
+      terminalRemovalPending: Boolean(existing?.terminalRemovalPending || terminalRemovalPending),
+    } satisfies CatalogNotification);
+  }
+
+  private async currentPublicCatalog(): Promise<{ catalogRevision: number; matches: PublicMatchView[] } | null> {
+    const materialized = await this.transaction(async (storage) => {
+      const catalogRevision = (await storage.get<number>("public-catalog-revision")) ?? 0;
+      const values = await storage.list<Allocation>({ prefix: "allocation:" });
+      return { catalogRevision, list: [...values.values()] };
+    });
+    const { catalogRevision, list } = materialized;
+    const matches: PublicMatchView[] = [];
+    for (const item of list) {
+      if (item.status !== "playing" || item.summary === undefined) continue;
+      const normalized = normalizePublicMatchSummary(item.summary);
+      if (!normalized.ok) return null;
+      matches.push(normalized.value);
+    }
+    const catalog = validatePublicMatchCatalog({
+      __ott: true,
+      type: "ott:active-matches",
+      catalogRevision,
+      matches,
+    });
+    return catalog.ok ? { catalogRevision, matches: [...catalog.value.matches] } : null;
+  }
+
+  private async claimCatalogNotification(now: number): Promise<CatalogNotificationClaim | null> {
+    return this.transaction(async (storage) => {
+      const notification = await storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY);
+      const claims = await storage.list<CatalogNotificationClaim>({ prefix: PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX });
+      for (const claim of claims.values()) {
+        if (notification && notification.catalogRevision > claim.catalogRevision) {
+          if (claim.leaseUntilMs <= now) await storage.delete(catalogClaimKey(claim.catalogRevision));
+          continue;
+        }
+        if (claim.leaseUntilMs > now) return null;
+        await storage.delete(PUBLIC_CATALOG_NOTIFY_KEY);
+        const nextAttempt = claim.attempt + 1;
+        if (nextAttempt >= PUBLIC_CATALOG_MAX_ATTEMPTS) {
+          await storage.put(PUBLIC_CATALOG_EXHAUSTED_KEY, {
+            ...catalogNotificationRecord(claim),
+            attempt: nextAttempt,
+            nextAttemptMs: now,
+          } satisfies CatalogNotification);
+          await storage.delete(catalogClaimKey(claim.catalogRevision));
+          return null;
+        }
+        const recovered: CatalogNotificationClaim = {
+          ...claim,
+          attempt: nextAttempt,
+          claimToken: crypto.randomUUID(),
+          nextAttemptMs: now,
+          leaseUntilMs: now + PUBLIC_CATALOG_CLAIM_LEASE_MS,
+        };
+        await storage.put(catalogClaimKey(claim.catalogRevision), recovered);
+        return recovered;
+      }
+      const record = await storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY);
+      if (!record || record.nextAttemptMs > now || record.attempt >= PUBLIC_CATALOG_MAX_ATTEMPTS) return null;
+      const claim: CatalogNotificationClaim = {
+        ...record,
+        claimToken: crypto.randomUUID(),
+        leaseUntilMs: now + PUBLIC_CATALOG_CLAIM_LEASE_MS,
+      };
+      await storage.put(catalogClaimKey(record.catalogRevision), claim);
+      await storage.delete(PUBLIC_CATALOG_NOTIFY_KEY);
+      return claim;
+    });
+  }
+
+  private async restoreCatalogNotification(record: CatalogNotificationClaim, now: number): Promise<void> {
+    const nextAttempt = record.attempt + 1;
+    let exhausted = false;
+    await this.transaction(async (storage) => {
+      const claim = await storage.get<CatalogNotificationClaim>(catalogClaimKey(record.catalogRevision));
+      if (!claim || claim.catalogRevision !== record.catalogRevision || claim.attempt !== record.attempt ||
+          claim.nextAttemptMs !== record.nextAttemptMs || claim.terminalRemovalPending !== record.terminalRemovalPending ||
+          claim.claimToken !== record.claimToken) return;
+      const deliveredRevision = await storage.get<number>(PUBLIC_CATALOG_DELIVERED_KEY);
+      if (deliveredRevision !== undefined && deliveredRevision >= record.catalogRevision) {
+        await storage.delete(catalogClaimKey(record.catalogRevision));
+        return;
+      }
+      const current = await storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY);
+      if (current && (
+        current.catalogRevision !== record.catalogRevision ||
+        current.attempt !== record.attempt ||
+        current.nextAttemptMs !== record.nextAttemptMs ||
+        current.terminalRemovalPending !== record.terminalRemovalPending
+      )) {
+        await storage.delete(catalogClaimKey(record.catalogRevision));
+        return;
+      }
+      if (nextAttempt >= PUBLIC_CATALOG_MAX_ATTEMPTS) {
+        await storage.put(PUBLIC_CATALOG_EXHAUSTED_KEY, {
+          ...catalogNotificationRecord(record),
+          attempt: nextAttempt,
+          nextAttemptMs: now,
+        } satisfies CatalogNotification);
+        await storage.delete(catalogClaimKey(record.catalogRevision));
+        exhausted = true;
+        return;
+      }
+      await storage.put(PUBLIC_CATALOG_NOTIFY_KEY, {
+        ...catalogNotificationRecord(record),
+        attempt: nextAttempt,
+        nextAttemptMs: now + Math.min(PUBLIC_CATALOG_RETRY_MAX_MS, PUBLIC_CATALOG_RETRY_BASE_MS * (2 ** record.attempt)),
+      } satisfies CatalogNotification);
+      await storage.delete(catalogClaimKey(record.catalogRevision));
+    });
+    if (exhausted) {
+      console.warn(`OTT public catalog notification exhausted at revision ${record.catalogRevision}`);
+    }
+  }
+
+  private async completeCatalogNotification(record: CatalogNotificationClaim, deliveredRevision: number): Promise<void> {
+    await this.transaction(async (storage) => {
+      const claim = await storage.get<CatalogNotificationClaim>(catalogClaimKey(record.catalogRevision));
+      if (!claim || claim.catalogRevision !== record.catalogRevision || claim.attempt !== record.attempt ||
+          claim.nextAttemptMs !== record.nextAttemptMs || claim.terminalRemovalPending !== record.terminalRemovalPending ||
+          claim.claimToken !== record.claimToken) return;
+      await storage.delete(catalogClaimKey(record.catalogRevision));
+      const previousDelivered = await storage.get<number>(PUBLIC_CATALOG_DELIVERED_KEY);
+      if (previousDelivered === undefined || deliveredRevision > previousDelivered) {
+        await storage.put(PUBLIC_CATALOG_DELIVERED_KEY, deliveredRevision);
+      }
+      const current = await storage.get<CatalogNotification>(PUBLIC_CATALOG_NOTIFY_KEY);
+      if (!current || current.catalogRevision <= record.catalogRevision) {
+        if (current) await storage.delete(PUBLIC_CATALOG_NOTIFY_KEY);
+      }
+      const exhausted = await storage.get<CatalogNotification>(PUBLIC_CATALOG_EXHAUSTED_KEY);
+      if (exhausted && exhausted.catalogRevision <= deliveredRevision) {
+        await storage.delete(PUBLIC_CATALOG_EXHAUSTED_KEY);
+      }
+    });
+  }
+
+  private async deliverCatalogNotification(now = Date.now()): Promise<void> {
+    if (this.env.OTT_SPECTATOR_ENABLED !== "true") return;
+    const claimed = await this.claimCatalogNotification(now);
+    if (!claimed) return;
+    const restore = async (): Promise<void> => {
+      try {
+        await this.restoreCatalogNotification(claimed, now);
+      } catch {
+        // The durable claim remains leased and can be recovered by a later alarm.
+      }
+    };
+    let catalog: { catalogRevision: number; matches: PublicMatchView[] } | null;
+    try {
+      catalog = await this.currentPublicCatalog();
+    } catch {
+      await restore();
+      return;
+    }
+    if (!catalog) {
+      await restore();
+      return;
+    }
+    if (catalog.catalogRevision < claimed.catalogRevision) {
+      await restore();
+      return;
+    }
+    try {
+      const stream = this.env.Lobby?.get(this.env.Lobby.idFromName("ott-lobby-public"));
+      if (!stream || !this.env.OTT_INTERNAL_SECRET) {
+        await restore();
+        return;
+      }
+      const response = await stream.fetch(internalRequest(this.env.OTT_INTERNAL_SECRET, "/internal/active-update", {
+        catalogRevision: catalog.catalogRevision,
+        matches: catalog.matches,
+      }));
+      if (!response.ok) throw new Error(`Lobby stream update failed with HTTP ${response.status}`);
+      await this.completeCatalogNotification(claimed, catalog.catalogRevision);
+    } catch {
+      await restore();
+    }
   }
 
   private async rollbackJoinReservation(id: string): Promise<void> {
@@ -95,9 +403,9 @@ export class OttLobbyServer extends DurableObject<Env> {
   }
 
   private async read(request: Request): Promise<Record<string, unknown> | null> {
-    if (request.method !== "POST" || Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return null;
-    const text = await request.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_BODY) return null;
+    if (request.method !== "POST") return null;
+    const text = await readCappedUtf8Body(request, MAX_BODY);
+    if (text === null) return null;
     try { const value = JSON.parse(text); return value && typeof value === "object" && !Array.isArray(value) ? value : null; } catch { return null; }
   }
 
@@ -121,12 +429,14 @@ export class OttLobbyServer extends DurableObject<Env> {
     const last = await this.ctx.storage.get<number>(rateKey);
     if (last !== undefined && now - last < 40) return json({ error: "rate_limited" }, 429);
     await this.ctx.storage.put(rateKey, now);
-    await this.scheduleRateLimitSweep(now);
+    await this.scheduleAlarm();
     const list = await this.allocations();
     if (action === "list") return json({ rooms: list.filter((item) => item.status === "waiting").map(publicAllocation) });
     if (action === "active") {
       if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
-      return json({ matches: list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary) });
+      const catalog = await this.currentPublicCatalog();
+      if (!catalog) return json({ error: "catalog_unavailable" }, 503);
+      return json({ matches: catalog.matches });
     }
 
     if (!this.env.OTT_INTERNAL_SECRET) {
@@ -300,61 +610,61 @@ export class OttLobbyServer extends DurableObject<Env> {
     return json({ error: "invalid_request" }, 400);
   }
 
-  private async notifyLobbyStream(catalogRevision: number, matches: unknown[]): Promise<void> {
-    if (!this.env.Lobby || !this.env.OTT_INTERNAL_SECRET) return;
-    try {
-      const stream = this.env.Lobby.get(this.env.Lobby.idFromName("ott-lobby-public"));
-      await stream.fetch(internalRequest(this.env.OTT_INTERNAL_SECRET, "/internal/active-update", {
-        catalogRevision,
-        matches,
-      }));
-    } catch {
-      // non-fatal
-    }
-  }
-
   private async handleActiveUpdate(request: Request): Promise<Response> {
     if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
       return new Response("Forbidden", { status: 403 });
     }
-    let body: {
-      allocationId?: string;
-      roomId?: string;
-      version?: { roomRevision: number; summarySequence: number };
-      summary?: unknown;
-    };
-    try { body = await request.json(); } catch { return new Response("Bad request", { status: 400 }); }
-    if (typeof body.allocationId !== "string" || typeof body.roomId !== "string" || !body.version || typeof body.version.roomRevision !== "number" || typeof body.version.summarySequence !== "number" || !body.summary) {
+    const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);
+    if (text === null) return new Response("Bad request", { status: 400 });
+    let body: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Response("Bad request", { status: 400 });
+      body = parsed as Record<string, unknown>;
+    } catch { return new Response("Bad request", { status: 400 }); }
+    const version = body.version;
+    const summary = normalizePublicMatchSummary(body.summary);
+    if (Object.keys(body).sort().join(",") !== "allocationId,roomId,summary,version" ||
+        typeof body.allocationId !== "string" || typeof body.roomId !== "string" ||
+        !version || typeof version !== "object" || Array.isArray(version) ||
+        Object.keys(version).sort().join(",") !== "roomRevision,summarySequence" ||
+        !Number.isSafeInteger((version as Record<string, unknown>).roomRevision) ||
+        !Number.isSafeInteger((version as Record<string, unknown>).summarySequence) ||
+        (version as Record<string, unknown>).roomRevision < 0 ||
+        (version as Record<string, unknown>).summarySequence < 0 || !summary.ok ||
+        summary.value.allocationId !== body.allocationId || summary.value.roomId !== body.roomId) {
       return new Response("Bad request", { status: 400 });
     }
 
     const result = await this.transaction(async (storage) => {
-      const key = `allocation:${body.allocationId}`;
+      const key = `allocation:${body.allocationId as string}`;
       const allocation = await storage.get<Allocation>(key);
-      if (!allocation || allocation.roomId !== body.roomId || allocation.status === "terminal") {
-        return null;
-      }
+      if (!allocation || allocation.roomId !== body.roomId || allocation.status !== "playing") return "not_available" as const;
       const existing = allocation.summaryVersion;
       if (existing) {
         const isNewer =
-          body.version!.roomRevision > existing.roomRevision ||
-          (body.version!.roomRevision === existing.roomRevision && body.version!.summarySequence > existing.summarySequence);
-        if (!isNewer) return null;
+          (version as { roomRevision: number; summarySequence: number }).roomRevision > existing.roomRevision ||
+          ((version as { roomRevision: number; summarySequence: number }).roomRevision === existing.roomRevision &&
+            (version as { roomRevision: number; summarySequence: number }).summarySequence > existing.summarySequence);
+        if (!isNewer) return "stale" as const;
       }
-      allocation.summary = body.summary;
-      allocation.summaryVersion = body.version;
+      allocation.summary = summary.value;
+      allocation.summaryVersion = version as { roomRevision: number; summarySequence: number };
       await storage.put(key, allocation);
 
       const catalogRevision = ((await storage.get<number>("public-catalog-revision")) ?? 0) + 1;
       await storage.put("public-catalog-revision", catalogRevision);
+      if (this.env.OTT_SPECTATOR_ENABLED === "true") {
+        await this.enqueueCatalogNotification(storage, catalogRevision, false);
+      }
       return catalogRevision;
     });
 
-    if (result !== null) {
-      const list = await this.allocations();
-      const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
-      await this.notifyLobbyStream(result, matches);
-    }
+    if (result === "not_available") return new Response("Not found", { status: 404 });
+    if (result === "stale") return new Response("Stale update", { status: 409 });
+    await this.scheduleAlarm();
+    await this.deliverCatalogNotification();
+    await this.scheduleAlarm();
     return Response.json({ ok: true });
   }
 
@@ -362,18 +672,24 @@ export class OttLobbyServer extends DurableObject<Env> {
     if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
       return new Response("Forbidden", { status: 403 });
     }
-    const catalogRevision = (await this.ctx.storage.get<number>("public-catalog-revision")) ?? 0;
-    const list = await this.allocations();
-    const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
-    return Response.json({ catalogRevision, matches });
+    if (await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES) === null) return new Response("Bad request", { status: 400 });
+    const catalog = await this.currentPublicCatalog();
+    if (!catalog) return new Response("Catalog unavailable", { status: 503 });
+    return Response.json(catalog);
   }
 
   private async terminalize(request: Request): Promise<Response> {
     if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
       return new Response("Forbidden", { status: 403 });
     }
+    const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);
+    if (text === null) return new Response("Bad request", { status: 400 });
     let body: { allocationId?: string; roomId?: string; reason?: string };
-    try { body = await request.json(); } catch { return new Response("Bad request", { status: 400 }); }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Response("Bad request", { status: 400 });
+      body = parsed as { allocationId?: string; roomId?: string; reason?: string };
+    } catch { return new Response("Bad request", { status: 400 }); }
     if (typeof body.allocationId !== "string" || typeof body.roomId !== "string" ||
         !["creator_attach_timeout", "disconnect_timeout", "timeout", "leave", "goal", "elimination", "no_moves"].includes(body.reason ?? "")) {
       return new Response("Bad request", { status: 400 });
@@ -390,13 +706,16 @@ export class OttLobbyServer extends DurableObject<Env> {
       await deleteOwnerCredentials(storage, body.allocationId!);
       const catalogRevision = ((await storage.get<number>("public-catalog-revision")) ?? 0) + 1;
       await storage.put("public-catalog-revision", catalogRevision);
+      if (this.env.OTT_SPECTATOR_ENABLED === "true") {
+        await this.enqueueCatalogNotification(storage, catalogRevision, true);
+      }
       return { status: "terminalized", catalogRevision };
     });
     if (result === "not_found") return new Response("Not found", { status: 404 });
     if (typeof result === "object" && result.status === "terminalized") {
-      const list = await this.allocations();
-      const matches = list.filter((item) => item.status === "playing" && item.summary).map((item) => item.summary);
-      await this.notifyLobbyStream(result.catalogRevision, matches);
+      await this.scheduleAlarm();
+      await this.deliverCatalogNotification();
+      await this.scheduleAlarm();
       return Response.json({ ok: true, result: result.status });
     }
     return Response.json({ ok: true, result });
