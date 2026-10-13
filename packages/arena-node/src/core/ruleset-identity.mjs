@@ -78,3 +78,13 @@ export function verifyRulesetHash(snapshot, expectedHash) {
 export function verifyMatchPolicyHash(policy, expectedHash) {
   return computeMatchPolicyHash(policy) === expectedHash;
 }
+
+/**
+ * Computes canonical SHA-256 digest of a ReplayDocument.
+ * Returns formatted digest with "sha256:" prefix.
+ */
+export function computeReplayDigest(replay) {
+  const canonicalJson = canonicalSerialize(replay);
+  const hash = createHash("sha256").update(canonicalJson, "utf8").digest("hex");
+  return `sha256:${hash}`;
+}

@@ -354,3 +354,4 @@ export declare function validateArenaMatchResult(result: unknown): ValidationRes
 export declare function validateMatchPolicy(policy: unknown): ValidationResult;
 export declare function validateRulesetSnapshot(snapshot: unknown): ValidationResult;
 export declare function isSupportedEngineRuleset(snapshot: unknown): boolean;
+export declare function validateReplayDocument(doc: unknown, options?: { maxBytes?: number }): ValidationResult;
