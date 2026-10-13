@@ -9,6 +9,9 @@ export interface ReplayControlsProps {
   readonly onPause: () => void;
   readonly onStep: (direction: "next" | "prev") => void;
   readonly onSetSpeed: (speed: ReplaySpeed) => void;
+  readonly onForkPractice?: (mode: "local" | "ai") => void;
+  readonly canFork?: boolean;
+  readonly forkDisabledReason?: string | null;
 }
 
 const SPEEDS: readonly ReplaySpeed[] = [0.5, 1, 2, 4];
@@ -20,6 +23,9 @@ export function ReplayControls({
   onPause,
   onStep,
   onSetSpeed,
+  onForkPractice,
+  canFork = true,
+  forkDisabledReason,
 }: ReplayControlsProps) {
   const { cursor, totalPlies, isPlaying, speed, isAtStart, isAtEnd } = playback;
 
@@ -101,6 +107,32 @@ export function ReplayControls({
           ))}
         </div>
       </div>
+
+      {onForkPractice && (
+        <div className={styles.forkRow} role="group" aria-label="Thử đi khác từ thế cờ hiện tại">
+          <span className={styles.forkLabel}>Thử đi khác:</span>
+          <Button
+            variant="secondary"
+            onClick={() => onForkPractice("local")}
+            disabled={!canFork}
+            title={canFork ? "Thử đi khác với chế độ chơi 2 người" : (forkDisabledReason ?? "Không thể thử đi khác")}
+            aria-label="Thử đi khác chơi cùng máy"
+            data-testid="replay-fork-local-btn"
+          >
+            Chơi cùng máy
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => onForkPractice("ai")}
+            disabled={!canFork}
+            title={canFork ? "Thử đi khác với AI" : (forkDisabledReason ?? "Không thể thử đi khác")}
+            aria-label="Thử đi khác đấu với AI"
+            data-testid="replay-fork-ai-btn"
+          >
+            Đấu với AI
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

@@ -124,4 +124,111 @@ describe("AiSession", () => {
     expect(session.getSnapshot()).toMatchObject({ phase: "finished", result: { winner: "A", reason: "goal" }, aiThinking: false });
     expect(timer.setTimeout).not.toHaveBeenCalled();
   });
+
+  it("hydrates from practice, schedules AI thinking if current turn is AI seat, and cancels on dispose", async () => {
+    const { deps, timer, chooseMove } = dependencies();
+    chooseMove.mockReturnValueOnce({ from: { x: 2, y: 0 }, to: { x: 2, y: 1 } });
+    const session = new AiSession(deps);
+    const practice = {
+      practiceId: "practice-ai-1",
+      parentMatchId: "match-001",
+      parentPly: 5,
+      rulesetId: "ottv2-g-default-v1",
+      rulesetHash: "sha256:a00ee0cddc9d1dba495babf87bea2184d20feaa964b1741ec06c9bb972fd5e88",
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      coreState: {
+        turn: "B" as const,
+        winner: null,
+        reason: null,
+        eliminatedPlayer: null,
+        clock: { remainingMs: { A: 600000, B: 600000 }, runningSeat: "B" as const },
+        pieces: [
+          { id: "A-la-0", player: "A" as const, type: "la" as const, x: 3, y: 4 },
+          { id: "B-la-0", player: "B" as const, type: "la" as const, x: 2, y: 0 },
+        ],
+      },
+    };
+
+    // Human plays A, current turn at practice is B -> AI's turn
+    await session.start({ mode: "ai", playerName: "An", humanSeat: "A", practice });
+    const snapshot = session.getSnapshot();
+    expect(snapshot.turn).toBe("B");
+    expect(snapshot.aiThinking).toBe(true);
+    expect(timer.setTimeout).toHaveBeenCalledTimes(1);
+
+    // AI timer fires, AI executes move
+    timer.runNext();
+    await vi.waitFor(() =>
+      expect(session.getSnapshot()).toMatchObject({
+        turn: "A",
+        aiThinking: false,
+      })
+    );
+
+    // Starting new practice and disposing cancels pending timer
+    await session.start({ mode: "ai", playerName: "An", humanSeat: "A", practice });
+    expect(timer.pending()).toBe(1);
+    session.dispose();
+    expect(timer.pending()).toBe(0);
+  });
+
+  it("rejects forged practice objects and does not schedule AI thinking", async () => {
+    const { deps, timer } = dependencies();
+    const session = new AiSession(deps);
+    const forgedPractice = {
+      practiceId: "forged-ai-1",
+      parentMatchId: "match-001",
+      parentPly: 5,
+      rulesetId: "ottv2-g-default-v1",
+      rulesetHash: "sha256:a00ee0cddc9d1dba495babf87bea2184d20feaa964b1741ec06c9bb972fd5e88",
+      engineRevision: "sha256:unauthorized-engine",
+      coreState: {
+        turn: "B" as const,
+        winner: "B" as const,
+        reason: "goal",
+        eliminatedPlayer: null,
+        clock: { remainingMs: { A: 600000, B: 600000 }, runningSeat: "B" as const },
+        pieces: [{ id: "B-la-0", player: "B" as const, type: "la" as const, x: 8, y: 8 }],
+      },
+    };
+    await session.start({ mode: "ai", playerName: "An", practice: forgedPractice as any });
+    expect(session.getSnapshot().phase).toBe("error");
+    expect(session.getSnapshot().aiThinking).toBe(false);
+    expect(timer.pending()).toBe(0);
+    const moveResult = await session.move({ x: 8, y: 8 }, { x: 7, y: 7 });
+    expect(moveResult.accepted).toBe(false);
+  });
+
+  it("cancels AI thinking timer when session starts a new game before timer fires", async () => {
+    const { deps, timer } = dependencies();
+    const session = new AiSession(deps);
+    const practice = {
+      practiceId: "practice-ai-switch",
+      parentMatchId: "match-001",
+      parentPly: 5,
+      rulesetId: "ottv2-g-default-v1",
+      rulesetHash: "sha256:a00ee0cddc9d1dba495babf87bea2184d20feaa964b1741ec06c9bb972fd5e88",
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      coreState: {
+        turn: "B" as const,
+        winner: null,
+        reason: null,
+        eliminatedPlayer: null,
+        clock: { remainingMs: { A: 600000, B: 600000 }, runningSeat: "B" as const },
+        pieces: [
+          { id: "A-la-0", player: "A" as const, type: "la" as const, x: 3, y: 4 },
+          { id: "B-la-0", player: "B" as const, type: "la" as const, x: 2, y: 0 },
+        ],
+      },
+    };
+    await session.start({ mode: "ai", playerName: "An", humanSeat: "A", practice });
+    expect(session.getSnapshot().aiThinking).toBe(true);
+    expect(timer.pending()).toBe(1);
+
+    // Switch before timer fires to a new standard game
+    await session.start({ mode: "ai", playerName: "An", humanSeat: "A" });
+    expect(timer.pending()).toBe(0);
+    expect(session.getSnapshot().turn).toBe("A");
+    expect(session.getSnapshot().aiThinking).toBe(false);
+  });
 });

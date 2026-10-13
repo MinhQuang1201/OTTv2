@@ -177,4 +177,123 @@ describe("ReplayScreen", () => {
     expect(screen.getByText(/AlphaBot.*1\.0\.4.*aggressive/i)).toBeInTheDocument();
     expect(screen.getByText(/BetaBot.*2\.1\.0.*defensive/i)).toBeInTheDocument();
   });
+
+  it("renders enabled fork practice controls at mid-game and invokes onForkPractice callback", async () => {
+    const user = userEvent.setup();
+    const fixtureWithCurrentEngine = {
+      ...deterministicFixture,
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+    };
+    const session = await createStartedSession(fixtureWithCurrentEngine);
+    session.seek(5);
+    const onForkPractice = vi.fn();
+
+    render(
+      <ReplayScreen
+        session={session}
+        snapshot={session.getSnapshot()}
+        onLobby={vi.fn()}
+        onForkPractice={onForkPractice}
+      />
+    );
+
+    const forkLocalBtn = screen.getByTestId("replay-fork-local-btn");
+    const forkAiBtn = screen.getByTestId("replay-fork-ai-btn");
+
+    expect(forkLocalBtn).toBeEnabled();
+    expect(forkAiBtn).toBeEnabled();
+
+    await user.click(forkAiBtn);
+    expect(onForkPractice).toHaveBeenCalledTimes(1);
+    expect(onForkPractice).toHaveBeenCalledWith("ai", expect.objectContaining({
+      parentMatchId: "match-det-001",
+      parentPly: 5,
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      coreState: expect.objectContaining({ turn: "B" }),
+    }));
+
+    await user.click(forkLocalBtn);
+    expect(onForkPractice).toHaveBeenCalledTimes(2);
+    expect(onForkPractice).toHaveBeenCalledWith("local", expect.objectContaining({
+      parentMatchId: "match-det-001",
+      parentPly: 5,
+    }));
+  });
+
+  it("disables fork practice controls at terminal ply or when engineRevision is unsupported", async () => {
+    // 1. Unsupported engine revision (default deterministicFixture has test-engine-rev)
+    const sessionUnsupported = await createStartedSession(deterministicFixture);
+    sessionUnsupported.seek(5);
+    const { rerender } = render(
+      <ReplayScreen
+        session={sessionUnsupported}
+        snapshot={sessionUnsupported.getSnapshot()}
+        onLobby={vi.fn()}
+        onForkPractice={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("replay-fork-ai-btn")).toBeDisabled();
+    expect(screen.getByTestId("replay-fork-local-btn")).toBeDisabled();
+
+    // 2. Terminal ply with supported engine
+    const fixtureWithCurrentEngine = {
+      ...deterministicFixture,
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+    };
+    const sessionTerminal = await createStartedSession(fixtureWithCurrentEngine);
+    sessionTerminal.seek(19); // terminal goal win ply
+
+    rerender(
+      <ReplayScreen
+        session={sessionTerminal}
+        snapshot={sessionTerminal.getSnapshot()}
+        onLobby={vi.fn()}
+        onForkPractice={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("replay-fork-ai-btn")).toBeDisabled();
+    expect(screen.getByTestId("replay-fork-local-btn")).toBeDisabled();
+  });
+
+  it("preserves original document against deep practice mutations", async () => {
+    const user = userEvent.setup();
+    const fixtureWithCurrentEngine = {
+      ...deterministicFixture,
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+    };
+    const session = await createStartedSession(fixtureWithCurrentEngine);
+    session.seek(5);
+    let capturedPractice: any = null;
+    const onForkPractice = vi.fn((_mode, practice) => {
+      capturedPractice = practice;
+    });
+
+    render(
+      <ReplayScreen
+        session={session}
+        snapshot={session.getSnapshot()}
+        onLobby={vi.fn()}
+        onForkPractice={onForkPractice}
+      />
+    );
+
+    const forkLocalBtn = screen.getByTestId("replay-fork-local-btn");
+    await user.click(forkLocalBtn);
+    expect(capturedPractice).not.toBeNull();
+
+    // Mutate practice core state
+    capturedPractice.coreState.pieces.length = 0;
+    capturedPractice.coreState.clock.remainingMs.A = 12345;
+    capturedPractice.coreState.winner = "A";
+
+    // Original session document remains completely intact
+    const docAfter = session.getDocument();
+    expect(docAfter?.frames[5].coreState.pieces.length).toBe(
+      deterministicFixture.frames[5].coreState.pieces.length
+    );
+    expect(docAfter?.frames[5].coreState.clock.remainingMs.A).toBe(
+      deterministicFixture.frames[5].coreState.clock.remainingMs.A
+    );
+    expect(docAfter?.result.winner).toBe(deterministicFixture.result.winner);
+  });
 });

@@ -39,10 +39,21 @@ import type {
 export type {
   AcceptedMoveRecord,
   ArenaMatchResult,
+  CoreState,
   ReplayDocument,
   ReplayFrame,
   ReplayParticipant,
 } from "../../../../packages/arena/src/contracts/index.d.mts";
+
+export interface PracticeStart {
+  readonly practiceId: string;
+  readonly parentMatchId: string;
+  readonly parentPly: number;
+  readonly rulesetId: string;
+  readonly rulesetHash: string;
+  readonly engineRevision: string;
+  readonly coreState: import("../../../../packages/arena/src/contracts/index.d.mts").CoreState;
+}
 
 export type ReplaySpeed = 0.5 | 1 | 2 | 4;
 
@@ -71,8 +82,8 @@ export interface ReplayPlaybackFacade {
 
 export type StartGameOptions =
   | { readonly mode: "demo"; readonly scenario: DemoScenario }
-  | { readonly mode: "local"; readonly playerNames: readonly [string, string] }
-  | { readonly mode: "ai"; readonly playerName: string; readonly humanSeat?: Seat }
+  | { readonly mode: "local"; readonly playerNames: readonly [string, string]; readonly practice?: PracticeStart }
+  | { readonly mode: "ai"; readonly playerName: string; readonly humanSeat?: Seat; readonly practice?: PracticeStart }
   | { readonly mode: "online"; readonly intent: "create"; readonly playerName: string }
   | {
       readonly mode: "online";

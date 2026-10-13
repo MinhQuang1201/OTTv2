@@ -33,6 +33,63 @@ describe("LocalSession", () => {
     expect(snapshot.board.some((piece) => piece.position.x === 8 && piece.position.y === 8)).toBe(false);
   });
 
+  it("hydrates independent practice coreState and viewer follows current turn", async () => {
+    const time = clock();
+    const session = new LocalSession(time);
+    const practice = {
+      practiceId: "practice-test-1",
+      parentMatchId: "match-001",
+      parentPly: 5,
+      rulesetId: "ottv2-g-default-v1",
+      rulesetHash: "sha256:a00ee0cddc9d1dba495babf87bea2184d20feaa964b1741ec06c9bb972fd5e88",
+      engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      coreState: {
+        turn: "B" as const,
+        winner: null,
+        reason: null,
+        eliminatedPlayer: null,
+        clock: { remainingMs: { A: 600000, B: 600000 }, runningSeat: "B" as const },
+        pieces: [
+          { id: "A-la-0", player: "A" as const, type: "la" as const, x: 3, y: 4 },
+          { id: "B-la-0", player: "B" as const, type: "la" as const, x: 2, y: 0 },
+        ],
+      },
+    };
+    await session.start({ mode: "local", playerNames: ["An", "Bình"], practice });
+    const snapshot = session.getSnapshot();
+    expect(snapshot.turn).toBe("B");
+    expect(snapshot.viewerSeat).toBe("B");
+    expect(snapshot.viewer).toEqual({ role: "player", seat: "B" });
+    expect(snapshot.board).toHaveLength(2);
+    expect(snapshot.players.A?.remainingMs).toBe(600000);
+    expect(snapshot.players.B?.remainingMs).toBe(600000);
+  });
+
+  it("rejects forged practice objects with winner, duplicate positions, or unknown engine", async () => {
+    const session = new LocalSession();
+    const forgedPractice = {
+      practiceId: "forged-1",
+      parentMatchId: "match-001",
+      parentPly: 5,
+      rulesetId: "ottv2-g-default-v1",
+      rulesetHash: "sha256:a00ee0cddc9d1dba495babf87bea2184d20feaa964b1741ec06c9bb972fd5e88",
+      engineRevision: "sha256:unknown-engine",
+      coreState: {
+        turn: "B" as const,
+        winner: "A" as const,
+        reason: "goal",
+        eliminatedPlayer: null,
+        clock: { remainingMs: { A: 600000, B: 600000 }, runningSeat: "B" as const },
+        pieces: [{ id: "A-la-0", player: "A" as const, type: "la" as const, x: 0, y: 0 }],
+      },
+    };
+    await session.start({ mode: "local", playerNames: ["An", "Bình"], practice: forgedPractice as any });
+    expect(session.getSnapshot().phase).toBe("error");
+    expect(session.getSnapshot().capabilities.canMove).toBe(false);
+    const moveResult = await session.move({ x: 0, y: 0 }, { x: 0, y: 1 });
+    expect(moveResult.accepted).toBe(false);
+  });
+
   it("uses safe explicit viewer defaults before and after a session error", async () => {
     const session = new LocalSession();
     expect(session.getSnapshot()).toMatchObject({

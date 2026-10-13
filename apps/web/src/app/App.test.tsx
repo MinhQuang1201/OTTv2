@@ -1320,5 +1320,96 @@ describe("App shell lifecycle", () => {
 
       await coordinator.dispose();
     });
+
+    it("forks practice from replay frame into AI session and disposes replaySession cleanly", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const fixtureWithCurrentEngine = {
+        ...deterministicFixture,
+        engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      };
+      const file = new File([JSON.stringify(fixtureWithCurrentEngine)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+
+      // Seek to ply 5
+      replaySession.seek(5);
+
+      const forkAiBtn = await screen.findByTestId("replay-fork-ai-btn");
+      expect(forkAiBtn).toBeEnabled();
+
+      await user.click(forkAiBtn);
+
+      // Successfully transitioned away from replay to game screen
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /Xem lại trận đấu/i })).not.toBeInTheDocument();
+        expect(screen.getByTestId("game-screen")).toBeInTheDocument();
+      });
+
+      // Replay session was cleanly disposed
+      expect(replayDisposeSpy).toHaveBeenCalled();
+
+      // App state transitioned to playing
+      const appStateEl = screen.getByTestId("app-state");
+      expect(appStateEl).toHaveAttribute("data-state", "playing");
+
+      // Clocks reset to fresh 10:00 (600,000ms)
+      expect(screen.getAllByText("10:00").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("forks practice from replay frame into local session and disposes replaySession cleanly", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const fixtureWithCurrentEngine = {
+        ...deterministicFixture,
+        engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      };
+      const file = new File([JSON.stringify(fixtureWithCurrentEngine)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+
+      replaySession.seek(5);
+
+      const forkLocalBtn = await screen.findByTestId("replay-fork-local-btn");
+      expect(forkLocalBtn).toBeEnabled();
+
+      await user.click(forkLocalBtn);
+
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /Xem lại trận đấu/i })).not.toBeInTheDocument();
+        expect(screen.getByTestId("game-screen")).toBeInTheDocument();
+      });
+
+      expect(replayDisposeSpy).toHaveBeenCalled();
+      const appStateEl = screen.getByTestId("app-state");
+      expect(appStateEl).toHaveAttribute("data-state", "playing");
+      expect(screen.getAllByText("10:00").length).toBeGreaterThanOrEqual(1);
+    });
   });
 });

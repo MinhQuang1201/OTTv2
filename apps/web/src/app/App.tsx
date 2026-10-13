@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { DemoScenario, GameSession, GameResultView, GameSnapshot, SessionErrorView, StartGameOptions } from "../sessions/contract";
+import type { DemoScenario, GameSession, GameResultView, GameSnapshot, PracticeStart, SessionErrorView, StartGameOptions } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot";
 import { ScenarioSwitcher } from "../demo/ScenarioSwitcher";
@@ -307,6 +307,13 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const onStartReplay = (document: ReplayDocument) => {
     transitionTo(createReplaySession, { mode: "replay", document }, "game-active-a");
   };
+  const onForkPractice = (mode: "local" | "ai", practice: PracticeStart) => {
+    if (mode === "local") {
+      transitionTo(() => new LocalSession(), { mode: "local", playerNames: ["Người chơi Đỏ", "Người chơi Xanh"], practice }, "game-active-a");
+    } else {
+      transitionTo(() => new AiSession(), { mode: "ai", playerName: "Người chơi", practice }, "game-ai-thinking");
+    }
+  };
 
   return (
     <AppProviders>
@@ -330,6 +337,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onStartLocal={onStartLocal}
                 onStartAi={onStartAi}
                 onStartReplay={onStartReplay}
+                onForkPractice={onForkPractice}
                 onCreateOnline={(name) => startOnline({ mode: "online", intent: "create", playerName: name })}
                 onJoinOnline={(name, roomId) => startOnline({ mode: "online", intent: "join", playerName: name, roomId })}
                 waitingRooms={waitingRooms}
@@ -346,12 +354,13 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
   readonly onStartAi: (name: string) => void;
   readonly onStartReplay: (document: ReplayDocument) => void;
+  readonly onForkPractice: (mode: "local" | "ai", practice: PracticeStart) => void;
   readonly onCreateOnline: (name: string) => void;
   readonly onJoinOnline: (name: string, roomId: string) => void;
   readonly waitingRooms: { status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string };
@@ -372,7 +381,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onC
 
   // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
   if (state.snapshot?.mode === "replay" && state.session) {
-    return <ReplayScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
+    return <ReplayScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} onForkPractice={onForkPractice} />;
   }
 
   if (state.status === "preparing") return <LobbyScreen
