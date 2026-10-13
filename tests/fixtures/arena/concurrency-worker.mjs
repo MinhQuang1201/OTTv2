@@ -78,6 +78,32 @@ async function runWorker(config) {
       return { success: true, versionNo: ver.version_no };
     }
 
+    if (action === "upload-service-versions") {
+      const { botId, userId, workerId, count, storageDir } = params;
+      const serviceModule = await import("../../../packages/arena-node/src/persistence/bot-version-service.mjs");
+      const artifactModule = await import("../../../packages/arena-node/src/artifacts/artifact-store.mjs");
+      const { createBotVersionService } = serviceModule;
+      const { createArtifactStore } = artifactModule;
+      const artifactStore = createArtifactStore({ storageDir });
+      const service = createBotVersionService({ db, artifactStore });
+      const allocated = [];
+      for (let i = 1; i <= count; i++) {
+        const res = await service.uploadBotVersion(
+          {
+            botId,
+            sourceContent: `// worker ${workerId} code ${i}`,
+            profileId: "python"
+          },
+          {
+            actorId: userId,
+            idempotencyKey: `idem-service-${workerId}-${i}-${Date.now()}`
+          }
+        );
+        allocated.push(res.botVersion.version_no);
+      }
+      return { success: true, allocated };
+    }
+
     throw new Error(`Unknown worker action: ${action}`);
   } finally {
     closeDatabase(db);
