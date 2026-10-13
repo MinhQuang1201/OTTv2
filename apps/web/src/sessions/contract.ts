@@ -28,6 +28,46 @@ export type {
   ViewerIdentity,
   WaitingRoomView,
 } from "../shared/model/game";
+import type {
+  AcceptedMoveRecord,
+  ArenaMatchResult,
+  ReplayDocument,
+  ReplayFrame,
+  ReplayParticipant,
+} from "../../../../packages/arena/src/contracts/index.d.mts";
+
+export type {
+  AcceptedMoveRecord,
+  ArenaMatchResult,
+  ReplayDocument,
+  ReplayFrame,
+  ReplayParticipant,
+} from "../../../../packages/arena/src/contracts/index.d.mts";
+
+export type ReplaySpeed = 0.5 | 1 | 2 | 4;
+
+export interface ReplayPlaybackView {
+  readonly cursor: number;
+  readonly maxCursor: number;
+  readonly isPlaying: boolean;
+  readonly speed: ReplaySpeed;
+  readonly result: ArenaMatchResult | null;
+  readonly isAtStart: boolean;
+  readonly isAtEnd: boolean;
+  readonly currentPly: number;
+  readonly totalPlies: number;
+  readonly lastMove: AcceptedMoveRecord | null;
+  readonly participants?: Record<Seat, ReplayParticipant>;
+}
+
+export interface ReplayPlaybackFacade {
+  getPlayback(): ReplayPlaybackView;
+  seek(cursor: number): void;
+  play(): void;
+  pause(): void;
+  step(direction?: number | "next" | "prev"): void;
+  setSpeed(speed: ReplaySpeed): void;
+}
 
 export type StartGameOptions =
   | { readonly mode: "demo"; readonly scenario: DemoScenario }
@@ -39,10 +79,14 @@ export type StartGameOptions =
       readonly intent: "join";
       readonly playerName: string;
       readonly roomId: string;
-     }
+    }
   | {
       readonly mode: "spectator";
       readonly allocation: PlayhtmlSpectatorAllocation;
+    }
+  | {
+      readonly mode: "replay";
+      readonly document: ReplayDocument;
     };
 
 export type MoveResult =
