@@ -21,7 +21,7 @@
     "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
     "arena:cli": "node apps/arena-cli/src/main.mjs",
     "arena:doctor": "node apps/arena-cli/src/main.mjs doctor",
-    "test:arena": "node --test tests/arena-contracts.test.js tests/arena-ruleset.test.js tests/arena-controller.test.js tests/arena-replay.test.js tests/arena-elo.test.js tests/arena-persistence.test.js tests/arena-bot-versions.test.js tests/arena-finalizer.test.js tests/arena-cli.test.js tests/arena-process-bot.test.js tests/arena-profiles.test.js tests/arena-build.test.js",
+    "test:arena": "node --test tests/arena-contracts.test.js tests/arena-ruleset.test.js tests/arena-controller.test.js tests/arena-replay.test.js tests/arena-elo.test.js tests/arena-persistence.test.js tests/arena-bot-versions.test.js tests/arena-finalizer.test.js tests/arena-cli.test.js tests/arena-process-bot.test.js tests/arena-profiles.test.js tests/arena-build.test.js tests/arena-queue.test.js tests/arena-worker.test.js",
     "test:arena:profiles": "node --test tests/runtime/arena-profiles.test.js"
   },
   "engines": {
