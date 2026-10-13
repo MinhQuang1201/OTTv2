@@ -1103,3 +1103,81 @@ export function validateReplayDocument(doc, options = {}) {
 
   return { ok: errors.length === 0, errors };
 }
+
+/**
+ * Validates a MatchCompletionEnvelope before finalization.
+ * Ensures matchId, attemptNo, leaseToken, result, replay, and digests are valid.
+ *
+ * @param {unknown} envelope
+ * @returns {import("./index.d.mts").ValidationResult}
+ */
+export function validateMatchCompletionEnvelope(envelope) {
+  const errors = [];
+  if (!envelope || typeof envelope !== "object") {
+    return {
+      ok: false,
+      errors: [{ path: "envelope", code: "invalid_type", message: "Envelope must be a non-null object" }]
+    };
+  }
+
+  if (typeof envelope.matchId !== "string" || envelope.matchId.trim().length === 0) {
+    errors.push({ path: "envelope.matchId", code: "invalid_match_id", message: "matchId must be a non-empty string" });
+  }
+
+  if (!Number.isInteger(envelope.attemptNo) || envelope.attemptNo < 1) {
+    errors.push({ path: "envelope.attemptNo", code: "invalid_attempt_no", message: "attemptNo must be an integer >= 1" });
+  }
+
+  if (typeof envelope.leaseToken !== "string" || envelope.leaseToken.trim().length === 0) {
+    errors.push({ path: "envelope.leaseToken", code: "invalid_lease_token", message: "leaseToken must be a non-empty string" });
+  }
+
+  if (typeof envelope.replayDigest !== "string" || !envelope.replayDigest.startsWith("sha256:")) {
+    errors.push({ path: "envelope.replayDigest", code: "invalid_replay_digest", message: "replayDigest must be a string starting with 'sha256:'" });
+  }
+
+  if (typeof envelope.completionDigest !== "string" || !envelope.completionDigest.startsWith("sha256:")) {
+    errors.push({ path: "envelope.completionDigest", code: "invalid_completion_digest", message: "completionDigest must be a string starting with 'sha256:'" });
+  }
+
+  if (!envelope.result || typeof envelope.result !== "object") {
+    errors.push({ path: "envelope.result", code: "missing_result", message: "result must be an object" });
+  } else {
+    const resVal = validateArenaMatchResult(envelope.result);
+    if (!resVal.ok) {
+      errors.push(...resVal.errors.map(e => ({ ...e, path: `envelope.${e.path}` })));
+    }
+  }
+
+  if (!envelope.replay || typeof envelope.replay !== "object") {
+    errors.push({ path: "envelope.replay", code: "missing_replay", message: "replay must be a ReplayDocument object" });
+  } else {
+    const repVal = validateReplayDocument(envelope.replay);
+    if (!repVal.ok) {
+      errors.push(...repVal.errors.map(e => ({ ...e, path: `envelope.${e.path}` })));
+    }
+
+    if (envelope.matchId && envelope.replay.matchId && envelope.matchId !== envelope.replay.matchId) {
+      errors.push({
+        path: "envelope.matchId",
+        code: "match_id_mismatch",
+        message: `envelope.matchId '${envelope.matchId}' does not match replay.matchId '${envelope.replay.matchId}'`
+      });
+    }
+
+    if (
+      envelope.result &&
+      envelope.replay.result &&
+      envelope.result.outcome !== envelope.replay.result.outcome
+    ) {
+      errors.push({
+        path: "envelope.result.outcome",
+        code: "outcome_mismatch",
+        message: `envelope.result outcome '${envelope.result.outcome}' does not match replay.result outcome '${envelope.replay.result.outcome}'`
+      });
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+

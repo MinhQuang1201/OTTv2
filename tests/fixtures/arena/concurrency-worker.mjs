@@ -104,6 +104,50 @@ async function runWorker(config) {
       return { success: true, allocated };
     }
 
+    if (action === "finalize-match") {
+      const { envelope } = params;
+      const { createHash } = await import("node:crypto");
+      const { canonicalSerialize } = await import("../../../packages/arena/src/contracts/index.mjs");
+      const finalizerModule = await import("../../../packages/arena-node/src/persistence/finalizer.mjs");
+      const appFinalizerModule = await import("../../../packages/arena/src/application/finalize-match.mjs");
+
+      const computeDigest = (data) => {
+        const str = typeof data === "string" ? data : canonicalSerialize(data);
+        return `sha256:${createHash("sha256").update(str, "utf8").digest("hex")}`;
+      };
+
+      const finalizerRepo = finalizerModule.createMatchFinalizer(db);
+      const useCase = appFinalizerModule.createFinalizeMatchUseCase({
+        finalizerRepo,
+        computeDigest
+      });
+
+      const finalized = await useCase.finalizeMatch(envelope);
+      return { success: true, finalized };
+    }
+
+    if (action === "crash-in-write-tx") {
+      const { envelope } = params;
+      withTransaction(db, () => {
+        // Perform partial write under write TX
+        db.prepare(`
+          INSERT INTO match_results (
+            match_id, result_json, replay_json, replay_digest, completion_digest, winning_attempt, finalized_at
+          ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          envelope.matchId,
+          JSON.stringify(envelope.result),
+          JSON.stringify(envelope.replay),
+          envelope.replayDigest,
+          envelope.completionDigest,
+          envelope.attemptNo
+        );
+        // Abruptly terminate process BEFORE commit
+        process.exit(77);
+      });
+      return { success: false, error: "Unreachable" };
+    }
+
     throw new Error(`Unknown worker action: ${action}`);
   } finally {
     closeDatabase(db);
@@ -117,6 +161,29 @@ if (parentPort && workerData) {
   runWorker(workerData)
     .then((result) => parentPort.postMessage(result))
     .catch((err) => parentPort.postMessage({ success: false, error: err.message, stack: err.stack }));
+} else if (process.argv[2] === "--stdin" || (!process.argv[2] && !process.stdin.isTTY)) {
+  let raw = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    raw += chunk;
+  });
+  process.stdin.on("end", () => {
+    try {
+      const config = JSON.parse(raw);
+      runWorker(config)
+        .then((result) => {
+          process.stdout.write(JSON.stringify(result));
+          process.exit(0);
+        })
+        .catch((err) => {
+          process.stderr.write(JSON.stringify({ success: false, error: err.message }));
+          process.exit(1);
+        });
+    } catch (err) {
+      process.stderr.write(JSON.stringify({ success: false, error: err.message }));
+      process.exit(1);
+    }
+  });
 } else if (process.argv[2]) {
   // Invoked as child process via CLI argument JSON
   try {
