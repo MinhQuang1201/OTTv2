@@ -13,6 +13,10 @@
  */
 
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { createHeadlessMatchController } from "../../../arena/src/application/match-controller.mjs";
 import { createReplayJournal } from "../../../arena/src/application/replay-journal.mjs";
 import {
@@ -67,6 +71,8 @@ export function createJobWorker(options) {
     finalizer = null,
     botVersionService = null,
     botFactory = null,
+    artifactStore = null,
+    profileRegistry = null,
     getEngine = null,
     getClock = null,
     getJournal = null,
@@ -77,6 +83,12 @@ export function createJobWorker(options) {
     pollIntervalMs = 500,
     allowedKinds = null
   } = options;
+
+  const resolvedBotFactory =
+    botFactory ||
+    (artifactStore && profileRegistry
+      ? createProfileBotFactory({ artifactStore, profileRegistry })
+      : null);
 
   if (!workerId) throw new TypeError("options.workerId is required");
   if (!db) throw new TypeError("options.db is required");
@@ -130,9 +142,9 @@ export function createJobWorker(options) {
     let botA;
     let botB;
 
-    if (botFactory) {
-      botA = await botFactory("A", participants.A, { match, clock, supervisorSignal: supervisorAbort.signal });
-      botB = await botFactory("B", participants.B, { match, clock, supervisorSignal: supervisorAbort.signal });
+    if (resolvedBotFactory) {
+      botA = await resolvedBotFactory("A", participants.A, { match, clock, supervisorSignal: supervisorAbort.signal });
+      botB = await resolvedBotFactory("B", participants.B, { match, clock, supervisorSignal: supervisorAbort.signal });
     } else {
       const { createFunctionBot } = await import("../../../arena/src/adapters/function-bot.mjs");
       botA = createFunctionBot({ botId: participants.A.bot_id });
@@ -385,3 +397,186 @@ export function createJobWorker(options) {
     getStatus
   };
 }
+
+/**
+ * Creates a BotFactory that delegates to pinned execution profiles in ProfileRegistry.
+ * Supports Python, Node, C++, Java, etc. according to participant profileId,
+ * handles Node 18 extensionless ESM artifacts, and provides a sanitized environment
+ * without leaking host secrets or environment tokens.
+ *
+ * @param {object} options
+ * @param {import('../artifacts/artifact-store.d.mts').ArtifactStore} options.artifactStore
+ * @param {import('../execution/profile-registry.d.mts').ProfileRegistry} options.profileRegistry
+ * @returns {(seat: "A" | "B", participant: object, context?: object) => Promise<object>}
+ */
+export function createProfileBotFactory({ artifactStore, profileRegistry }) {
+  if (!artifactStore) throw new TypeError("createProfileBotFactory requires artifactStore");
+  if (!profileRegistry) throw new TypeError("createProfileBotFactory requires profileRegistry");
+
+  return async function profileBotFactory(seat, participant, context = {}) {
+    const digest = participant.artifactDigest || participant.artifact_digest;
+    const botId = participant.botId || participant.bot_id || `bot-${seat}`;
+    const profileId = participant.profileId || participant.profile_id || "node";
+
+    const artifact = await artifactStore.resolveArtifact(digest);
+    if (!artifact) {
+      throw new Error(`Artifact not found for participant ${seat} (${digest})`);
+    }
+
+    const profile = profileRegistry.getProfile(profileId);
+    if (!profile) {
+      throw new Error(`Execution profile not found: ${profileId}`);
+    }
+
+    // Sanitized bot environment — DO NOT leak secrets or auth tokens from host process.env
+    const botEnv = {
+      NODE_ENV: process.env.NODE_ENV || "production",
+      PATH: process.env.PATH || "",
+      SYSTEMROOT: process.env.SYSTEMROOT || "",
+      WINDIR: process.env.WINDIR || "",
+      HOMEPATH: process.env.HOMEPATH || "",
+      USERPROFILE: process.env.USERPROFILE || "",
+      TMP: process.env.TMP || "",
+      TEMP: process.env.TEMP || "",
+      ARENA_STRICT_TERMINATION: "1"
+    };
+
+    let targetPath = artifact.path;
+    // Node 18 ESM handling: Node fails on extensionless files without package.json type=module.
+    // If the profile is node/javascript and targetPath lacks .mjs or .js, link/copy with .mjs.
+    if (
+      (profileId === "node" || profile.language === "javascript") &&
+      !targetPath.endsWith(".mjs") &&
+      !targetPath.endsWith(".js")
+    ) {
+      const extPath = `${targetPath}.mjs`;
+      if (!fs.existsSync(extPath)) {
+        try {
+          fs.linkSync(targetPath, extPath);
+        } catch (_) {
+          fs.copyFileSync(targetPath, extPath);
+        }
+      }
+      targetPath = extPath;
+    }
+
+    return profile.createBot(targetPath, {
+      botId,
+      env: botEnv,
+      clock: context?.clock,
+      supervisorSignal: context?.supervisorSignal
+    });
+  };
+}
+
+/**
+ * CLI runner for standalone worker process (`arena:worker`).
+ *
+ * @param {string[]} args
+ */
+export async function runWorkerCli(args = []) {
+  let dbPath = process.env.ARENA_DB_PATH || path.resolve(process.cwd(), "var/arena/arena.db");
+  let storageDir = process.env.ARENA_STORAGE_DIR || path.resolve(process.cwd(), "var/arena/artifacts");
+  let workerId = process.env.ARENA_WORKER_ID || `worker-${os.hostname()}-${process.pid}`;
+  let pollIntervalMs = process.env.ARENA_POLL_INTERVAL_MS ? parseInt(process.env.ARENA_POLL_INTERVAL_MS, 10) : 1000;
+  let leaseDurationMs = process.env.ARENA_LEASE_DURATION_MS ? parseInt(process.env.ARENA_LEASE_DURATION_MS, 10) : 30000;
+  let heartbeatIntervalMs = process.env.ARENA_HEARTBEAT_INTERVAL_MS ? parseInt(process.env.ARENA_HEARTBEAT_INTERVAL_MS, 10) : 5000;
+  let allowedKinds = process.env.ARENA_ALLOWED_KINDS ? process.env.ARENA_ALLOWED_KINDS.split(",") : ["build", "match"];
+  let once = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--db" && i + 1 < args.length) {
+      dbPath = path.resolve(args[++i]);
+    } else if (arg === "--storage" && i + 1 < args.length) {
+      storageDir = path.resolve(args[++i]);
+    } else if (arg === "--worker-id" && i + 1 < args.length) {
+      workerId = args[++i];
+    } else if (arg === "--kinds" && i + 1 < args.length) {
+      allowedKinds = args[++i].split(",");
+    } else if (arg === "--poll-interval" && i + 1 < args.length) {
+      pollIntervalMs = parseInt(args[++i], 10);
+    } else if (arg === "--lease-duration" && i + 1 < args.length) {
+      leaseDurationMs = parseInt(args[++i], 10);
+    } else if (arg === "--heartbeat-interval" && i + 1 < args.length) {
+      heartbeatIntervalMs = parseInt(args[++i], 10);
+    } else if (arg === "--once") {
+      once = true;
+    }
+  }
+
+  const { openDatabase, closeDatabase } = await import("../persistence/sqlite-database.mjs");
+  const { createArtifactStore } = await import("../artifacts/artifact-store.mjs");
+  const { createProfileRegistry } = await import("../execution/profile-registry.mjs");
+  const { createBuildService } = await import("../execution/build-service.mjs");
+  const { createBotVersionService } = await import("../persistence/bot-version-service.mjs");
+  const { createMatchRepository } = await import("../persistence/match-repository.mjs");
+  const { createJobQueue } = await import("../persistence/job-queue.mjs");
+  const { createMatchFinalizer } = await import("../persistence/finalizer.mjs");
+
+  const opened = openDatabase(dbPath);
+  const db = opened.db || opened;
+  const artifactStore = createArtifactStore({ storageDir });
+  const profileRegistry = createProfileRegistry();
+  const buildService = createBuildService({ artifactStore, profileRegistry });
+  const botVersionService = createBotVersionService({
+    db,
+    artifactStore,
+    buildService,
+    profileRegistry
+  });
+
+  const matchRepo = createMatchRepository(db);
+  const jobQueue = createJobQueue(db);
+  const finalizer = createMatchFinalizer(db);
+  const botFactory = createProfileBotFactory({ artifactStore, profileRegistry });
+
+  const worker = createJobWorker({
+    workerId,
+    db,
+    jobQueue,
+    matchRepo,
+    finalizer,
+    botVersionService,
+    botFactory,
+    allowedKinds,
+    pollIntervalMs,
+    leaseDurationMs,
+    heartbeatIntervalMs
+  });
+
+  if (once) {
+    const res = await worker.runOnce();
+    console.log(`[arena:worker] runOnce finished:`, res.executed ? `executed ${res.claim.jobId}` : "idle");
+    closeDatabase(db);
+    return;
+  }
+
+  console.log(`[arena:worker] Worker ${workerId} active on ${dbPath} (kinds: ${allowedKinds.join(", ")})`);
+  worker.start();
+
+  const shutdown = async () => {
+    console.log(`\n[arena:worker] Stopping worker ${workerId}...`);
+    await worker.stop();
+    closeDatabase(db);
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+const isMain =
+  process.argv[1] &&
+  (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) ||
+    process.argv[1].endsWith("packages/arena-node/src/worker/job-worker.mjs") ||
+    process.argv[1].endsWith("packages\\arena-node\\src\\worker\\job-worker.mjs"));
+
+if (isMain) {
+  runWorkerCli(process.argv.slice(2)).catch((err) => {
+    console.error("[arena:worker] Fatal error:", err);
+    process.exit(1);
+  });
+}
+
+
