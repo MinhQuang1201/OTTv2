@@ -55,6 +55,8 @@ export class ReplaySession implements GameSession, ReplayPlaybackFacade {
 
   getSnapshot = (): GameSnapshot => this.snapshot;
 
+  getDocument = (): ReplayDocument | null => (this.document ? structuredClone(this.document) : null);
+
   getPlayback = (): ReplayPlaybackView => {
     if (!this.document) {
       return INITIAL_PLAYBACK_VIEW;

@@ -10,6 +10,11 @@ import { DemoSession } from "../sessions/demo/DemoSession";
 import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import type { DemoScenario } from "../shared/model/game";
 import { AppLifecycleCoordinator } from "./AppLifecycleCoordinator";
+import userEvent from "@testing-library/user-event";
+import { ReplaySession } from "../sessions/replay/ReplaySession";
+import deterministicFixture from "../../../../tests/fixtures/arena/replays/deterministic-match.json";
+import forfeitFixture from "../../../../tests/fixtures/arena/replays/forfeit-ply0.json";
+import type { ReplayDocument } from "../../../../packages/arena/src/contracts/index.d.mts";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -1215,5 +1220,105 @@ describe("App shell lifecycle", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(started).toEqual(["started"]);
     await coordinator.dispose();
+  });
+
+  describe("Replay routing and lifecycle", () => {
+    it("routes replay mode before phase checks and never renders live ResultDialog", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      // Verify initially on lobby
+      expect(screen.getByRole("button", { name: /Mở file Replay/i })).toBeInTheDocument();
+
+      // Upload deterministic match fixture
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const file = new File([JSON.stringify(deterministicFixture)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      // Successfully transitioned to ReplayScreen
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("replay-timeline-slider")).toBeInTheDocument();
+
+      // Board has 81 cells
+      expect(screen.getAllByRole("button", { name: /^Ô /i })).toHaveLength(81);
+
+      // Fast-forward cursor to terminal ply 19 so phase is 'finished'
+      replaySession.seek(19);
+
+      // Terminal ArenaResultSummary should appear, NOT live ResultDialog
+      await waitFor(() => {
+        expect(screen.getByRole("region", { name: /kết quả trận đấu/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("dialog", { name: /kết quả ván đấu/i })).not.toBeInTheDocument();
+
+      // Return to lobby and verify replaySession is disposed
+      const lobbyBtn = screen.getByTestId("replay-lobby-btn");
+      await user.click(lobbyBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Mở file Replay/i })).toBeInTheDocument();
+      });
+      expect(replayDisposeSpy).toHaveBeenCalled();
+    });
+
+    it("routes forfeit ply 0 replay directly to ReplayScreen without error screen", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const file = new File([JSON.stringify(forfeitFixture)], "forfeit.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      // Directly routes to ReplayScreen with forfeit summary
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+      const summary = await screen.findByRole("region", { name: /kết quả trận đấu/i });
+      expect(summary).toHaveTextContent(/xử thua|bỏ cuộc|thua/i);
+      expect(screen.queryByRole("dialog", { name: /kết quả ván đấu/i })).not.toBeInTheDocument();
+    });
+
+    it("does not acquire RuntimeBridge for replay mode transitions", async () => {
+      const runtime = {
+        bootstrap: vi.fn(),
+        connectionFactory: vi.fn(),
+        dispose: vi.fn(async () => undefined),
+      };
+      const replaySession = new ReplaySession();
+      const coordinator = new AppLifecycleCoordinator({
+        runtime: runtime as any,
+        gateway: {} as any,
+        createLobbyStream: () => { throw new Error("not used"); },
+      });
+
+      await coordinator.transition({
+        factory: () => replaySession,
+        options: { mode: "replay", document: deterministicFixture as unknown as ReplayDocument },
+        onSession: () => undefined,
+        onLobbyStream: () => undefined,
+      });
+
+      expect(runtime.bootstrap).not.toHaveBeenCalled();
+      expect(runtime.connectionFactory).not.toHaveBeenCalled();
+
+      await coordinator.dispose();
+    });
   });
 });

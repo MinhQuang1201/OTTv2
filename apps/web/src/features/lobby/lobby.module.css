@@ -483,3 +483,17 @@
   .modeCard .button { width: 100%; }
   .joinRow { grid-template-columns: 1fr; }
 }
+
+.replayError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: var(--ui-text-sm);
+  margin-top: var(--ui-space-3);
+}
