@@ -1,6 +1,7 @@
 /**
- * Arena Execution Profile Registry & Python Bot Resolution Tests — Task 6 (Milestone M2)
- * Unit tests profile registry, probe timeouts, executable resolution, and bot spec resolution.
+ * Arena Execution Profile Registry & Multi-Language Resolution Tests — Task 6 & 7 (Milestone M2)
+ * Unit tests profile registry, probe timeouts, executable resolution, Java version parsing,
+ * and bot spec resolution across Python, Node, C++, Java.
  */
 
 "use strict";
@@ -14,12 +15,20 @@ const os = require("node:os");
 let createProfileRegistry;
 let probeExecutable;
 let resolvePythonExecutable;
+let resolveNodeExecutable;
+let resolveCppExecutable;
+let resolveJavaExecutables;
+let parseJavaMajorVersion;
 
 before(async () => {
   const regMod = await import("../packages/arena-node/src/execution/profile-registry.mjs");
   createProfileRegistry = regMod.createProfileRegistry;
   probeExecutable = regMod.probeExecutable;
   resolvePythonExecutable = regMod.resolvePythonExecutable;
+  resolveNodeExecutable = regMod.resolveNodeExecutable;
+  resolveCppExecutable = regMod.resolveCppExecutable;
+  resolveJavaExecutables = regMod.resolveJavaExecutables;
+  parseJavaMajorVersion = regMod.parseJavaMajorVersion;
 });
 
 describe("profile-registry: probeExecutable utility", () => {
@@ -44,7 +53,7 @@ describe("profile-registry: probeExecutable utility", () => {
   });
 });
 
-describe("profile-registry: resolvePythonExecutable", () => {
+describe("profile-registry: executable resolution utilities", () => {
   it("honors OTT_ARENA_PYTHON environment variable when set", () => {
     const original = process.env.OTT_ARENA_PYTHON;
     try {
@@ -58,7 +67,7 @@ describe("profile-registry: resolvePythonExecutable", () => {
     }
   });
 
-  it("selects platform-appropriate fallback without hardcoding python3 on Windows", () => {
+  it("selects platform-appropriate Python fallback without hardcoding python3 on Windows", () => {
     const original = process.env.OTT_ARENA_PYTHON;
     delete process.env.OTT_ARENA_PYTHON;
     try {
@@ -73,16 +82,75 @@ describe("profile-registry: resolvePythonExecutable", () => {
       if (original !== undefined) process.env.OTT_ARENA_PYTHON = original;
     }
   });
+
+  it("resolves Node executable honoring OTT_ARENA_NODE or process.execPath", () => {
+    const original = process.env.OTT_ARENA_NODE;
+    try {
+      process.env.OTT_ARENA_NODE = "custom-node-bin";
+      const res = resolveNodeExecutable();
+      assert.equal(res.executable, "custom-node-bin");
+      assert.equal(res.source, "env");
+    } finally {
+      if (original !== undefined) process.env.OTT_ARENA_NODE = original;
+      else delete process.env.OTT_ARENA_NODE;
+    }
+
+    const defaultNode = resolveNodeExecutable();
+    assert.ok(defaultNode.executable);
+    assert.ok(defaultNode.candidates.includes(process.execPath));
+  });
+
+  it("resolves C++ compiler honoring OTT_ARENA_CPP", () => {
+    const original = process.env.OTT_ARENA_CPP;
+    try {
+      process.env.OTT_ARENA_CPP = "custom-g++";
+      const res = resolveCppExecutable();
+      assert.equal(res.executable, "custom-g++");
+      assert.equal(res.source, "env");
+    } finally {
+      if (original !== undefined) process.env.OTT_ARENA_CPP = original;
+      else delete process.env.OTT_ARENA_CPP;
+    }
+  });
+
+  it("parses Java major version correctly across formats", () => {
+    assert.equal(parseJavaMajorVersion("javac 23.0.1"), 23);
+    assert.equal(parseJavaMajorVersion("javac 21.0.2"), 21);
+    assert.equal(parseJavaMajorVersion("java version \"21.0.1\" 2023-10-17 LTS"), 21);
+    assert.equal(parseJavaMajorVersion("openjdk 21.0.3 2024-04-16"), 21);
+    assert.equal(parseJavaMajorVersion("javac 17.0.5"), 17);
+    assert.equal(parseJavaMajorVersion("java version \"1.8.0_301\""), 8);
+    assert.equal(parseJavaMajorVersion("invalid string"), null);
+  });
+
+  it("resolves Java toolchain honoring OTT_ARENA_JAVAC and OTT_ARENA_JAVA", () => {
+    const origJavac = process.env.OTT_ARENA_JAVAC;
+    const origJava = process.env.OTT_ARENA_JAVA;
+    try {
+      process.env.OTT_ARENA_JAVAC = "custom-javac";
+      process.env.OTT_ARENA_JAVA = "custom-java";
+      const res = resolveJavaExecutables();
+      assert.equal(res.javac, "custom-javac");
+      assert.equal(res.java, "custom-java");
+    } finally {
+      if (origJavac !== undefined) process.env.OTT_ARENA_JAVAC = origJavac;
+      else delete process.env.OTT_ARENA_JAVAC;
+      if (origJava !== undefined) process.env.OTT_ARENA_JAVA = origJava;
+      else delete process.env.OTT_ARENA_JAVA;
+    }
+  });
 });
 
 describe("profile-registry: createProfileRegistry lifecycle & resolution", () => {
-  it("lists default python profile", () => {
+  it("lists default profiles (python, node, cpp, java)", () => {
     const registry = createProfileRegistry();
     const profiles = registry.listProfiles();
     assert.ok(Array.isArray(profiles));
-    const pythonProfile = profiles.find((p) => p.id === "python");
-    assert.ok(pythonProfile);
-    assert.equal(pythonProfile.language, "python");
+    const ids = profiles.map((p) => p.id);
+    assert.ok(ids.includes("python"));
+    assert.ok(ids.includes("node"));
+    assert.ok(ids.includes("cpp"));
+    assert.ok(ids.includes("java"));
   });
 
   it("resolves built-in 'first-legal' bot spec as FunctionBot", () => {
@@ -125,9 +193,63 @@ describe("profile-registry: createProfileRegistry lifecycle & resolution", () =>
     }
   });
 
+  it("resolves 'node:<path>' when source file exists into ProcessBot", () => {
+    const tempBotFile = path.join(os.tmpdir(), `test_node_bot_${Date.now()}.mjs`);
+    fs.writeFileSync(tempBotFile, "console.log('hello');", "utf8");
+
+    try {
+      const registry = createProfileRegistry();
+      const bot = registry.resolveBot(`node:${tempBotFile}`, { botId: "valid-node" });
+      assert.ok(bot);
+      assert.equal(bot.botId, "valid-node");
+      assert.equal(typeof bot.start, "function");
+      assert.equal(typeof bot.requestMove, "function");
+      assert.equal(typeof bot.stop, "function");
+    } finally {
+      try { fs.unlinkSync(tempBotFile); } catch (_) {}
+    }
+  });
+
+  it("rejects uncompiled C++ source file with uncompiled_source infrastructure error", () => {
+    const tempCpp = path.join(os.tmpdir(), `raw_uncompiled_${Date.now()}.cpp`);
+    fs.writeFileSync(tempCpp, "int main() { return 0; }", "utf8");
+
+    try {
+      const registry = createProfileRegistry();
+      assert.throws(
+        () => registry.resolveBot(`cpp:${tempCpp}`, { botId: "uncompiled-cpp" }),
+        (err) => {
+          assert.equal(err.kind, "infrastructure_error");
+          assert.equal(err.code, "uncompiled_source");
+          return true;
+        }
+      );
+    } finally {
+      try { fs.unlinkSync(tempCpp); } catch (_) {}
+    }
+  });
+
+  it("rejects uncompiled Java source file with uncompiled_source infrastructure error", () => {
+    const tempJava = path.join(os.tmpdir(), `RawUncompiled_${Date.now()}.java`);
+    fs.writeFileSync(tempJava, "public class RawUncompiled {}", "utf8");
+
+    try {
+      const registry = createProfileRegistry();
+      assert.throws(
+        () => registry.resolveBot(`java:${tempJava}`, { botId: "uncompiled-java" }),
+        (err) => {
+          assert.equal(err.kind, "infrastructure_error");
+          assert.equal(err.code, "uncompiled_source");
+          return true;
+        }
+      );
+    } finally {
+      try { fs.unlinkSync(tempJava); } catch (_) {}
+    }
+  });
+
   it("separates unavailable runtime from execution failure using probe doubles", () => {
     const registry = createProfileRegistry();
-    // Register double profile that is unavailable
     registry.registerProfile({
       id: "fake-lang",
       language: "fake",
