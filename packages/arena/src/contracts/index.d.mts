@@ -83,6 +83,7 @@ export interface BotAction {
   requestId: string;
   move: WireMove;
   comment?: string;
+  receivedAtMs?: number;
 }
 
 export interface BotStartContext {
