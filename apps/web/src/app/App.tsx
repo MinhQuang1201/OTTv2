@@ -13,6 +13,9 @@ import { LocalSession } from "../sessions/local/LocalSession";
 import { AiSession } from "../sessions/ai/AiSession";
 import { OnlineSession } from "../sessions/online/OnlineSession";
 import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
+import { ReplaySession } from "../sessions/replay/ReplaySession";
+import { ReplayScreen } from "../features/replay/ReplayScreen";
+import type { ReplayDocument } from "../../../../packages/arena/src/contracts/index.d.mts";
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/online/OnlineLobbyStream";
 import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runtimeBridge";
@@ -29,12 +32,13 @@ export type AppState =
   | { readonly status: "lobby"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "preparing"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "playing"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
-  | { readonly status: "finished"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot & { readonly result: GameResultView }; readonly scenario: DemoScenario }
+  | { readonly status: "finished"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot & { readonly result?: GameResultView | null }; readonly scenario: DemoScenario }
   | { readonly status: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly error: SessionErrorView; readonly scenario: DemoScenario };
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
 export type OnlineSessionFactory = () => GameSession;
 export type SpectatorSessionFactory = () => GameSession;
+export type ReplaySessionFactory = () => GameSession;
 export type OnlineLobbyStreamFactory = (runtime: RuntimeBridge) => OnlineLobbyStream;
 
 export function createDemoSession(scenario: DemoScenario): GameSession {
@@ -61,6 +65,15 @@ export function safeSessionError(error: unknown): SessionErrorView {
 }
 
 function stateForSnapshot(session: GameSession, scenario: DemoScenario, snapshot: GameSnapshot, generation: number): AppState {
+  if (snapshot.mode === "replay") {
+    if (snapshot.phase === "error") {
+      return { status: "error", generation, session, snapshot, error: snapshot.error ? safeSessionError(snapshot.error) : { code: "session_failed", message: "Không thể xử lý phiên replay.", retryable: true }, scenario };
+    }
+    if (snapshot.phase === "finished") {
+      return { status: "finished", generation, session, snapshot, scenario };
+    }
+    return { status: "playing", generation, session, snapshot, scenario };
+  }
   if (snapshot.phase === "finished") {
     if (snapshot.result) return { status: "finished", generation, session, snapshot: snapshot as GameSnapshot & { readonly result: GameResultView }, scenario };
     return { status: "error", generation, session, snapshot, error: { code: "session_failed", message: "Kết quả ván chơi không hợp lệ.", retryable: false }, scenario };
@@ -93,13 +106,14 @@ export interface AppProps {
   readonly onlineGateway?: OnlineLobbyGateway;
   readonly onlineSessionFactory?: OnlineSessionFactory;
   readonly spectatorSessionFactory?: SpectatorSessionFactory;
+  readonly replaySessionFactory?: ReplaySessionFactory;
   readonly runtime?: RuntimeBridge;
   readonly onlineLobbyStreamFactory?: OnlineLobbyStreamFactory;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
@@ -126,6 +140,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const [waitingRooms, setWaitingRooms] = useState<{ status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string }>({ status: "loading" });
   const createOnlineSession = onlineSessionFactory ?? (() => new OnlineSession({ gateway: onlineGateway, runtime: runtimeOwnerRef.current, disposeRuntime: false }));
   const createSpectatorSession = spectatorSessionFactory ?? (() => new SpectatorSession({ gateway: onlineGateway, runtime: runtimeOwnerRef.current, disposeRuntime: false }));
+  const createReplaySession = replaySessionFactory ?? (() => new ReplaySession());
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
 
   useEffect(() => {
@@ -289,6 +304,9 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     if (demo.enabled) return;
     transitionTo(createSpectatorSession, { mode: "spectator", allocationId: identity.allocationId, roomId: identity.roomId }, "spectator-active");
   };
+  const onStartReplay = (document: ReplayDocument) => {
+    transitionTo(createReplaySession, { mode: "replay", document }, "game-active-a");
+  };
 
   return (
     <AppProviders>
@@ -311,6 +329,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onLobby={onLobby}
                 onStartLocal={onStartLocal}
                 onStartAi={onStartAi}
+                onStartReplay={onStartReplay}
                 onCreateOnline={(name) => startOnline({ mode: "online", intent: "create", playerName: name })}
                 onJoinOnline={(name, roomId) => startOnline({ mode: "online", intent: "join", playerName: name, roomId })}
                 waitingRooms={waitingRooms}
@@ -327,11 +346,12 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
   readonly onStartAi: (name: string) => void;
+  readonly onStartReplay: (document: ReplayDocument) => void;
   readonly onCreateOnline: (name: string) => void;
   readonly onJoinOnline: (name: string, roomId: string) => void;
   readonly waitingRooms: { status: "loading" | "ready" | "unavailable" | "error"; rooms?: readonly import("../shared/model/game").WaitingRoomView[]; message?: string };
@@ -349,6 +369,12 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
     </Panel>
   );
   if (state.status === "error") return null;
+
+  // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
+  if (state.snapshot?.mode === "replay" && state.session) {
+    return <ReplayScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
+  }
+
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
@@ -356,6 +382,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
+    onStartReplay={onStartReplay}
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
     onWatchMatch={onWatchMatch}
@@ -367,6 +394,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onCreateOnline, on
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
+    onStartReplay={onStartReplay}
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
     onWatchMatch={onWatchMatch}
