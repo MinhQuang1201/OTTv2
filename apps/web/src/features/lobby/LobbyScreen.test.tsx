@@ -154,4 +154,23 @@ describe("LobbyScreen", () => {
       window.FileReader = originalFileReader;
     }
   });
+
+  it("renders Arena entry card when arenaAvailable and calls onOpenArena on select", async () => {
+    const user = userEvent.setup();
+    const onOpenArena = vi.fn();
+    renderLobby({ onOpenArena, arenaAvailable: true });
+
+    const arenaBtn = screen.getByRole("button", { name: /Vào đấu trường/i });
+    expect(arenaBtn).toBeInTheDocument();
+
+    await user.click(arenaBtn);
+    expect(onOpenArena).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render Arena entry card when arenaAvailable is false", () => {
+    const onOpenArena = vi.fn();
+    renderLobby({ onOpenArena, arenaAvailable: false });
+    expect(screen.queryByRole("button", { name: /Vào đấu trường/i })).not.toBeInTheDocument();
+  });
 });
+

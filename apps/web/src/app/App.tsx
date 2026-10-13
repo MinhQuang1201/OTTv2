@@ -19,6 +19,9 @@ import type { ReplayDocument } from "../../../../packages/arena/src/contracts/in
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/online/OnlineLobbyStream";
 import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runtimeBridge";
+import { ArenaApiGateway } from "../features/arena/ArenaApiGateway";
+import { ArenaScreen } from "../features/arena/ArenaScreen";
+import { isArenaAvailable, resolveArenaEndpoint } from "../runtime-config";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import { AppLifecycleCoordinator, type AppLifecycleOptions } from "./AppLifecycleCoordinator";
@@ -33,6 +36,7 @@ export type AppState =
   | { readonly status: "preparing"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "playing"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "finished"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot & { readonly result?: GameResultView | null }; readonly scenario: DemoScenario }
+  | { readonly status: "arena"; readonly generation: number }
   | { readonly status: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly error: SessionErrorView; readonly scenario: DemoScenario };
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
@@ -90,12 +94,14 @@ function stateForSnapshot(session: GameSession, scenario: DemoScenario, snapshot
 
 type LifecycleAction =
   | { readonly type: "boot"; readonly generation: number }
+  | { readonly type: "arena"; readonly generation: number }
   | { readonly type: "snapshot"; readonly generation: number; readonly session: GameSession; readonly scenario: DemoScenario; readonly snapshot: GameSnapshot }
   | { readonly type: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly scenario: DemoScenario; readonly error: SessionErrorView };
 
 function appStateReducer(_state: AppState, action: LifecycleAction): AppState {
   if (action.generation < _state.generation) return _state;
   if (action.type === "boot") return _state.status === "boot" ? _state : { status: "boot", generation: action.generation };
+  if (action.type === "arena") return { status: "arena", generation: action.generation };
   if (action.type === "error") return { status: "error", generation: action.generation, session: action.session, snapshot: action.snapshot, error: action.error, scenario: action.scenario };
   return stateForSnapshot(action.session, action.scenario, action.snapshot, action.generation);
 }
@@ -107,13 +113,15 @@ export interface AppProps {
   readonly onlineSessionFactory?: OnlineSessionFactory;
   readonly spectatorSessionFactory?: SpectatorSessionFactory;
   readonly replaySessionFactory?: ReplaySessionFactory;
+  readonly arenaGateway?: ArenaApiGateway;
+  readonly arenaAvailable?: boolean;
   readonly runtime?: RuntimeBridge;
   readonly onlineLobbyStreamFactory?: OnlineLobbyStreamFactory;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
@@ -315,6 +323,21 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     }
   };
 
+  const effectiveArenaAvailable = arenaAvailable ?? isArenaAvailable();
+  const [arenaGatewayInstance] = useState(() => arenaGateway ?? new ArenaApiGateway({ baseUrl: resolveArenaEndpoint() }));
+  const effectiveArenaGateway = arenaGateway ?? arenaGatewayInstance;
+
+  const onOpenArena = () => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    dispatch({ type: "arena", generation });
+    setActiveSession(null);
+    lobbyStreamUnsubscribeRef.current?.();
+    lobbyStreamUnsubscribeRef.current = null;
+    setLobbyStreamSnapshot(null);
+    void coordinatorRef.current?.releaseCurrentSession().catch(() => undefined);
+  };
+
   return (
     <AppProviders>
       <main className={styles.app} aria-label="OTTv2">
@@ -345,6 +368,9 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onlineAvailable={onlineGateway.available}
                 demoEnabled={demo.enabled}
                 onWatchMatch={startSpectator}
+                arenaGateway={effectiveArenaGateway}
+                arenaAvailable={effectiveArenaAvailable}
+                onOpenArena={onOpenArena}
               />
             </ScreenBoundary>
           </div>
@@ -354,7 +380,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -368,6 +394,9 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly onlineAvailable: boolean;
   readonly demoEnabled: boolean;
   readonly onWatchMatch: (identity: PublicMatchIdentity) => void;
+  readonly arenaGateway: ArenaApiGateway;
+  readonly arenaAvailable: boolean;
+  readonly onOpenArena: () => void;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error" && state.error.code === "room_unavailable" && state.snapshot?.viewer?.role === "spectator") return (
@@ -378,6 +407,10 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     </Panel>
   );
   if (state.status === "error") return null;
+
+  if (state.status === "arena") {
+    return <ArenaScreen gateway={arenaGateway} onLobby={onLobby} onStartReplay={onStartReplay} />;
+  }
 
   // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
   if (state.snapshot?.mode === "replay" && state.session) {
@@ -395,6 +428,8 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
     onWatchMatch={onWatchMatch}
+    onOpenArena={onOpenArena}
+    arenaAvailable={arenaAvailable}
   />;
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
@@ -407,6 +442,8 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onCreateOnline={onCreateOnline}
     onJoinOnline={onJoinOnline}
     onWatchMatch={onWatchMatch}
+    onOpenArena={onOpenArena}
+    arenaAvailable={arenaAvailable}
   />;
   if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
@@ -430,7 +467,7 @@ function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 
-function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" }> }) {
+function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" } | { status: "arena" }> }) {
   return (
     <Panel className={styles.screen}>
       <h1>{heading}</h1>

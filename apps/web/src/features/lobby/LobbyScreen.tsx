@@ -21,10 +21,12 @@ export interface LobbyScreenProps {
   readonly onJoinOnline: (playerName: string, roomId: string) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
   readonly onStartReplay?: (document: ReplayDocument) => void;
+  readonly onOpenArena?: () => void;
+  readonly arenaAvailable?: boolean;
   readonly allowDemoWatch?: boolean;
 }
 
-export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, onWatchMatch, onStartReplay, allowDemoWatch }: LobbyScreenProps) {
+export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, onStartLocal, onStartAi, onCreateOnline, onJoinOnline, onWatchMatch, onStartReplay, onOpenArena, arenaAvailable, allowDemoWatch }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   const [playerNameError, setPlayerNameError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -111,6 +113,17 @@ export function LobbyScreen({ onlineAvailability, waitingRooms, publicMatches, o
                 description="Mở tập tin replay JSON để xem lại từng nước đi của trận đấu Arena."
                 actionLabel="Mở file Replay"
                 onSelect={() => fileInputRef.current?.click()}
+              />
+            )}
+            {onOpenArena && arenaAvailable && (
+              <ModeCard
+                title="Đấu trường AI"
+                description="Xem bảng xếp hạng, giải đấu và theo dõi trận đấu bot."
+                actionLabel="Vào đấu trường"
+                onSelect={() => {
+                  importGenerationRef.current += 1;
+                  onOpenArena();
+                }}
               />
             )}
           </div>

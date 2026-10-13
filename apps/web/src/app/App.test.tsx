@@ -1412,4 +1412,43 @@ describe("App shell lifecycle", () => {
       expect(screen.getAllByText("10:00").length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe("Arena route integration", () => {
+    it("enters arena route, disposes active session, and returns to lobby", async () => {
+      const user = userEvent.setup();
+      const { session, controls } = fakeSession();
+      const sessionFactory = vi.fn(() => session);
+      const states: AppState[] = [];
+
+      render(
+        <App
+          sessionFactory={sessionFactory}
+          arenaAvailable={true}
+          onStateChange={(state) => states.push(state)}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Vào đấu trường/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: /Vào đấu trường/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Đấu trường AI/i })).toBeInTheDocument();
+        expect(states.at(-1)?.status).toBe("arena");
+      });
+
+      expect(controls.dispose).toHaveBeenCalled();
+
+      // Return to lobby
+      await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+        expect(states.at(-1)?.status).toBe("lobby");
+      });
+    });
+  });
 });
+
