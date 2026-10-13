@@ -923,8 +923,16 @@ describe("Arena HTTP API — Task 14 Route Matrix & Integration", () => {
     assert.equal(getTourneyRes.json.matches.length, 6);
     assert.equal(getTourneyRes.json.standings.length, 3);
     for (const standing of getTourneyRes.json.standings) {
-      assert.equal(standing.points, 0);
-      assert.equal(standing.played, 0);
+      assert.ok(typeof standing.botId === "string" && standing.botId.length > 0, "standing must contain valid botId string");
+      assert.equal(typeof standing.rank, "number", "standing must contain numeric rank");
+      assert.equal(standing.matchesPlayed, 0, "initial tournament standing matchesPlayed must be 0");
+      assert.equal(standing.wins, 0, "initial tournament standing wins must be 0");
+      assert.equal(standing.draws, 0, "initial tournament standing draws must be 0");
+      assert.equal(standing.losses, 0, "initial tournament standing losses must be 0");
+      assert.equal(standing.points, 0, "initial tournament standing points must be 0");
+      assert.equal(standing.bot_id, undefined, "raw snake_case bot_id must not leak");
+      assert.equal(standing.played, undefined, "raw snake_case played must not leak");
+      assert.equal(standing.tournament_id, undefined, "raw tournament_id must not leak");
     }
   });
 

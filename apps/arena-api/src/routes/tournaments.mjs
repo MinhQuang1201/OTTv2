@@ -203,7 +203,15 @@ export async function handleTournamentsRoute(req, res, ctx) {
         ranked: Boolean(tournament.ranked),
         createdAt: tournament.created_at
       },
-      standings,
+      standings: standings.map((s) => ({
+        botId: s.bot_id,
+        rank: s.rank,
+        matchesPlayed: s.played,
+        wins: s.wins,
+        draws: s.draws,
+        losses: s.losses,
+        points: s.points
+      })),
       matches: matches.map((m) => ({
         id: m.id,
         scheduleIndex: m.schedule_index,
