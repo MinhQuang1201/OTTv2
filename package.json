@@ -18,7 +18,10 @@
     "build:web": "vite build --config apps/web/vite.config.ts",
     "test:web": "vitest run --config apps/web/vitest.config.ts",
     "test:web:watch": "vitest --config apps/web/vitest.config.ts",
-    "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit"
+    "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
+    "arena:cli": "node apps/arena-cli/src/main.mjs",
+    "arena:doctor": "node apps/arena-cli/src/main.mjs doctor",
+    "test:arena": "node --test tests/arena-contracts.test.js tests/arena-ruleset.test.js tests/arena-controller.test.js tests/arena-replay.test.js tests/arena-elo.test.js tests/arena-persistence.test.js tests/arena-cli.test.js"
   },
   "engines": {
     "node": ">=18"
