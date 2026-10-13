@@ -52,7 +52,7 @@ export interface ViewerCapabilities {
   readonly canSpectate: boolean;
 }
 
-export type SessionMode = "demo" | "local" | "ai" | "online" | "spectator";
+export type SessionMode = "demo" | "local" | "ai" | "online" | "spectator" | "replay";
 
 export type SessionPhase =
   | "idle"
