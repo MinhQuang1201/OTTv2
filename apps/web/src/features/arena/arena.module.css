@@ -1,0 +1,308 @@
+.arenaContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 1rem);
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-4, 1rem);
+  box-sizing: border-box;
+}
+
+.topBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 0.75rem);
+  padding-bottom: var(--space-3, 0.75rem);
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.topBarLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 0.75rem);
+}
+
+.title {
+  font-size: var(--text-2xl, 1.5rem);
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary, #fff);
+}
+
+.topBarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 0.75rem);
+  flex-wrap: wrap;
+}
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--text-secondary, #aaa);
+}
+
+.inlineLoginForm {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2, 0.5rem);
+  flex-wrap: wrap;
+}
+
+.tabsNav {
+  display: flex;
+  gap: var(--space-2, 0.5rem);
+  border-bottom: 2px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  padding-bottom: var(--space-2, 0.5rem);
+  overflow-x: auto;
+}
+
+.tabBtn {
+  padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
+  font-size: var(--text-base, 1rem);
+  font-weight: 600;
+  background: transparent;
+  color: var(--text-secondary, #aaa);
+  border: none;
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tabBtn:hover {
+  color: var(--text-primary, #fff);
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+}
+
+.tabBtnActive {
+  color: var(--accent-primary, #3b82f6);
+  background: var(--surface-active, rgba(59, 130, 246, 0.1));
+}
+
+.tabContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 1rem);
+}
+
+.gridTwoCols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4, 1rem);
+}
+
+@media (max-width: 768px) {
+  .gridTwoCols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm, 0.875rem);
+  text-align: left;
+}
+
+.dataTable th,
+.dataTable td {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dataTable th {
+  color: var(--text-secondary, #aaa);
+  font-weight: 600;
+}
+
+.dataTable tr:hover td {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.03));
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+.clickableRowSelected td {
+  background: var(--surface-active, rgba(59, 130, 246, 0.15)) !important;
+}
+
+.filterBar {
+  display: flex;
+  gap: var(--space-3, 0.75rem);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.filterSelect {
+  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  background: var(--surface-input, #1e1e1e);
+  color: var(--text-primary, #fff);
+  border: 1px solid var(--border-default, #444);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.formBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+  padding: var(--space-3, 0.75rem);
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.03));
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--space-2, 0.5rem);
+  font-family: monospace;
+  font-size: var(--text-xs, 0.75rem);
+  background: var(--surface-input, #1e1e1e);
+  color: var(--text-primary, #fff);
+  border: 1px solid var(--border-default, #444);
+  border-radius: var(--radius-sm, 4px);
+  box-sizing: border-box;
+}
+
+.errorBanner {
+  padding: var(--space-3, 0.75rem);
+  background: var(--surface-danger, rgba(239, 68, 68, 0.15));
+  color: var(--text-danger, #f87171);
+  border: 1px solid var(--border-danger, rgba(239, 68, 68, 0.3));
+  border-radius: var(--radius-md, 6px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 0.5rem);
+}
+
+.infoBanner {
+  padding: var(--space-3, 0.75rem);
+  background: var(--surface-info, rgba(59, 130, 246, 0.15));
+  color: var(--text-info, #60a5fa);
+  border: 1px solid var(--border-info, rgba(59, 130, 246, 0.3));
+  border-radius: var(--radius-md, 6px);
+}
+
+.emptyState {
+  padding: var(--space-6, 1.5rem);
+  text-align: center;
+  color: var(--text-muted, #777);
+  font-style: italic;
+}
+
+.matchList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.matchCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-3, 0.75rem);
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 6px);
+  gap: var(--space-2, 0.5rem);
+}
+
+.matchActions {
+  display: flex;
+  gap: var(--space-2, 0.5rem);
+  align-items: center;
+}
+
+.botSelectBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  color: var(--text-primary, #fff);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.botSelectBtn:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+}
+
+.botSelectBtn:focus-visible {
+  outline: 2px solid var(--accent-primary, #3b82f6);
+  outline-offset: 1px;
+}
+
+.botSelectBtnActive {
+  background: var(--surface-active, rgba(59, 130, 246, 0.2)) !important;
+  border-color: var(--accent-primary, #3b82f6);
+}
+
+.versionChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--space-2, 0.5rem);
+  background: var(--surface-input, #1e1e1e);
+  border: 1px solid var(--border-default, #444);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.875rem);
+  cursor: pointer;
+}
+
+.boundedBuildLog {
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--surface-subtle, rgba(0, 0, 0, 0.4));
+  padding: var(--space-2, 0.5rem);
+  border: 1px solid var(--border-danger, rgba(239, 68, 68, 0.4));
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--text-xs, 0.75rem);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-danger, #f87171);
+  margin-top: var(--space-1, 0.25rem);
+}
+
+.failedBuildDetails {
+  margin-top: var(--space-2, 0.5rem);
+  font-size: var(--text-xs, 0.75rem);
+}
+
+.matchHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 0.25rem);
+}
+
+.matchParticipants {
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--text-secondary, #ccc);
+  margin-top: var(--space-1, 0.25rem);
+}
+
+.matchResultInfo {
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--text-primary, #fff);
+  margin-top: var(--space-1, 0.25rem);
+}
+
