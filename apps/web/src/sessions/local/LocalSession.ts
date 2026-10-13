@@ -2,6 +2,7 @@ import type { GameSession, MoveResult, StartGameOptions } from "../contract";
 import type { GameEventView, GameSnapshot, Position, Seat, SessionErrorView } from "../../shared/model/game";
 import { getGameCoreBridge, type CoreMove, type CoreMoveChooser, type CoreState, type GameCoreBridge } from "../core/gameCoreBridge";
 import { normalizeCoreEvents, normalizeCoreState } from "../core/normalizeCoreState";
+import { validatePracticeStart } from "../replay/replayHydration";
 
 export interface LocalSessionDependencies {
   readonly now?: () => number;
@@ -51,6 +52,22 @@ export class LocalSession implements GameSession {
     this.clearTimer();
     this.names = [options.playerNames[0].trim() || "Người chơi Đỏ", options.playerNames[1].trim() || "Người chơi Xanh"];
     try {
+      if (options.practice) {
+        const val = validatePracticeStart(options.practice);
+        if (!val.ok) {
+          this.failSession();
+          return;
+        }
+        this.state = structuredClone(val.validated.coreState);
+        this.lastNow = this.now();
+        this.boardRevision = 1;
+        this.nextEventId = 1;
+        const initialTurn = this.state.turn ?? "A";
+        this.snapshot = this.makeSnapshot("playing", initialTurn, "offline", [], false);
+        this.timer = this.setIntervalFn(() => this.tick(), this.tickMs);
+        this.publish();
+        return;
+      }
       this.state = this.bridge.createInitialState();
       this.lastNow = this.now();
       this.boardRevision = 1;

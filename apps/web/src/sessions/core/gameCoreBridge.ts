@@ -16,6 +16,8 @@ export interface GameCoreBridge {
   readonly ai: OttCoreAi;
   createInitialState(): CoreState;
   getLegalMoves(state: CoreState, pieceId: string): readonly Position[];
+  allMoves(state: CoreState, player: Seat): readonly { readonly pieceId: string; readonly from: Position; readonly to: Position }[];
+  detectWinner(state: CoreState): { readonly winner: Seat; readonly reason: string; readonly eliminatedPlayer: Seat | null } | null;
   applyMove(state: CoreState, player: Seat, from: Position, to: Position): CoreMoveResult;
   elapseClock(state: CoreState, elapsedMs: number): CoreMoveResult;
   countByType(state: CoreState, player: Seat): Readonly<Record<PieceType, number>>;
@@ -35,7 +37,7 @@ function requireGlobals(): { config: OttCoreConfig; rules: OttCoreRules; ai: Ott
   const config = globalThis.OTT_CONFIG;
   const rules = globalThis.OTT_RULES;
   const ai = globalThis.OTT_AI;
-  if (!config || !rules || !ai || typeof rules.createInitialState !== "function" || typeof rules.applyMove !== "function" || typeof rules.elapseClock !== "function" || typeof rules.getLegalMoves !== "function" || typeof rules.countByType !== "function") {
+  if (!config || !rules || !ai || typeof rules.createInitialState !== "function" || typeof rules.applyMove !== "function" || typeof rules.elapseClock !== "function" || typeof rules.getLegalMoves !== "function" || typeof rules.countByType !== "function" || typeof rules.detectWinner !== "function" || typeof rules.allMoves !== "function") {
     throw new GameCoreUnavailableError();
   }
   return { config, rules, ai };
@@ -47,6 +49,8 @@ export function getGameCoreBridge(): GameCoreBridge {
     ...globals,
     createInitialState: () => globals.rules.createInitialState(),
     getLegalMoves: (state, pieceId) => globals.rules.getLegalMoves(state, pieceId).map((move) => ({ x: move.x, y: move.y })),
+    allMoves: (state, player) => globals.rules.allMoves(state, player).map((m) => ({ pieceId: m.pieceId, from: { x: m.from.x, y: m.from.y }, to: { x: m.to.x, y: m.to.y } })),
+    detectWinner: (state) => globals.rules.detectWinner(state),
     applyMove: (state, player, from, to) => globals.rules.applyMove(state, player, from, to),
     elapseClock: (state, elapsedMs) => globals.rules.elapseClock(state, elapsedMs),
     countByType: (state, player) => globals.rules.countByType(state, player),

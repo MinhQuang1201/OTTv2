@@ -152,6 +152,23 @@
   margin-right: var(--ui-space-1);
 }
 
+.forkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+  padding-top: var(--ui-space-2);
+  border-top: 1px solid var(--ui-glass-border);
+}
+
+.forkLabel {
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-muted);
+  font-weight: 600;
+  margin-right: var(--ui-space-1);
+}
+
 /* Arena Result Summary Overlay */
 .resultSummaryOverlay {
   position: fixed;

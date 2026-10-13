@@ -11,6 +11,8 @@ import { Panel } from "../../shared/ui/Panel";
 import { ReplayControls } from "./ReplayControls";
 import { ArenaResultSummary } from "./ArenaResultSummary";
 import { downloadReplayDocument } from "./replayImport";
+import { hydratePracticeCoreState } from "../../sessions/replay/replayHydration";
+import type { PracticeStart } from "../../sessions/contract";
 import styles from "./replay.module.css";
 
 export interface ReplayScreenProps {
@@ -19,6 +21,7 @@ export interface ReplayScreenProps {
   };
   readonly snapshot: GameSnapshot;
   readonly onLobby: () => void;
+  readonly onForkPractice?: (mode: "local" | "ai", practice: PracticeStart) => void;
   readonly initialDocument?: ReplayDocument;
 }
 
@@ -26,6 +29,7 @@ export function ReplayScreen({
   session,
   snapshot: initialSnapshot,
   onLobby,
+  onForkPractice,
   initialDocument,
 }: ReplayScreenProps) {
   const activeSnapshot = useSessionSnapshot(session) || initialSnapshot;
@@ -86,6 +90,15 @@ export function ReplayScreen({
   const showResultOverlay = playback.isAtEnd && Boolean(playback.result) && !summaryDismissed;
 
   const doc = session.getDocument?.() || initialDocument;
+  const hydrationResult = doc ? hydratePracticeCoreState(doc, playback.cursor) : null;
+  const canFork = hydrationResult?.ok === true;
+  const forkDisabledReason = hydrationResult?.ok === false ? hydrationResult.reason : null;
+
+  const handleForkPractice = (mode: "local" | "ai") => {
+    if (hydrationResult?.ok) {
+      onForkPractice?.(mode, hydrationResult.practice);
+    }
+  };
 
   const renderParticipantMeta = (seat: "A" | "B") => {
     const p = doc?.participants?.[seat] || playback.participants?.[seat];
@@ -163,6 +176,9 @@ export function ReplayScreen({
             onPause={handlePause}
             onStep={handleStep}
             onSetSpeed={handleSetSpeed}
+            onForkPractice={onForkPractice ? handleForkPractice : undefined}
+            canFork={canFork}
+            forkDisabledReason={forkDisabledReason}
           />
         </div>
 

@@ -62,12 +62,19 @@ export class AiSession implements GameSession {
   async start(options: StartGameOptions): Promise<void> {
     if (this.disposed || options.mode !== "ai") return;
     this.cancelAi();
-    this.humanSeat = options.humanSeat ?? "A";
+    const currentTurn = options.practice?.coreState.turn ?? "A";
+    this.humanSeat = options.humanSeat ?? currentTurn;
     this.aiSeat = this.humanSeat === "A" ? "B" : "A";
     const names: [string, string] = this.humanSeat === "A"
       ? [options.playerName.trim() || "Người chơi", "Máy"]
       : ["Máy", options.playerName.trim() || "Người chơi"];
-    await this.local.start({ mode: "local", playerNames: names });
+    await this.local.start({ mode: "local", playerNames: names, practice: options.practice });
+    if (this.local.getSnapshot().phase === "error") {
+      this.aiThinking = false;
+      this.snapshot = this.decorate(this.local.getSnapshot());
+      this.publish();
+      return;
+    }
     this.aiThinking = this.local.getSnapshot().turn === this.aiSeat;
     this.snapshot = this.decorate(this.local.getSnapshot());
     this.publish();

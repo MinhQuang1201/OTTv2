@@ -46,6 +46,8 @@ declare global {
   interface OttCoreRules {
     createInitialState(): OttCoreState;
     getLegalMoves(state: OttCoreState, pieceId: string): readonly { readonly x: number; readonly y: number }[];
+    allMoves(state: OttCoreState, player: "A" | "B"): readonly { readonly pieceId: string; readonly from: { readonly x: number; readonly y: number }; readonly to: { readonly x: number; readonly y: number } }[];
+    detectWinner(state: OttCoreState): { readonly winner: "A" | "B"; readonly reason: string; readonly eliminatedPlayer: "A" | "B" | null } | null;
     applyMove(state: OttCoreState, player: "A" | "B", from: { readonly x: number; readonly y: number }, to: { readonly x: number; readonly y: number }): OttCoreMoveResult;
     elapseClock(state: OttCoreState, elapsedMs: number): OttCoreMoveResult;
     countByType(state: OttCoreState, player: "A" | "B"): Readonly<Record<"dam" | "la" | "keo", number>>;
