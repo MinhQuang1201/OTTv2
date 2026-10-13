@@ -26,6 +26,7 @@ import {
   computeReplayDigest
 } from "../../../packages/arena-node/src/core/ruleset-identity.mjs";
 import { createNodeClock } from "../../../packages/arena-node/src/clock/node-clock.mjs";
+import { createProfileRegistry } from "../../../packages/arena-node/src/execution/profile-registry.mjs";
 
 function parseMatchOptions(args) {
   const options = {
@@ -117,6 +118,7 @@ function handleDoctor(stdout, stderr, io = {}) {
       ? io.getRulesetHash(rulesetSnapshot)
       : computeRulesetHash(rulesetSnapshot);
     const engineFingerprint = getEngineFingerprint();
+    const registry = io.getRegistry ? io.getRegistry() : createProfileRegistry();
 
     stdout("[Arena Doctor]");
     stdout(`Runtime: Node ${process.version} (${process.platform} ${process.arch})`);
@@ -129,6 +131,15 @@ function handleDoctor(stdout, stderr, io = {}) {
     stdout("  trusted-local: available");
     stdout("  sandbox: unavailable");
     stdout("  compiler: unavailable");
+    stdout("Profiles:");
+    const probed = registry.probeAll();
+    for (const [profId, pInfo] of Object.entries(probed)) {
+      if (pInfo.available) {
+        stdout(`  ${profId}: available (${pInfo.version || pInfo.executable})`);
+      } else {
+        stdout(`  ${profId}: unavailable (${pInfo.error || "not found"})`);
+      }
+    }
 
     return 0;
   } catch (err) {
@@ -156,13 +167,19 @@ async function handleMatch(args, stdout, stderr, cwd, io = {}) {
     return 2;
   }
 
-  if (opts.botA !== "first-legal") {
-    stderr(`Error: Unsupported bot "${opts.botA}" for seat A. Only "first-legal" is supported in milestone M1.`);
+  function isValidBotSpec(spec) {
+    if (spec === "first-legal") return true;
+    if (typeof spec === "string" && spec.startsWith("python:") && spec.slice(7).trim().length > 0) return true;
+    return false;
+  }
+
+  if (!isValidBotSpec(opts.botA)) {
+    stderr(`Error: Unsupported bot "${opts.botA}" for seat A. Only "first-legal" or "python:<source-path>" is supported.`);
     return 2;
   }
 
-  if (opts.botB !== "first-legal") {
-    stderr(`Error: Unsupported bot "${opts.botB}" for seat B. Only "first-legal" is supported in milestone M1.`);
+  if (!isValidBotSpec(opts.botB)) {
+    stderr(`Error: Unsupported bot "${opts.botB}" for seat B. Only "first-legal" or "python:<source-path>" is supported.`);
     return 2;
   }
 
@@ -202,23 +219,42 @@ async function handleMatch(args, stdout, stderr, cwd, io = {}) {
   }
 
   const matchId = `practice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const registry = io.getRegistry ? io.getRegistry() : createProfileRegistry();
 
-  const chooseFirstLegal = (turn) => {
-    if (!turn.legalMoves || turn.legalMoves.length === 0) {
-      throw new Error("No legal moves available");
+  let botA, botB;
+  try {
+    botA = registry.resolveBot(opts.botA, {
+      botId: opts.botA.startsWith("python:")
+        ? `python-a-${path.basename(opts.botA.slice(7), ".py")}`
+        : "first-legal-a",
+      cwd,
+      clock
+    });
+  } catch (errA) {
+    if (errA && errA.kind === "infrastructure_error") {
+      stderr(`Infrastructure error: ${errA.code || errA.message}`);
+      return 1;
     }
-    return turn.legalMoves[0];
-  };
+    stderr(`Error: Failed resolving bot A: ${errA.message}`);
+    return 2;
+  }
 
-  const botA = createFunctionBot({
-    botId: "first-legal-a",
-    chooseFn: chooseFirstLegal
-  });
-
-  const botB = createFunctionBot({
-    botId: "first-legal-b",
-    chooseFn: chooseFirstLegal
-  });
+  try {
+    botB = registry.resolveBot(opts.botB, {
+      botId: opts.botB.startsWith("python:")
+        ? `python-b-${path.basename(opts.botB.slice(7), ".py")}`
+        : "first-legal-b",
+      cwd,
+      clock
+    });
+  } catch (errB) {
+    if (errB && errB.kind === "infrastructure_error") {
+      stderr(`Infrastructure error: ${errB.code || errB.message}`);
+      return 1;
+    }
+    stderr(`Error: Failed resolving bot B: ${errB.message}`);
+    return 2;
+  }
 
   const controller = createHeadlessMatchController({
     matchId,
@@ -232,8 +268,16 @@ async function handleMatch(args, stdout, stderr, cwd, io = {}) {
     rulesetHash,
     engineRevision,
     participants: {
-      A: { botId: "first-legal-a", name: "first-legal", isFunctionBot: true },
-      B: { botId: "first-legal-b", name: "first-legal", isFunctionBot: true }
+      A: {
+        botId: botA.botId || "bot-a",
+        name: opts.botA,
+        isFunctionBot: !opts.botA.startsWith("python:")
+      },
+      B: {
+        botId: botB.botId || "bot-b",
+        name: opts.botB,
+        isFunctionBot: !opts.botB.startsWith("python:")
+      }
     }
   });
 
