@@ -26,6 +26,19 @@ function cloneDeep(val) {
   return copy;
 }
 
+function getBotFault(bot) {
+  if (!bot) return null;
+  if (typeof bot.consumeFault === "function") {
+    const f = bot.consumeFault();
+    if (f) return f;
+  }
+  if (typeof bot.getFault === "function") {
+    const f = bot.getFault();
+    if (f) return f;
+  }
+  return null;
+}
+
 const VALID_SEATS = new Set(["A", "B"]);
 const VALID_PIECE_TYPES = new Set(["dam", "la", "keo"]);
 
@@ -388,7 +401,26 @@ export function createHeadlessMatchController(options) {
             }
           }
 
-          const receiveMs = clock.nowMs();
+          let receiveMs = null;
+          if (raceResult.kind === "action" && typeof currentBot.getReceiptTime === "function") {
+            try {
+              const candidateMs = currentBot.getReceiptTime(raceResult.action);
+              const nowMs = clock.nowMs();
+              if (
+                typeof candidateMs === "number" &&
+                Number.isFinite(candidateMs) &&
+                candidateMs >= startMs &&
+                candidateMs <= nowMs
+              ) {
+                receiveMs = candidateMs;
+              }
+            } catch (_) {
+              receiveMs = null;
+            }
+          }
+          if (receiveMs === null) {
+            receiveMs = clock.nowMs();
+          }
           const elapsedMs = Math.max(0, receiveMs - startMs);
 
           // Handle supervisor abort
@@ -396,6 +428,49 @@ export function createHeadlessMatchController(options) {
             finalResult = createInfrastructureError({
               code: "interrupted",
               retryable: false
+            });
+            break;
+          }
+
+          // Check for pending faults on either bot (cross-seat fault detection)
+          // If non-acting bot faulted during this turn, non-acting bot forfeits
+          const otherBot = seat === "A" ? botB : botA;
+          const otherFault = getBotFault(otherBot);
+          if (otherFault) {
+            remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+            const forfeitReason =
+              otherFault.code === "output_limit" || otherFault.code === "protocol_error" || otherFault.code === "crash"
+                ? otherFault.code
+                : "protocol_error";
+            finalResult = createForfeitResult({
+              winner: seat,
+              loser: otherSeat,
+              reason: forfeitReason,
+              acceptedPlies
+            });
+            journal.technicalEvent({
+              type: "fault",
+              message: `Non-acting seat ${otherSeat} faulted: ${otherFault.message || forfeitReason}`
+            });
+            break;
+          }
+
+          const currentFault = getBotFault(currentBot);
+          if (currentFault) {
+            remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+            const forfeitReason =
+              currentFault.code === "output_limit" || currentFault.code === "protocol_error" || currentFault.code === "crash"
+                ? currentFault.code
+                : "protocol_error";
+            finalResult = createForfeitResult({
+              winner: otherSeat,
+              loser: seat,
+              reason: forfeitReason,
+              acceptedPlies
+            });
+            journal.technicalEvent({
+              type: "fault",
+              message: `Acting seat ${seat} faulted: ${currentFault.message || forfeitReason}`
             });
             break;
           }

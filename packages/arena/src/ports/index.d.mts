@@ -33,9 +33,13 @@ export interface EnginePort {
 }
 
 export interface BotPort {
+  readonly botId?: string;
   start(context: BotStartContext): Promise<void>;
   requestMove(turn: BotTurn, signal: AbortSignal): Promise<BotAction>;
   stop(): Promise<void>; // idempotent, including partial startup
+  getReceiptTime?(action: BotAction): number | null;
+  consumeFault?(): { code: string; message: string } | null;
+  getFault?(): { code: string; message: string } | null;
 }
 
 export interface ClockPort {
