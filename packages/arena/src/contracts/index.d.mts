@@ -172,6 +172,7 @@ export interface ReplayParticipant {
   sourceDigest?: string;
   artifactDigest?: string;
   profileId?: string;
+  profileRevision?: string;
   isFunctionBot?: boolean;
 }
 
@@ -356,3 +357,4 @@ export declare function validateMatchPolicy(policy: unknown): ValidationResult;
 export declare function validateRulesetSnapshot(snapshot: unknown): ValidationResult;
 export declare function isSupportedEngineRuleset(snapshot: unknown): boolean;
 export declare function validateReplayDocument(doc: unknown, options?: { maxBytes?: number }): ValidationResult;
+export declare function validateMatchCompletionEnvelope(envelope: unknown): ValidationResult;

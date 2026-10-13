@@ -6,7 +6,8 @@ import {
   validateMatchPolicy,
   validateRulesetSnapshot,
   isSupportedEngineRuleset,
-  validateReplayDocument
+  validateReplayDocument,
+  validateMatchCompletionEnvelope
 } from "./validation.mjs";
 
 import { DEFAULT_MATCH_POLICY, MATCH_POLICY_VERSION, canonicalMatchPolicyJson } from "../domain/match-policy.mjs";
@@ -87,6 +88,7 @@ export {
   validateRulesetSnapshot,
   isSupportedEngineRuleset,
   validateReplayDocument,
+  validateMatchCompletionEnvelope,
   // Policy
   DEFAULT_MATCH_POLICY,
   MATCH_POLICY_VERSION,
