@@ -7,3 +7,4 @@ export declare function getDefaultCorePaths(): { configPath: string; rulesPath: 
 export declare function computeCurrentEngineFingerprint(customPaths?: { configPath?: string; rulesPath?: string }): string;
 export declare function verifyRulesetHash(snapshot: RulesetSnapshot, expectedHash: string): boolean;
 export declare function verifyMatchPolicyHash(policy: MatchPolicy, expectedHash: string): boolean;
+export declare function computeReplayDigest(replay: unknown): string;
