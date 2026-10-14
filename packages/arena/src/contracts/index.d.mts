@@ -358,3 +358,4 @@ export declare function validateRulesetSnapshot(snapshot: unknown): ValidationRe
 export declare function isSupportedEngineRuleset(snapshot: unknown): boolean;
 export declare function validateReplayDocument(doc: unknown, options?: { maxBytes?: number }): ValidationResult;
 export declare function validateMatchCompletionEnvelope(envelope: unknown): ValidationResult;
+export declare function checkInitialState(state: unknown, engine: unknown): string | null;

@@ -127,9 +127,29 @@ export async function handleBotsRoute(req, res, ctx) {
       return sendError(res, 422, "VALIDATION_ERROR", "Bot name must be between 1 and 255 characters", {}, req);
     }
 
+    if (body.id !== undefined) {
+      if (typeof body.id !== "string") {
+        return sendError(res, 400, "INVALID_PAYLOAD", "Bot id must be a string", {}, req);
+      }
+      const rawId = body.id.trim();
+      if (rawId.length === 0) {
+        return sendError(res, 422, "VALIDATION_ERROR", "Bot id cannot be empty", {}, req);
+      }
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(rawId)) {
+        return sendError(
+          res,
+          422,
+          "VALIDATION_ERROR",
+          "Bot id must be 1-64 alphanumeric characters, underscores, or hyphens and cannot contain slashes or whitespace",
+          {},
+          req
+        );
+      }
+    }
+
     try {
       const botId =
-        body.id ||
+        (typeof body.id === "string" && body.id.trim().length > 0 ? body.id.trim() : null) ||
         `bot-${createHash("sha256").update(`${user.id}:${idempotencyKey.trim()}`).digest("hex").slice(0, 16)}`;
 
       const bot = botRepo.createBot(

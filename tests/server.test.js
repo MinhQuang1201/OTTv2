@@ -93,3 +93,55 @@ test("serves only the built React app", async () => {
   assert.equal((await request(port, "/apps/web/src/legacy/game.js")).statusCode, 404);
   assert.equal((await request(port, "/packages/game-client/src/playhtml-bootstrap.js")).statusCode, 404);
 });
+
+test("serves static fonts with correct font MIME types", async () => {
+  const port = server.address().port;
+
+  // Verify production bundled TTF assets (read-only, no mutation)
+  const ttfRes = await request(port, "/fonts/PixeloidSans.ttf");
+  assert.equal(ttfRes.statusCode, 200);
+  assert.equal(ttfRes.headers["content-type"], "font/ttf");
+  assert.equal(ttfRes.headers["x-content-type-options"], "nosniff");
+  assert.match(ttfRes.headers["cache-control"], /public, max-age=/);
+
+  const boldRes = await request(port, "/fonts/PixeloidSans-Bold.ttf");
+  assert.equal(boldRes.statusCode, 200);
+  assert.equal(boldRes.headers["content-type"], "font/ttf");
+
+  const monoRes = await request(port, "/fonts/PixeloidMono.ttf");
+  assert.equal(monoRes.statusCode, 200);
+  assert.equal(monoRes.headers["content-type"], "font/ttf");
+
+  // Verify font MIME mappings (.woff, .woff2, .otf) in an isolated fixture directory
+  // without mutating production dist/fonts artifacts
+  const root = path.resolve(__dirname, "..");
+  const fixtureName = `font-fixture-${process.pid}-${Date.now()}`;
+  const fixtureDir = path.join(root, "apps", "web", "dist", fixtureName);
+
+  await fs.mkdir(fixtureDir, { recursive: true });
+  const sampleWoff = path.join(fixtureDir, "sample.woff");
+  const sampleWoff2 = path.join(fixtureDir, "sample.woff2");
+  const sampleOtf = path.join(fixtureDir, "sample.otf");
+
+  try {
+    await fs.writeFile(sampleWoff, "mock-woff");
+    await fs.writeFile(sampleWoff2, "mock-woff2");
+    await fs.writeFile(sampleOtf, "mock-otf");
+
+    const woffRes = await request(port, `/${fixtureName}/sample.woff`);
+    assert.equal(woffRes.statusCode, 200);
+    assert.equal(woffRes.headers["content-type"], "font/woff");
+
+    const woff2Res = await request(port, `/${fixtureName}/sample.woff2`);
+    assert.equal(woff2Res.statusCode, 200);
+    assert.equal(woff2Res.headers["content-type"], "font/woff2");
+
+    const otfRes = await request(port, `/${fixtureName}/sample.otf`);
+    assert.equal(otfRes.statusCode, 200);
+    assert.equal(otfRes.headers["content-type"], "font/otf");
+  } finally {
+    await fs.rm(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+

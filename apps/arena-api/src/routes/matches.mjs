@@ -21,6 +21,9 @@ import {
 } from "../../../../packages/arena-node/src/persistence/match-repository.mjs";
 import {
   DEFAULT_MATCH_POLICY,
+  validateMatchPolicy,
+  isSupportedEngineRuleset,
+  checkInitialState,
   createCurrentRulesetSnapshot
 } from "../../../../packages/arena/src/contracts/index.mjs";
 import { createNodeEngine, coreConfig } from "../../../../packages/arena-node/src/core/node-engine.mjs";
@@ -212,6 +215,68 @@ export async function handleMatchesRoute(req, res, ctx) {
     const defaultRuleset = createCurrentRulesetSnapshot(coreConfig);
     const defaultInitialState = engine.createInitialState();
 
+    // 1. Policy validation upfront before any match/job DB writes
+    let candidatePolicy = body.policyJson ?? body.policy ?? DEFAULT_MATCH_POLICY;
+    if (typeof candidatePolicy === "string") {
+      try {
+        candidatePolicy = JSON.parse(candidatePolicy);
+      } catch (_) {
+        return sendError(res, 400, "INVALID_PAYLOAD", "policyJson must be valid JSON", {}, req);
+      }
+    }
+    const policyVal = validateMatchPolicy(candidatePolicy);
+    if (!policyVal.ok) {
+      return sendError(
+        res,
+        422,
+        "VALIDATION_ERROR",
+        `Invalid match policy: ${policyVal.errors.map((e) => e.message).join("; ")}`,
+        { errors: policyVal.errors },
+        req
+      );
+    }
+
+    // 2. Ruleset validation upfront
+    let candidateRuleset = body.rulesetJson ?? body.ruleset ?? defaultRuleset;
+    if (typeof candidateRuleset === "string") {
+      try {
+        candidateRuleset = JSON.parse(candidateRuleset);
+      } catch (_) {
+        return sendError(res, 400, "INVALID_PAYLOAD", "rulesetJson must be valid JSON", {}, req);
+      }
+    }
+    if (!isSupportedEngineRuleset(candidateRuleset)) {
+      return sendError(
+        res,
+        422,
+        "VALIDATION_ERROR",
+        "Invalid or unsupported ruleset snapshot",
+        {},
+        req
+      );
+    }
+
+    // 3. Initial core state validation upfront
+    let candidateState = body.initialStateJson ?? body.initialState ?? defaultInitialState;
+    if (typeof candidateState === "string") {
+      try {
+        candidateState = JSON.parse(candidateState);
+      } catch (_) {
+        return sendError(res, 400, "INVALID_PAYLOAD", "initialStateJson must be valid JSON", {}, req);
+      }
+    }
+    const stateError = checkInitialState(candidateState, engine);
+    if (stateError) {
+      return sendError(
+        res,
+        422,
+        "VALIDATION_ERROR",
+        `Invalid initial game state: ${stateError}`,
+        { code: stateError },
+        req
+      );
+    }
+
     try {
       const matchId =
         body.id ||
@@ -222,10 +287,10 @@ export async function handleMatchesRoute(req, res, ctx) {
           id: matchId,
           kind,
           ladderId: body.ladderId || "ladder-main",
-          rulesetJson: body.rulesetJson || body.ruleset || defaultRuleset,
-          policyJson: body.policyJson || body.policy || DEFAULT_MATCH_POLICY,
+          rulesetJson: candidateRuleset,
+          policyJson: candidatePolicy,
           profileJson: body.profileJson || body.profile || {},
-          initialStateJson: body.initialStateJson || body.initialState || defaultInitialState,
+          initialStateJson: candidateState,
           participants: { A: pA, B: pB }
         },
         {

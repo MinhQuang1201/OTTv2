@@ -18,6 +18,7 @@ import {
   canonicalRulesetJson,
   createCurrentRulesetSnapshot
 } from "../domain/ruleset.mjs";
+import { checkInitialState } from "../application/match-controller.mjs";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_STDOUT_LINE_BYTES = 64 * 1024;
@@ -89,6 +90,7 @@ export {
   isSupportedEngineRuleset,
   validateReplayDocument,
   validateMatchCompletionEnvelope,
+  checkInitialState,
   // Policy
   DEFAULT_MATCH_POLICY,
   MATCH_POLICY_VERSION,

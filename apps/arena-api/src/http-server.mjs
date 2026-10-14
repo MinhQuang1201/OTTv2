@@ -235,8 +235,16 @@ export function createArenaServer(options) {
         const username = body.username ? String(body.username).trim().toLowerCase() : "";
         const password = body.password ? String(body.password) : "";
 
-        const rateLimitKey = username || req.socket.remoteAddress || "anonymous";
-        const rateCheck = checkLoginRateLimit(rateLimitKey);
+        // Derive peer IP strictly from socket remoteAddress; never trust forwarded headers
+        const rawRemoteAddress = req.socket?.remoteAddress || "127.0.0.1";
+        const peerIp = String(rawRemoteAddress).replace(/^::ffff:/, "");
+
+        const rateTarget = {
+          username: username || null,
+          peerIp
+        };
+
+        const rateCheck = checkLoginRateLimit(rateTarget);
         if (!rateCheck.allowed) {
           return sendError(
             res,
@@ -249,22 +257,22 @@ export function createArenaServer(options) {
         }
 
         if (!username || !password) {
-          recordLoginFailure(rateLimitKey);
+          recordLoginFailure(rateTarget);
           return sendError(res, 401, "INVALID_CREDENTIALS", "Invalid username or password", {}, req);
         }
 
         const user = db.prepare("SELECT * FROM users WHERE normalized_username = ?").get(username);
         if (!user || !verifyPassword(password, user.password_hash)) {
-          recordLoginFailure(rateLimitKey);
+          recordLoginFailure(rateTarget);
           return sendError(res, 401, "INVALID_CREDENTIALS", "Invalid username or password", {}, req);
         }
 
         if (user.status !== "active") {
-          recordLoginFailure(rateLimitKey);
+          recordLoginFailure(rateTarget);
           return sendError(res, 401, "ACCOUNT_DISABLED", "User account is suspended or disabled", {}, req);
         }
 
-        resetLoginFailure(rateLimitKey);
+        resetLoginFailure(rateTarget);
         const session = createSession(db, user.id);
 
         return sendJson(res, 200, {

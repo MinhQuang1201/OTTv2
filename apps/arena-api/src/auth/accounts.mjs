@@ -190,80 +190,163 @@ export function revokeSession(db, token) {
 // ── Bounded Login Rate Limiter ────────────────────────────────────────────────
 
 const loginAttempts = new Map();
-const RATE_LIMIT_MAX_FAILURES = 5;
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_TRACKED_ENTRIES = 1000;
+export const RATE_LIMIT_MAX_FAILURES = 5;
+export const RATE_LIMIT_USER_MAX_FAILURES = 5;
+export const RATE_LIMIT_PEER_MAX_FAILURES = 20;
+export const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+export const MAX_TRACKED_ENTRIES = 1000;
 
 function cleanupRateLimiter() {
   const now = Date.now();
-  if (loginAttempts.size > MAX_TRACKED_ENTRIES) {
-    for (const [key, record] of loginAttempts.entries()) {
-      if (now - record.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
-        loginAttempts.delete(key);
-      }
+  // 1. Purge expired entries
+  for (const [key, record] of loginAttempts.entries()) {
+    if (now - record.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
+      loginAttempts.delete(key);
     }
+  }
+  // 2. Strict hard cap: evict oldest entries if capacity reached
+  while (loginAttempts.size >= MAX_TRACKED_ENTRIES) {
+    const oldestKey = loginAttempts.keys().next().value;
+    if (oldestKey === undefined) break;
+    loginAttempts.delete(oldestKey);
   }
 }
 
+function normalizeKeys(target) {
+  if (typeof target === "string") {
+    const trimmed = target.trim();
+    if (!trimmed) return [];
+    return [{ key: trimmed, maxFailures: RATE_LIMIT_MAX_FAILURES }];
+  }
+  if (!target || typeof target !== "object") {
+    return [];
+  }
+  const keys = [];
+  if (target.username && typeof target.username === "string") {
+    const u = target.username.toLowerCase().trim();
+    if (u) {
+      keys.push({ key: `u:${u}`, maxFailures: RATE_LIMIT_USER_MAX_FAILURES });
+    }
+  }
+  if (target.peerIp && typeof target.peerIp === "string") {
+    const p = target.peerIp.trim();
+    if (p) {
+      keys.push({ key: `p:${p}`, maxFailures: RATE_LIMIT_PEER_MAX_FAILURES });
+    }
+  }
+  return keys;
+}
+
 /**
- * Checks if a login key is currently rate-limited.
+ * Checks if a login target (key string or { username, peerIp }) is currently rate-limited.
  *
- * @param {string} key - e.g. username or IP
+ * @param {string|{ username?: string|null, peerIp?: string|null }} target
  * @returns {{ allowed: boolean, remainingAttempts: number, retryAfterSeconds: number }}
  */
-export function checkLoginRateLimit(key) {
+export function checkLoginRateLimit(target) {
   cleanupRateLimiter();
-  const record = loginAttempts.get(key);
-  if (!record) {
+  const keys = normalizeKeys(target);
+  if (keys.length === 0) {
     return { allowed: true, remainingAttempts: RATE_LIMIT_MAX_FAILURES, retryAfterSeconds: 0 };
   }
 
   const now = Date.now();
-  const elapsed = now - record.firstAttemptAt;
+  let minRemaining = RATE_LIMIT_MAX_FAILURES;
+  let maxRetryAfter = 0;
+  let blocked = false;
 
-  if (elapsed > RATE_LIMIT_WINDOW_MS) {
-    loginAttempts.delete(key);
-    return { allowed: true, remainingAttempts: RATE_LIMIT_MAX_FAILURES, retryAfterSeconds: 0 };
+  for (const { key, maxFailures } of keys) {
+    const record = loginAttempts.get(key);
+    if (!record) {
+      minRemaining = Math.min(minRemaining, maxFailures);
+      continue;
+    }
+
+    const elapsed = now - record.firstAttemptAt;
+    if (elapsed > RATE_LIMIT_WINDOW_MS) {
+      loginAttempts.delete(key);
+      minRemaining = Math.min(minRemaining, maxFailures);
+      continue;
+    }
+
+    if (record.failures >= maxFailures) {
+      blocked = true;
+      const retryAfter = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+      maxRetryAfter = Math.max(maxRetryAfter, retryAfter);
+      minRemaining = 0;
+    } else {
+      minRemaining = Math.min(minRemaining, maxFailures - record.failures);
+    }
   }
 
-  if (record.failures >= RATE_LIMIT_MAX_FAILURES) {
-    const retryAfterSeconds = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
-    return { allowed: false, remainingAttempts: 0, retryAfterSeconds };
+  if (blocked) {
+    return {
+      allowed: false,
+      remainingAttempts: 0,
+      retryAfterSeconds: Math.max(1, maxRetryAfter)
+    };
   }
 
   return {
     allowed: true,
-    remainingAttempts: RATE_LIMIT_MAX_FAILURES - record.failures,
+    remainingAttempts: minRemaining,
     retryAfterSeconds: 0
   };
 }
 
 /**
- * Records a failed login attempt for the key.
+ * Records a failed login attempt for the target.
  *
- * @param {string} key
+ * @param {string|{ username?: string|null, peerIp?: string|null }} target
  * @returns {{ allowed: boolean, remainingAttempts: number, retryAfterSeconds: number }}
  */
-export function recordLoginFailure(key) {
+export function recordLoginFailure(target) {
   cleanupRateLimiter();
+  const keys = normalizeKeys(target);
   const now = Date.now();
-  let record = loginAttempts.get(key);
 
-  if (!record || now - record.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
-    record = { failures: 1, firstAttemptAt: now };
-  } else {
-    record.failures += 1;
+  for (const { key } of keys) {
+    if (!loginAttempts.has(key) && loginAttempts.size >= MAX_TRACKED_ENTRIES) {
+      cleanupRateLimiter();
+      while (loginAttempts.size >= MAX_TRACKED_ENTRIES) {
+        const oldestKey = loginAttempts.keys().next().value;
+        if (oldestKey === undefined) break;
+        loginAttempts.delete(oldestKey);
+      }
+    }
+
+    let record = loginAttempts.get(key);
+    if (!record || now - record.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
+      record = { failures: 1, firstAttemptAt: now };
+    } else {
+      record.failures += 1;
+    }
+    loginAttempts.delete(key);
+    loginAttempts.set(key, record);
   }
 
-  loginAttempts.set(key, record);
-  return checkLoginRateLimit(key);
+  return checkLoginRateLimit(target);
 }
 
 /**
- * Clears failed login attempts for a key upon successful authentication.
+ * Clears failed login attempts for a target upon successful authentication.
  *
- * @param {string} key
+ * @param {string|{ username?: string|null, peerIp?: string|null }} target
  */
-export function resetLoginFailure(key) {
-  loginAttempts.delete(key);
+export function resetLoginFailure(target) {
+  const keys = normalizeKeys(target);
+  for (const { key } of keys) {
+    // Only reset user or generic key; keep peer throttling intact to prevent spray reset
+    if (!key.startsWith("p:")) {
+      loginAttempts.delete(key);
+    }
+  }
+}
+
+export function _getRateLimitMapSize() {
+  return loginAttempts.size;
+}
+
+export function _clearRateLimitsForTesting() {
+  loginAttempts.clear();
 }

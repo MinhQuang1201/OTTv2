@@ -15,7 +15,11 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".json": "application/json; charset=utf-8",
   ".md": "text/plain; charset=utf-8",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".otf": "font/otf"
 };
 const DENY = new Set([
   "server.js",

@@ -32,7 +32,7 @@ export function computeSha256(content) {
  * @returns {import("../../../arena/src/ports/index.d.mts").ArtifactPort & { storageDir: string, computeDigest: (c: any) => string, getManifest: (d: string) => Promise<any> }}
  */
 export function createArtifactStore(options = {}) {
-  const rawDir = options.storageDir || options.baseDir;
+  const rawDir = options.storageDir || options.storageRoot || options.baseDir;
   const storageDir = rawDir
     ? path.resolve(rawDir)
     : path.resolve(process.cwd(), "var/arena/artifacts");
@@ -47,11 +47,22 @@ export function createArtifactStore(options = {}) {
     return kind === "build" ? buildsDir : sourcesDir;
   }
 
+const SHA256_DIGEST_REGEX = /^sha256:[a-f0-9]{64}$/;
+
   function getArtifactPath(kind, digest) {
-    const rawHash = digest.startsWith("sha256:") ? digest.slice(7) : digest;
+    if (typeof digest !== "string" || !SHA256_DIGEST_REGEX.test(digest)) {
+      throw new TypeError(`Invalid SHA-256 digest format: expected 'sha256:<64-hex>', got '${digest}'`);
+    }
+    const rawHash = digest.slice(7);
     const prefix = rawHash.slice(0, 2);
     const rest = rawHash.slice(2);
-    return path.join(getKindDir(kind), prefix, rest);
+    const kindDir = getKindDir(kind);
+    const targetPath = path.join(kindDir, prefix, rest);
+    const resolvedPath = path.resolve(targetPath);
+    if (!resolvedPath.startsWith(kindDir + path.sep)) {
+      throw new Error("Path confinement error: artifact path escapes directory");
+    }
+    return resolvedPath;
   }
 
   return {
@@ -64,7 +75,7 @@ export function createArtifactStore(options = {}) {
     },
 
     verifyDigest(digest, content) {
-      if (typeof digest !== "string" || !digest.startsWith("sha256:")) {
+      if (typeof digest !== "string" || !SHA256_DIGEST_REGEX.test(digest)) {
         return false;
       }
       return computeSha256(content) === digest;
@@ -123,7 +134,7 @@ export function createArtifactStore(options = {}) {
     },
 
     async resolveArtifact(digest) {
-      if (typeof digest !== "string" || !digest.startsWith("sha256:")) {
+      if (typeof digest !== "string" || !SHA256_DIGEST_REGEX.test(digest)) {
         return null;
       }
 
@@ -164,8 +175,17 @@ export function createArtifactStore(options = {}) {
     },
 
     async getManifest(digest) {
+      if (typeof digest !== "string" || !SHA256_DIGEST_REGEX.test(digest)) {
+        return null;
+      }
       const resolved = await this.resolveArtifact(digest);
       return resolved?.manifest || null;
+    },
+
+    getArtifactPath(kindOrDigest, maybeDigest) {
+      const kind = maybeDigest !== undefined ? kindOrDigest : "build";
+      const digest = maybeDigest !== undefined ? maybeDigest : kindOrDigest;
+      return getArtifactPath(kind, digest);
     }
   };
 }

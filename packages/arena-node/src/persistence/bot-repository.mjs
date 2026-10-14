@@ -180,7 +180,14 @@ export function createBotRepository(db) {
   // ── createBot ─────────────────────────────────────────────────────────────
 
   function createBot({ id, ownerId, name }, { idempotencyKey, actorId }) {
-    const payloadDigest = canonicalDigest({ id, ownerId, name, operation: "createBot" });
+    if (typeof id !== "string") {
+      throw new TypeError("Bot id must be a string");
+    }
+    const cleanId = id.trim();
+    if (cleanId.length === 0 || !/^[a-zA-Z0-9_-]{1,64}$/.test(cleanId)) {
+      throw new TypeError("Invalid bot id format: must be 1-64 alphanumeric characters, underscores, or hyphens");
+    }
+    const payloadDigest = canonicalDigest({ id: cleanId, ownerId, name, operation: "createBot" });
 
     return db.transaction(() => {
       const existingId = checkIdempotency(actorId, "createBot", idempotencyKey, payloadDigest);
@@ -195,9 +202,9 @@ export function createBotRepository(db) {
         throw new OwnershipError("bot owner", ownerId, actorId);
       }
 
-      stmts.insertBot.run(id, ownerId, name);
-      stmts.insertApiRequest.run(actorId, "createBot", idempotencyKey, payloadDigest, id);
-      return stmts.selectBot.get(id);
+      stmts.insertBot.run(cleanId, ownerId, name);
+      stmts.insertApiRequest.run(actorId, "createBot", idempotencyKey, payloadDigest, cleanId);
+      return stmts.selectBot.get(cleanId);
     }).immediate();
   }
 

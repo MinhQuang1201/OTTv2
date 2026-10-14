@@ -46,7 +46,7 @@ const VALID_PIECE_TYPES = new Set(["dam", "la", "keo"]);
  * Validates initial host state for referee safety.
  * Returns null if valid, or an error code string if invalid.
  */
-function checkInitialState(state, engine) {
+export function checkInitialState(state, engine) {
   if (!state || typeof state !== "object") return "missing_initial_state";
   if (!VALID_SEATS.has(state.turn)) return "invalid_initial_turn";
 
