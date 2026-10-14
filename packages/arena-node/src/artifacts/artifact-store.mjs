@@ -32,8 +32,9 @@ export function computeSha256(content) {
  * @returns {import("../../../arena/src/ports/index.d.mts").ArtifactPort & { storageDir: string, computeDigest: (c: any) => string, getManifest: (d: string) => Promise<any> }}
  */
 export function createArtifactStore(options = {}) {
-  const storageDir = options.storageDir
-    ? path.resolve(options.storageDir)
+  const rawDir = options.storageDir || options.baseDir;
+  const storageDir = rawDir
+    ? path.resolve(rawDir)
     : path.resolve(process.cwd(), "var/arena/artifacts");
 
   const sourcesDir = path.join(storageDir, "sources");

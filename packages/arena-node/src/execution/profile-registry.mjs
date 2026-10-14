@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { createProcessBot } from "./process-bot.mjs";
+import { createContainerBot } from "./container-executor.mjs";
 import { createFunctionBot } from "../../../arena/src/adapters/function-bot.mjs";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2000;
@@ -237,6 +238,7 @@ export function resolveJavaExecutables(options = {}) {
  */
 export function createProfileRegistry(options = {}) {
   const probeTimeoutMs = options.probeTimeoutMs || DEFAULT_PROBE_TIMEOUT_MS;
+  const defaultExecutor = options.executor || "trusted-local";
   const customPython = options.pythonExecutable;
   const customNode = options.nodeExecutable;
   const customCpp = options.cppExecutable;
@@ -867,7 +869,59 @@ export function createProfileRegistry(options = {}) {
         });
       }
 
-      // 2. Profile-based bots: "<profile>:<path>"
+      const executor = botOptions.executor || defaultExecutor;
+
+      // Fail unsupported executor strings — do not silently fall back to trusted-local
+      if (executor !== "trusted-local" && executor !== "oci-container") {
+        const err = new Error(
+          `Unsupported executor '${executor}'. Supported executors: 'trusted-local', 'oci-container'.`
+        );
+        err.kind = "infrastructure_error";
+        err.code = "unsupported_executor";
+        err.retryable = false;
+        throw err;
+      }
+
+      // 2. OCI Container branch: dispatched AHEAD of host source checks and host runtime probes
+      if (executor === "oci-container") {
+        const colonIdx = spec.indexOf(":");
+        const parsedProfile = colonIdx !== -1 ? spec.slice(0, colonIdx) : spec;
+        const profileId = botOptions.profileId || botOptions.expectedManifest?.profileId || parsedProfile;
+
+        if (profileId !== "python" && profileId !== "node") {
+          const err = new Error(
+            `ContainerBot does not support profile '${profileId}'. Scoped profiles: 'python', 'node'. C++/Java untrusted compiler unprovisioned.`
+          );
+          err.kind = "infrastructure_error";
+          err.code = "unsupported_isolated_profile";
+          err.retryable = false;
+          throw err;
+        }
+
+        if (!botOptions.artifactStore || !botOptions.artifactDigest) {
+          const err = new Error(
+            "ProfileRegistry oci-container execution requires published artifact (artifactStore and artifactDigest). Workspace mutable source paths are prohibited."
+          );
+          err.kind = "infrastructure_error";
+          err.code = "artifact_required";
+          err.retryable = false;
+          throw err;
+        }
+
+        return createContainerBot({
+          botId: botOptions.botId || `${profileId}-${botOptions.artifactDigest.slice(0, 12)}`,
+          profileId,
+          artifactStore: botOptions.artifactStore,
+          artifactDigest: botOptions.artifactDigest,
+          expectedManifest: botOptions.expectedManifest,
+          clock: botOptions.clock,
+          limits: botOptions.limits,
+          attempt: botOptions.attempt,
+          onStderr: botOptions.onStderr
+        });
+      }
+
+      // 3. Trusted-local branch: requires profile in registry, host source path, and host runtime
       const colonIdx = spec.indexOf(":");
       if (colonIdx === -1) {
         throw new Error(`Unsupported bot specification "${spec}". Expected "first-legal" or "<profile>:<path>"`);

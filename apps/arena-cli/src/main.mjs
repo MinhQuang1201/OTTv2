@@ -97,7 +97,7 @@ export async function runCli(argv, io = {}) {
       stderr(`Error: doctor command does not accept positional arguments.`);
       return 2;
     }
-    return handleDoctor(stdout, stderr, io);
+    return await handleDoctor(stdout, stderr, io);
   }
 
   if (command === "match") {
@@ -108,7 +108,7 @@ export async function runCli(argv, io = {}) {
   return 2;
 }
 
-function handleDoctor(stdout, stderr, io = {}) {
+async function handleDoctor(stdout, stderr, io = {}) {
   try {
     const getEngineFingerprint = io.getEngineFingerprint || computeCurrentEngineFingerprint;
     const rulesetSnapshot = io.getRulesetSnapshot
@@ -127,10 +127,34 @@ function handleDoctor(stdout, stderr, io = {}) {
     stdout(`  Engine Fingerprint: ${engineFingerprint}`);
     stdout("Capabilities:");
     stdout("  FunctionBot: in-process only");
-    stdout("  process runner: not implemented");
+    stdout("  process runner: not implemented in standalone CLI match (trusted-local process runner implemented in runner)");
+    const pythonProbe = registry.probeProfile ? registry.probeProfile("python") : { available: false };
+    const nodeProbe = registry.probeProfile ? registry.probeProfile("node") : { available: false };
+    stdout(`  trusted profiles: python (available: ${Boolean(pythonProbe?.available)}), node (available: ${Boolean(nodeProbe?.available)})`);
     stdout("  trusted-local: available");
-    stdout("  sandbox: unavailable");
-    stdout("  compiler: unavailable");
+    stdout("  sandbox: unavailable (unverified target host; public author submissions disabled)");
+    stdout("  compiler: unavailable for untrusted C++/Java (Python/Node isolated build available)");
+    stdout("  isolated-build: available (python, node)");
+
+    const getContainerProbe = io.probeContainerRuntime || (async () => {
+      try {
+        const mod = await import("../../../packages/arena-node/src/execution/container-executor.mjs");
+        return mod.probeContainerRuntime();
+      } catch (_) {
+        return { available: false, verified: false, reason: "module_not_found" };
+      }
+    });
+
+    const containerProbe = typeof getContainerProbe === "function" ? await getContainerProbe() : getContainerProbe;
+    if (containerProbe?.available) {
+      if (containerProbe.verified) {
+        stdout(`  container-executor: verified (${containerProbe.serverOs}/${containerProbe.serverArch} ${containerProbe.dockerVersion})`);
+      } else {
+        stdout(`  container-executor: available (local-desktop-evidence; target-host unverified)`);
+      }
+    } else {
+      stdout(`  container-executor: unavailable (${containerProbe?.reason || "runtime missing"})`);
+    }
     stdout("Profiles:");
     const probed = registry.probeAll();
     for (const [profId, pInfo] of Object.entries(probed)) {

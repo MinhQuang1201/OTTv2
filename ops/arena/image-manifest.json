@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "image": "ottv2-arena-runner:local",
+  "imageId": "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54",
+  "baseImage": "alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c",
+  "platform": "linux/amd64",
+  "buildDate": "2026-10-14T00:50:51Z",
+  "executorRevision": "oci-container-linux-v1",
+  "apkPackages": {
+    "python3": "3.12.15-r0",
+    "nodejs": "22.23.2-r0"
+  },
+  "supportedProfiles": {
+    "python": {
+      "language": "python",
+      "version": "3.12.15",
+      "executable": "python3",
+      "available": true
+    },
+    "node": {
+      "language": "javascript",
+      "version": "22.23.2",
+      "executable": "node",
+      "available": true
+    }
+  },
+  "unsupportedProfiles": {
+    "cpp": {
+      "language": "cpp",
+      "available": false,
+      "reason": "untrusted_compiler_unprovisioned"
+    },
+    "java": {
+      "language": "java",
+      "available": false,
+      "reason": "untrusted_compiler_unprovisioned"
+    }
+  },
+  "runLimits": {
+    "network": "none",
+    "user": "10001:10001",
+    "capDrop": ["ALL"],
+    "securityOpt": ["no-new-privileges:true"],
+    "readOnlyRoot": true,
+    "tmpfs": {
+      "/tmp/scratch": "rw,nosuid,size=64m"
+    },
+    "memoryBytes": 268435456,
+    "memorySwapBytes": 268435456,
+    "pidsLimit": 32,
+    "cpus": 1.0,
+    "stdoutMaxLineBytes": 65536,
+    "stdoutMaxTotalBytes": 1048576,
+    "stderrMaxTotalBytes": 262144,
+    "turnTimeoutMs": 1000,
+    "startupTimeoutMs": 5000,
+    "graceStopMs": 250
+  },
+  "buildLimits": {
+    "network": "none",
+    "user": "10001:10001",
+    "capDrop": ["ALL"],
+    "securityOpt": ["no-new-privileges:true"],
+    "readOnlyRoot": true,
+    "tmpfs": {
+      "/tmp/scratch": "rw,nosuid,size=128m"
+    },
+    "memoryBytes": 536870912,
+    "memorySwapBytes": 536870912,
+    "pidsLimit": 64,
+    "cpus": 2.0,
+    "buildTimeoutMs": 30000,
+    "maxLogBytes": 1048576
+  }
+}

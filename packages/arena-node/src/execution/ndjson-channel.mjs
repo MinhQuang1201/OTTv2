@@ -274,10 +274,21 @@ export function createNdjsonChannel(options) {
     });
   }
 
+  function handleStdinError(err) {
+    triggerFault({
+      code: "crash",
+      message: `Stdin stream error: ${err?.message || err}`
+    });
+  }
+
   // Attach event listeners
   stdout.on("data", handleStdoutChunk);
   stdout.on("end", handleStdoutEnd);
   stdout.on("error", handleStdoutError);
+
+  if (stdin && typeof stdin.on === "function") {
+    stdin.on("error", handleStdinError);
+  }
 
   if (stderr && typeof stderr.on === "function") {
     stderr.on("data", handleStderrChunk);
@@ -412,6 +423,10 @@ export function createNdjsonChannel(options) {
       stdout.removeListener("data", handleStdoutChunk);
       stdout.removeListener("end", handleStdoutEnd);
       stdout.removeListener("error", handleStdoutError);
+
+      if (stdin && typeof stdin.removeListener === "function") {
+        stdin.removeListener("error", handleStdinError);
+      }
 
       if (stderr && typeof stderr.removeListener === "function") {
         stderr.removeListener("data", handleStderrChunk);
