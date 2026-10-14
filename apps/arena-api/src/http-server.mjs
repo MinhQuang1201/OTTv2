@@ -30,6 +30,7 @@ import { handleBotsRoute } from "./routes/bots.mjs";
 import { handleMatchesRoute } from "./routes/matches.mjs";
 import { handleTournamentsRoute } from "./routes/tournaments.mjs";
 import { handleCompetitionsRoute } from "./routes/competitions.mjs";
+import { handleCompetitionCatalogRoute } from "./routes/competition-rounds.mjs";
 import { handleLeaderboardRoute } from "./routes/leaderboard.mjs";
 import { createCompetitionRepository } from "../../../packages/arena-node/src/persistence/competition-repository.mjs";
 
@@ -169,7 +170,8 @@ export function createArenaServer(options) {
     botVersionService = null,
     profileRegistry = null,
     finalizer = null,
-    competitionRepo = null
+    competitionRepo = null,
+    competitionRoundsRepo = null
   } = options;
 
   if (!db) {
@@ -178,6 +180,7 @@ export function createArenaServer(options) {
 
   const resolvedCompetitionRepo =
     competitionRepo || createCompetitionRepository(db, { tournamentRepo });
+  let resolvedCompetitionRoundsRepo = competitionRoundsRepo || null;
 
   const server = http.createServer(async (req, res) => {
     // 1. Assign trace request ID
@@ -355,11 +358,38 @@ export function createArenaServer(options) {
         });
       }
 
+      // ── Routes: /competition-catalog ───────────────────────────────────────
+      if (pathname === "/api/arena/v1/competition-catalog" || pathname === "/api/arena/v1/competition-catalog/") {
+        if (!resolvedCompetitionRoundsRepo) {
+          try {
+            const { createCompetitionRoundsRepository } = await import(
+              "../../../packages/arena-node/src/persistence/competition-rounds-repository.mjs"
+            );
+            resolvedCompetitionRoundsRepo = createCompetitionRoundsRepository(db, { tournamentRepo });
+          } catch {}
+        }
+        return handleCompetitionCatalogRoute(req, res, {
+          db,
+          competitionRoundsRepo: resolvedCompetitionRoundsRepo,
+          parsedUrl,
+          maxBodyBytes
+        });
+      }
+
       // ── Routes: /competitions ───────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/competitions")) {
+        if (!resolvedCompetitionRoundsRepo) {
+          try {
+            const { createCompetitionRoundsRepository } = await import(
+              "../../../packages/arena-node/src/persistence/competition-rounds-repository.mjs"
+            );
+            resolvedCompetitionRoundsRepo = createCompetitionRoundsRepository(db, { tournamentRepo });
+          } catch {}
+        }
         return handleCompetitionsRoute(req, res, {
           db,
           competitionRepo: resolvedCompetitionRepo,
+          competitionRoundsRepo: resolvedCompetitionRoundsRepo,
           tournamentRepo,
           parsedUrl,
           maxBodyBytes

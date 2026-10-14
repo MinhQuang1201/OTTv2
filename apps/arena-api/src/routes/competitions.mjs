@@ -25,6 +25,10 @@ import {
   NotFoundError,
   IdempotencyConflictError
 } from "../../../../packages/arena-node/src/persistence/competition-repository.mjs";
+import {
+  handleCompetitionCatalogRoute,
+  handleNextRoundRoute
+} from "./competition-rounds.mjs";
 
 const FORBIDDEN_SHELL_PATH_KEYS = new Set([
   "filepath",
@@ -64,7 +68,7 @@ function assertStrictFields(body, allowedFields, actionName) {
 }
 
 export async function handleCompetitionsRoute(req, res, ctx) {
-  const { db, competitionRepo, parsedUrl, maxBodyBytes } = ctx;
+  const { db, competitionRepo, competitionRoundsRepo, parsedUrl, maxBodyBytes } = ctx;
   const pathname = parsedUrl.pathname;
 
   // 1. Authenticate user for all competition routes
@@ -75,6 +79,11 @@ export async function handleCompetitionsRoute(req, res, ctx) {
   const user = req.user;
 
   try {
+    // ── /api/arena/v1/competitions/catalog ────────────────────────────────────
+    if (pathname === "/api/arena/v1/competitions/catalog" || pathname === "/api/arena/v1/competitions/catalog/") {
+      return handleCompetitionCatalogRoute(req, res, ctx);
+    }
+
     // ── /api/arena/v1/competitions ────────────────────────────────────────────
     if (pathname === "/api/arena/v1/competitions" || pathname === "/api/arena/v1/competitions/") {
       if (req.method === "GET") {
@@ -95,6 +104,64 @@ export async function handleCompetitionsRoute(req, res, ctx) {
           body = await parseJsonBody(req, maxBodyBytes);
         } catch (err) {
           return sendError(res, err.statusCode || 400, err.code || "BAD_REQUEST", err.message, {}, req);
+        }
+
+        const hasExtendedFields =
+          body &&
+          typeof body === "object" &&
+          ("formatId" in body || "mapId" in body || "roundCount" in body || "mode" in body);
+
+        if (hasExtendedFields) {
+          assertStrictFields(
+            body,
+            new Set(["name", "description", "capacity", "ranked", "formatId", "mapId", "roundCount", "mode"]),
+            "create competition"
+          );
+
+          const name = body.name ? String(body.name).trim() : "";
+          if (name.length === 0) {
+            return sendError(res, 422, "VALIDATION_ERROR", "Field 'name' is required and cannot be empty", {}, req);
+          }
+          if (name.length > 255) {
+            return sendError(res, 422, "VALIDATION_ERROR", "Field 'name' cannot exceed 255 characters", {}, req);
+          }
+
+          let capacity = 16;
+          if (body.capacity !== undefined && body.capacity !== null) {
+            if (typeof body.capacity !== "number" || !Number.isInteger(body.capacity) || body.capacity < 2 || body.capacity > 128) {
+              return sendError(res, 422, "VALIDATION_ERROR", "Field 'capacity' must be an integer between 2 and 128", {}, req);
+            }
+            capacity = body.capacity;
+          }
+
+          if (body.ranked !== undefined && typeof body.ranked !== "boolean") {
+            return sendError(res, 422, "VALIDATION_ERROR", "Field 'ranked' must be a boolean", {}, req);
+          }
+
+          const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"];
+
+          if (!competitionRoundsRepo) {
+            return sendError(res, 500, "INTERNAL_ERROR", "Competition rounds repository not available", {}, req);
+          }
+
+          const competition = competitionRoundsRepo.createExtendedCompetition(
+            {
+              name,
+              description: body.description,
+              capacity,
+              ranked: body.ranked,
+              formatId: body.formatId,
+              mapId: body.mapId,
+              roundCount: body.roundCount,
+              mode: body.mode
+            },
+            {
+              actorId: user.id,
+              idempotencyKey: idempotencyKey ? String(idempotencyKey).trim() : undefined
+            }
+          );
+
+          return sendJson(res, 201, { competition });
         }
 
         assertStrictFields(body, new Set(["name", "description", "capacity", "ranked"]), "create competition");
@@ -262,7 +329,10 @@ export async function handleCompetitionsRoute(req, res, ctx) {
         return sendError(res, 422, "VALIDATION_ERROR", "Field 'expectedPhase' is required", {}, req);
       }
 
-      const competition = competitionRepo.advancePhase(competitionId, expectedPhase);
+      const isExtended = competitionRoundsRepo && competitionRoundsRepo.isExtendedCompetition(competitionId);
+      const competition = isExtended
+        ? competitionRoundsRepo.advanceExtendedPhase(competitionId, expectedPhase)
+        : competitionRepo.advancePhase(competitionId, expectedPhase);
       return sendJson(res, 200, { competition });
     }
 
@@ -299,8 +369,18 @@ export async function handleCompetitionsRoute(req, res, ctx) {
         return sendError(res, 422, "VALIDATION_ERROR", "scheduleIndex out of bounds (0..65535)", {}, req);
       }
 
-      const result = competitionRepo.retryCompetitionMatch(competitionId, scheduleIndex);
+      const isExtended = competitionRoundsRepo && competitionRoundsRepo.isExtendedCompetition(competitionId);
+      const result = isExtended
+        ? competitionRoundsRepo.retryCompetitionMatch(competitionId, scheduleIndex)
+        : competitionRepo.retryCompetitionMatch(competitionId, scheduleIndex);
       return sendJson(res, 200, result);
+    }
+
+    // ── /api/arena/v1/competitions/:id/next-round ─────────────────────────
+    const nextRoundMatch = pathname.match(/^\/api\/arena\/v1\/competitions\/([^/]+)\/next-round\/?$/);
+    if (nextRoundMatch) {
+      const competitionId = nextRoundMatch[1];
+      return handleNextRoundRoute(req, res, ctx, competitionId);
     }
 
     // ── /api/arena/v1/competitions/:id ────────────────────────────────────────
@@ -312,6 +392,15 @@ export async function handleCompetitionsRoute(req, res, ctx) {
       }
 
       const competitionId = detailMatch[1];
+      const isExtended = competitionRoundsRepo && competitionRoundsRepo.isExtendedCompetition(competitionId);
+      if (isExtended) {
+        const detail = competitionRoundsRepo.getExtendedCompetitionDetails(competitionId);
+        if (!detail) {
+          return sendError(res, 404, "NOT_FOUND", `Competition not found: ${competitionId}`, {}, req);
+        }
+        return sendJson(res, 200, detail);
+      }
+
       const detail = competitionRepo.getCompetitionWithEntries(competitionId);
       if (!detail) {
         return sendError(res, 404, "NOT_FOUND", `Competition not found: ${competitionId}`, {}, req);

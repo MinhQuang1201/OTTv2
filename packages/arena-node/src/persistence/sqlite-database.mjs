@@ -36,7 +36,8 @@ const DEFAULT_MIGRATION_SQL_PATH = resolve(
 /** List of migration definitions recognized by this codebase. */
 export const MIGRATIONS = [
   { version: "001-arena", path: resolve(__dirname, "migrations/001-arena.sql") },
-  { version: "002-competitions", path: resolve(__dirname, "migrations/002-competitions.sql") }
+  { version: "002-competitions", path: resolve(__dirname, "migrations/002-competitions.sql") },
+  { version: "003-competition-rounds", path: resolve(__dirname, "migrations/003-competition-rounds.sql") }
 ];
 
 /** Set of schema migration versions recognized by this codebase. */
@@ -44,28 +45,32 @@ const KNOWN_VERSIONS = new Set(MIGRATIONS.map((m) => m.version));
 
 /**
  * Applies a specific migration if not already present in schema_migrations.
+ * Applies any prerequisite migrations in sequence if not yet applied.
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} migrationVersion
  */
 export function applyMigration(db, migrationVersion) {
-  const m = MIGRATIONS.find((x) => x.version === migrationVersion);
-  if (!m) {
+  const targetIndex = MIGRATIONS.findIndex((x) => x.version === migrationVersion);
+  if (targetIndex === -1) {
     throw new Error(`Unknown migration: '${migrationVersion}'`);
   }
   const hasMigrationsTable = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
     .get();
 
-  if (hasMigrationsTable) {
-    const row = db
-      .prepare("SELECT version FROM schema_migrations WHERE version = ?")
-      .get(migrationVersion);
-    if (row) return;
-  }
+  for (let i = 0; i <= targetIndex; i++) {
+    const m = MIGRATIONS[i];
+    if (hasMigrationsTable) {
+      const row = db
+        .prepare("SELECT version FROM schema_migrations WHERE version = ?")
+        .get(m.version);
+      if (row) continue;
+    }
 
-  const sql = readFileSync(m.path, "utf8");
-  db.exec(sql);
+    const sql = readFileSync(m.path, "utf8");
+    db.exec(sql);
+  }
 }
 
 /**
@@ -177,7 +182,13 @@ export function openDatabase(dbPath, options = {}) {
 
       // If no targetVersion specified and 001-arena is already applied, return current version
       if (appliedVersions.includes("001-arena")) {
-        const currentVersion = appliedVersions.includes("002-competitions") ? "002-competitions" : "001-arena";
+        let currentVersion = "001-arena";
+        for (let i = MIGRATIONS.length - 1; i >= 0; i--) {
+          if (appliedVersions.includes(MIGRATIONS[i].version)) {
+            currentVersion = MIGRATIONS[i].version;
+            break;
+          }
+        }
         return { db, version: currentVersion };
       }
     }
