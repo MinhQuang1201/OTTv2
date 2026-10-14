@@ -612,35 +612,37 @@ export function createCompetitionRepository(db, options = {}) {
    * Retries an errored match in the running competition's linked tournament.
    */
   function retryCompetitionMatch(competitionId, scheduleIndex) {
-    const comp = stmts.selectCompetition.get(competitionId);
-    if (!comp) {
-      throw new NotFoundError("competition", competitionId);
-    }
-    if (comp.phase !== "running") {
-      throw new CompetitionPhaseError(`Competition must be in running phase to retry matches (current: '${comp.phase}')`);
-    }
-    if (!comp.tournament_id) {
-      throw new CompetitionPhaseError("Competition has no linked tournament");
-    }
-
     const sIndex = Number(scheduleIndex);
     if (!Number.isInteger(sIndex) || sIndex < 0 || sIndex > 65535) {
       throw new CompetitionValidationError("Invalid scheduleIndex: must be a non-negative integer within bounds (0..65535)");
     }
 
-    const matchRow = stmts.selectTournamentMatchBySchedule.get(comp.tournament_id, sIndex);
-    if (!matchRow) {
-      throw new NotFoundError("tournament_match", `${comp.tournament_id}#${sIndex}`);
-    }
+    return withTransaction(db, () => {
+      const comp = stmts.selectCompetition.get(competitionId);
+      if (!comp) {
+        throw new NotFoundError("competition", competitionId);
+      }
+      if (comp.phase !== "running") {
+        throw new CompetitionPhaseError(`Competition must be in running phase to retry matches (current: '${comp.phase}')`);
+      }
+      if (!comp.tournament_id) {
+        throw new CompetitionPhaseError("Competition has no linked tournament");
+      }
 
-    if (matchRow.status !== "error") {
-      throw new CompetitionPhaseError(
-        `Only matches in 'error' status can be retried (current status: '${matchRow.status}')`
-      );
-    }
+      const matchRow = stmts.selectTournamentMatchBySchedule.get(comp.tournament_id, sIndex);
+      if (!matchRow) {
+        throw new NotFoundError("tournament_match", `${comp.tournament_id}#${sIndex}`);
+      }
 
-    tournamentRepo.retryMatch(comp.tournament_id, sIndex);
-    return { ok: true };
+      if (matchRow.status !== "error") {
+        throw new CompetitionPhaseError(
+          `Only matches in 'error' status can be retried (current status: '${matchRow.status}')`
+        );
+      }
+
+      tournamentRepo.retryMatch(comp.tournament_id, sIndex);
+      return { ok: true };
+    });
   }
 
   return {

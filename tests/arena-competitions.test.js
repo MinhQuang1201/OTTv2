@@ -71,6 +71,7 @@ let NotFoundError;
 let IdempotencyConflictError;
 
 let createArenaServer;
+let createJobQueue;
 let hashPassword;
 let createSession;
 
@@ -153,6 +154,9 @@ before(async () => {
 
   const serverMod = await import("../apps/arena-api/src/http-server.mjs");
   createArenaServer = serverMod.createArenaServer;
+
+  const jobQueueMod = await import("../packages/arena-node/src/persistence/job-queue.mjs");
+  createJobQueue = jobQueueMod.createJobQueue;
 
   const accountsMod = await import("../apps/arena-api/src/auth/accounts.mjs");
   hashPassword = accountsMod.hashPassword;
@@ -1180,6 +1184,115 @@ describe("Competition Lifecycle Backend — Task 1", () => {
       // No duplicate rows inserted
       assert.equal(totalMatchesAfter, totalMatchesBefore);
       assert.equal(totalJobsAfter, totalJobsBefore);
+    });
+
+    it("retry extends max_attempts allowing real queue claim when attempt_no was exhausted", async () => {
+      // Find a match in compB (schedule_index 0)
+      const matchRow = env.db
+        .prepare("SELECT * FROM matches WHERE tournament_id = ? AND schedule_index = 0")
+        .get(compB.tournamentId);
+
+      // Simulate match failure by exhausted attempts: attempt_no = 3, max_attempts = 3
+      env.db
+        .prepare("UPDATE matches SET status = 'error' WHERE id = ?")
+        .run(matchRow.id);
+      env.db
+        .prepare(
+          "UPDATE jobs SET status = 'failed', attempt_no = 3, max_attempts = 3, lease_owner = NULL, lease_token = NULL WHERE kind = 'match' AND target_id = ?"
+        )
+        .run(matchRow.id);
+
+      // Admin triggers retry
+      const retryRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compB.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(retryRes.statusCode, 200);
+      assert.equal(retryRes.json.ok, true);
+
+      // Verify DB state before worker claim:
+      // 1. attempt_no is preserved at 3 (monotonic history preserved, no unique collision)
+      // 2. max_attempts extended to MAX(3, 3 + 3) = 6
+      // 3. status is 'queued'
+      const jobAfterRetry = env.db
+        .prepare("SELECT * FROM jobs WHERE kind = 'match' AND target_id = ?")
+        .get(matchRow.id);
+      assert.equal(jobAfterRetry.status, "queued");
+      assert.equal(jobAfterRetry.attempt_no, 3);
+      assert.equal(jobAfterRetry.max_attempts, 6);
+
+      // Real worker queue claim must succeed (NOT fail with nextAttempt > max_attempts)
+      // Clear any older queued match jobs from earlier tests so our retried job is claimed next
+      env.db
+        .prepare("UPDATE jobs SET status = 'completed' WHERE kind = 'match' AND id != ?")
+        .run(jobAfterRetry.id);
+
+      const jobQueue = createJobQueue(env.db);
+      const claimed = jobQueue.claimNextJob("worker-retry-test", ["match"]);
+      assert.ok(claimed, "Worker should successfully claim retried job");
+      assert.equal(claimed.jobId, jobAfterRetry.id);
+      assert.equal(claimed.targetId, matchRow.id);
+      assert.equal(claimed.attemptNo, 4);
+
+      // Verify match transitioned to active and attempt 4 recorded
+      const matchAfterClaim = env.db.prepare("SELECT status FROM matches WHERE id = ?").get(matchRow.id);
+      assert.equal(matchAfterClaim.status, "active");
+
+      const attemptRow = env.db
+        .prepare("SELECT * FROM job_attempts WHERE job_id = ? AND attempt_no = 4")
+        .get(jobAfterRetry.id);
+      assert.ok(attemptRow);
+      assert.equal(attemptRow.status, "active");
+    });
+
+    it("enforces retry duplicate guard preventing concurrent or duplicate retries", async () => {
+      // Set match at schedule_index 1 in compB to 'error'
+      const matchRow = env.db
+        .prepare("SELECT * FROM matches WHERE tournament_id = ? AND schedule_index = 1")
+        .get(compB.tournamentId);
+      env.db.prepare("UPDATE matches SET status = 'error' WHERE id = ?").run(matchRow.id);
+
+      // First retry succeeds
+      const firstRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compB.id}/matches/1/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(firstRes.statusCode, 200);
+      assert.equal(firstRes.json.ok, true);
+
+      // Second immediate retry is guarded and rejected with 409 because match is now 'pending'
+      const secondRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compB.id}/matches/1/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(secondRes.statusCode, 409);
+      assert.equal(secondRes.json.error.code, "PHASE_MISMATCH");
+      assert.match(secondRes.json.error.message, /Only matches in 'error' status can be retried/);
+
+      // Concurrency test: reset to 'error', then issue two concurrent requests
+      env.db.prepare("UPDATE matches SET status = 'error' WHERE id = ?").run(matchRow.id);
+      const [res1, res2] = await Promise.all([
+        makeRequest(server, {
+          path: `/api/arena/v1/competitions/${compB.id}/matches/1/retry`,
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        }),
+        makeRequest(server, {
+          path: `/api/arena/v1/competitions/${compB.id}/matches/1/retry`,
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        })
+      ]);
+
+      const statusCodes = [res1.statusCode, res2.statusCode].sort();
+      assert.deepEqual(
+        statusCodes,
+        [200, 409],
+        "Exactly one concurrent retry must succeed (200) and the duplicate must be rejected (409)"
+      );
     });
   });
 

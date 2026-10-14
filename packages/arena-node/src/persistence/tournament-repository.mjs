@@ -140,6 +140,7 @@ export function createTournamentRepository(db, options = {}) {
     resetJobPending: db.prepare(`
       UPDATE jobs
       SET status = 'queued',
+          max_attempts = MAX(max_attempts, attempt_no + 3),
           lease_owner = NULL,
           lease_token = NULL,
           lease_until = NULL,
