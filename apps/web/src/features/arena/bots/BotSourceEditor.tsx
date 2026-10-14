@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { getProfileInfo, getTemplateForProfile, type ProfileInfo } from "./templates";
 import styles from "./botEditor.module.css";
 
@@ -40,9 +40,34 @@ export function BotSourceEditor({
   const hintId = `source-hint-${generatedId}`;
   const statusId = `source-status-${generatedId}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeReaderRef = useRef<FileReader | null>(null);
+  const activeReadIdRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
 
   const [fileError, setFileError] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
+
+  // Invalidate any ongoing file reading on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      activeReadIdRef.current++;
+      if (activeReaderRef.current) {
+        activeReaderRef.current.abort();
+        activeReaderRef.current = null;
+      }
+    };
+  }, []);
+
+  // Invalidate any ongoing file reading if profileId changes
+  useEffect(() => {
+    activeReadIdRef.current++;
+    if (activeReaderRef.current) {
+      activeReaderRef.current.abort();
+      activeReaderRef.current = null;
+    }
+  }, [profileId]);
 
   const profileInfo: ProfileInfo = useMemo(() => getProfileInfo(profileId), [profileId]);
 
@@ -85,6 +110,12 @@ export function BotSourceEditor({
           : true;
       if (!ok) return;
     }
+    // Invalidate any pending file read
+    activeReadIdRef.current++;
+    if (activeReaderRef.current) {
+      activeReaderRef.current.abort();
+      activeReaderRef.current = null;
+    }
     const template = getTemplateForProfile(profileId);
     onChange(template);
     setFileError(null);
@@ -125,18 +156,48 @@ export function BotSourceEditor({
         }
       }
 
+      // Abort any prior reader and advance read ID to guard against stale async callbacks
+      if (activeReaderRef.current) {
+        activeReaderRef.current.abort();
+      }
+      const currentReadId = ++activeReadIdRef.current;
       const reader = new FileReader();
+      activeReaderRef.current = reader;
+
       reader.onload = () => {
-        const content = reader.result;
-        if (typeof content === "string") {
+        // Discard if component unmounted or a newer read / action occurred
+        if (!isMountedRef.current || activeReadIdRef.current !== currentReadId) {
+          return;
+        }
+        activeReaderRef.current = null;
+
+        try {
+          const buffer = reader.result as ArrayBuffer;
+          // Strict UTF-8 decoding: throws TypeError on invalid byte sequences or malformed utf-8
+          const decoder = new TextDecoder("utf-8", { fatal: true });
+          const content = decoder.decode(buffer);
           onChange(content);
           setFileError(null);
+        } catch {
+          setFileError(
+            `Tệp "${file.name}" không hợp lệ: tệp phải có định dạng văn bản UTF-8 hợp lệ.`
+          );
         }
       };
+
       reader.onerror = () => {
+        if (!isMountedRef.current || activeReadIdRef.current !== currentReadId) {
+          return;
+        }
+        activeReaderRef.current = null;
         setFileError(`Không thể đọc tệp "${file.name}": ${reader.error?.message || "Lỗi tệp tin"}`);
       };
-      reader.readAsText(file, "UTF-8");
+
+      reader.onabort = () => {
+        // Aborted reads are silently ignored
+      };
+
+      reader.readAsArrayBuffer(file);
       e.target.value = "";
     },
     [maxBytes, value, onChange]
@@ -253,6 +314,11 @@ export function BotSourceEditor({
           ].join(" ")}
           value={value}
           onChange={(e) => {
+            activeReadIdRef.current++;
+            if (activeReaderRef.current) {
+              activeReaderRef.current.abort();
+              activeReaderRef.current = null;
+            }
             onChange(e.target.value);
             if (fileError) setFileError(null);
           }}

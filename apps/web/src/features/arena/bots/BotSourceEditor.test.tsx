@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -355,5 +357,156 @@ describe("BotSourceEditor component", () => {
 
     fireEvent.click(templateBtn);
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("rejects file import with invalid non-UTF-8 bytes", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="node"
+      />
+    );
+
+    // Create a binary file with invalid UTF-8 byte sequence
+    const invalidBytes = new Uint8Array([0xff, 0xfe, 0x00, 0x80]);
+    const file = new File([invalidBytes], "binary_bad.exe", { type: "application/octet-stream" });
+
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByText(/phải có định dạng văn bản UTF-8 hợp lệ/i)).toBeInTheDocument();
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("guards against stale FileReader callback on rapid file selections", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="node"
+      />
+    );
+
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+
+    const file1 = new File(["content 1"], "file1.js", { type: "text/javascript" });
+    const file2 = new File(["content 2"], "file2.js", { type: "text/javascript" });
+
+    // Rapid selection: file1 then file2 immediately
+    fireEvent.change(hiddenInput, { target: { files: [file1] } });
+    fireEvent.change(hiddenInput, { target: { files: [file2] } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalled();
+    });
+
+    // Latest file content must win
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(lastCall).toBe("content 2");
+  });
+
+  it("cancels pending file read if user starts typing in textarea", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="node"
+      />
+    );
+
+    let triggerLoad: () => void = () => {};
+    const originalFileReader = window.FileReader;
+    class MockDelayedReader {
+      result: ArrayBuffer = new ArrayBuffer(0);
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      readAsArrayBuffer() {
+        this.result = new TextEncoder().encode("file content delayed").buffer;
+        triggerLoad = () => {
+          if (this.onload) this.onload();
+        };
+      }
+      abort() {
+        if (this.onabort) this.onabort();
+      }
+    }
+    // @ts-expect-error mocking for test
+    window.FileReader = MockDelayedReader;
+
+    try {
+      const file = new File(["file content delayed"], "delayed.js", { type: "text/javascript" });
+      const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+      fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+      // User types while read is pending
+      const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
+      fireEvent.change(textarea, { target: { value: "user typed first" } });
+      expect(onChange).toHaveBeenCalledWith("user typed first");
+
+      // Now delayed file load fires
+      triggerLoad();
+
+      // onChange should NOT have been called with "file content delayed"
+      expect(onChange).not.toHaveBeenCalledWith("file content delayed");
+    } finally {
+      window.FileReader = originalFileReader;
+    }
+  });
+
+  it("cancels pending file read if component unmounts", async () => {
+    const onChange = vi.fn();
+    let abortCalled = false;
+    let triggerLoad: () => void = () => {};
+    const originalFileReader = window.FileReader;
+    class MockDelayedReader {
+      result: ArrayBuffer = new ArrayBuffer(0);
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      readAsArrayBuffer() {
+        this.result = new TextEncoder().encode("unmount file").buffer;
+        triggerLoad = () => {
+          if (this.onload) this.onload();
+        };
+      }
+      abort() {
+        abortCalled = true;
+        if (this.onabort) this.onabort();
+      }
+    }
+    // @ts-expect-error mocking for test
+    window.FileReader = MockDelayedReader;
+
+    try {
+      const { unmount } = render(
+        <BotSourceEditor
+          value=""
+          onChange={onChange}
+          profileId="node"
+        />
+      );
+
+      const file = new File(["unmount file"], "unmount.js", { type: "text/javascript" });
+      const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+      fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+      unmount();
+      expect(abortCalled).toBe(true);
+
+      // Delayed load fires after unmount
+      triggerLoad();
+      expect(onChange).not.toHaveBeenCalled();
+    } finally {
+      window.FileReader = originalFileReader;
+    }
   });
 });
