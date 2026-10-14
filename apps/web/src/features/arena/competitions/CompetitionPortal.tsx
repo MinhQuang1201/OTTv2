@@ -358,13 +358,13 @@ export function CompetitionPortal({
     }
   };
 
-  const handleAdvance = async (nextPhase: CompetitionPhase) => {
+  const handleAdvance = async (expectedPhase: CompetitionPhase) => {
     if (!selectedId) return;
     setActionLoading(true);
     setError(null);
     setSuccessMsg(null);
     try {
-      const updated = await clientRef.current.advancePhase(selectedId, nextPhase);
+      const updated = await clientRef.current.advancePhase(selectedId, expectedPhase);
       setSuccessMsg(`Đã chuyển giai đoạn sang "${updated.phase}".`);
       await loadDetail(selectedId);
       await loadCompetitions();

@@ -141,6 +141,7 @@
   font-family: var(--ui-font-body);
   font-size: var(--ui-text-xs);
   font-weight: 600;
+}
 .infoBanner {
   display: flex;
   align-items: center;

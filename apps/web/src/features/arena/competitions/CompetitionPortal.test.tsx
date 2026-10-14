@@ -488,7 +488,7 @@ describe("CompetitionPortal", () => {
       expect(advanceBtn).toBeEnabled();
       await user.click(advanceBtn);
 
-      expect(advanceSpy).toHaveBeenCalledWith("comp-ready", "preparation");
+      expect(advanceSpy).toHaveBeenCalledWith("comp-ready", "registration");
     });
 
     it("displays error banner when advancePhase fails with 409 conflict", async () => {

@@ -28,7 +28,7 @@ export interface CompetitionDetailProps {
   readonly onRegister: () => void;
   readonly onSubmitBot: (e: FormEvent) => void;
   readonly onReview: (userId: string, accepted: boolean) => void;
-  readonly onAdvance: (nextPhase: CompetitionPhase) => void;
+  readonly onAdvance: (expectedPhase: CompetitionPhase) => void;
   readonly onNavigateTournament?: (tournamentId: string) => void;
   readonly onStartReplay?: (replayDoc: ReplayDocument) => void;
 }
@@ -176,7 +176,7 @@ export function CompetitionDetail({
                   (comp.phase === "registration" && !canAdvanceToPreparation) ||
                   (comp.phase === "preparation" && !canAdvanceToLocked)
                 }
-                onClick={() => onAdvance(nextPhase)}
+                onClick={() => onAdvance(comp.phase)}
               >
                 {actionLoading ? "Đang xử lý..." : `Chuyển sang: ${PHASE_LABEL_MAP[nextPhase]}`}
               </Button>

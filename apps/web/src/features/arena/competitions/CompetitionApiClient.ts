@@ -145,7 +145,10 @@ export class CompetitionApiClient {
   }
 
   async createCompetition(data: CreateCompetitionRequest, options?: RequestOptions): Promise<Competition> {
-    const res = await this.request<{ competition: Competition }>("/competitions", "POST", data, options);
+    const res = await this.request<{ competition: Competition }>("/competitions", "POST", data, {
+      ...options,
+      idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+    });
     return res.competition;
   }
 
