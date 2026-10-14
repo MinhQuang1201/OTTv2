@@ -5,6 +5,7 @@ import type {
   CompetitionListResponse,
   CompetitionPhase,
   CreateCompetitionRequest,
+  RetryMatchResponse,
 } from "./types";
 
 export interface GatewayTokenProvider {
@@ -209,4 +210,18 @@ export class CompetitionApiClient {
     );
     return res.competition;
   }
+
+  async retryMatch(
+    competitionId: string,
+    scheduleIndex: number,
+    options?: RequestOptions
+  ): Promise<RetryMatchResponse> {
+    return this.request<RetryMatchResponse>(
+      `/competitions/${encodeURIComponent(competitionId)}/matches/${encodeURIComponent(scheduleIndex)}/retry`,
+      "POST",
+      {},
+      options
+    );
+  }
 }
+

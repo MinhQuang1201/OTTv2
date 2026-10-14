@@ -380,7 +380,45 @@
   gap: var(--ui-space-1);
 }
 
+.linkedTournamentBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-4);
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-seat-b);
+  box-shadow: 2px 2px 0 var(--ui-seat-b);
+  box-sizing: border-box;
+}
+
+.tournamentBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+}
+
+.matchErrorRow {
+  background: rgba(220, 53, 69, 0.08) !important;
+}
+
+.matchErrorRow:hover td {
+  background: rgba(220, 53, 69, 0.14) !important;
+}
+
+.erroredMatchWarning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ui-danger);
+  font-weight: 700;
+  font-size: var(--ui-text-xs);
+  font-family: var(--ui-font-mono);
+}
+
 @media (max-width: 900px) {
+
   .gridTwoCols {
     grid-template-columns: minmax(0, 1fr);
   }

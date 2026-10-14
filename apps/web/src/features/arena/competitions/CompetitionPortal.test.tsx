@@ -579,4 +579,312 @@ describe("CompetitionPortal", () => {
       expect(onNavigateTournamentMock).toHaveBeenCalledWith("tourn-blitz-99");
     });
   });
+
+  describe("Bot Filtering, Pagination & Stale Selection", () => {
+    it("filters opponent bots and inactive bots before calling listBotVersions", async () => {
+      const prepComp: Competition = {
+        id: "comp-prep",
+        name: "Preparation Cup",
+        phase: "preparation",
+        capacity: 8,
+        ranked: true,
+        tournamentId: null,
+        createdAt: "2026-10-15T00:00:00Z",
+      };
+
+      const entries: CompetitionEntry[] = [
+        { userId: "u-author-1", username: "alice", status: "accepted", botId: null, botName: null, botVersionId: null, versionNo: null, buildStatus: null },
+      ];
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValueOnce([prepComp]);
+      vi.spyOn(client, "getCompetition").mockResolvedValueOnce({ competition: prepComp, entries });
+
+      // listBots returns 3 bots: 1 owned active, 1 owned inactive/suspended, 1 opponent bot
+      vi.spyOn(gateway, "listBots").mockResolvedValueOnce({
+        bots: [
+          { id: "bot-owned-1", ownerId: "u-author-1", name: "MyBot", status: "active", createdAt: "" },
+          { id: "bot-owned-inactive", ownerId: "u-author-1", name: "OldBot", status: "suspended", createdAt: "" },
+          { id: "bot-opponent", ownerId: "u-opponent-9", name: "EnemyBot", status: "active", createdAt: "" },
+        ],
+        total: 3,
+        limit: 50,
+        offset: 0,
+      });
+
+      const listVersionsSpy = vi.spyOn(gateway, "listBotVersions").mockResolvedValueOnce({
+        versions: [
+          {
+            id: "ver-ready-1",
+            botId: "bot-owned-1",
+            versionNo: 1,
+            sourceDigest: "d1",
+            profileId: "profile-node",
+            buildStatus: "ready",
+            createdAt: "",
+          },
+        ],
+      });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={authorProfile}
+          onNavigateTournament={onNavigateTournamentMock}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("combobox", { name: /Chọn phiên bản bot READY của bạn/i })).toBeInTheDocument();
+      });
+
+      // listBotVersions must ONLY be called for bot-owned-1
+      expect(listVersionsSpy).toHaveBeenCalledTimes(1);
+      expect(listVersionsSpy).toHaveBeenCalledWith("bot-owned-1", expect.anything());
+      expect(listVersionsSpy).not.toHaveBeenCalledWith("bot-opponent", expect.anything());
+      expect(listVersionsSpy).not.toHaveBeenCalledWith("bot-owned-inactive", expect.anything());
+    });
+
+    it("paginates listBots so own bot on page 2 is discovered", async () => {
+      const prepComp: Competition = {
+        id: "comp-prep",
+        name: "Prep Cup",
+        phase: "preparation",
+        capacity: 8,
+        ranked: true,
+        tournamentId: null,
+        createdAt: "2026-10-15T00:00:00Z",
+      };
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValueOnce([prepComp]);
+      vi.spyOn(client, "getCompetition").mockResolvedValueOnce({
+        competition: prepComp,
+        entries: [{ userId: "u-author-1", username: "alice", status: "accepted", botId: null, botName: null, botVersionId: null, versionNo: null, buildStatus: null }],
+      });
+
+      // Page 1: only opponents (50 bots), total 51
+      const listBotsSpy = vi.spyOn(gateway, "listBots")
+        .mockResolvedValueOnce({
+          bots: Array.from({ length: 50 }, (_, i) => ({
+            id: `bot-other-${i}`,
+            ownerId: `u-other-${i}`,
+            name: `OtherBot${i}`,
+            status: "active",
+            createdAt: "",
+          })),
+          total: 51,
+          limit: 50,
+          offset: 0,
+        })
+        // Page 2: author's bot
+        .mockResolvedValueOnce({
+          bots: [
+            { id: "bot-p2-owned", ownerId: "u-author-1", name: "PageTwoBot", status: "active", createdAt: "" },
+          ],
+          total: 51,
+          limit: 50,
+          offset: 50,
+        });
+
+      const listVersionsSpy = vi.spyOn(gateway, "listBotVersions").mockResolvedValueOnce({
+        versions: [
+          { id: "ver-p2", botId: "bot-p2-owned", versionNo: 2, sourceDigest: "d2", profileId: "node", buildStatus: "ready", createdAt: "" },
+        ],
+      });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={authorProfile}
+          onNavigateTournament={onNavigateTournamentMock}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("combobox", { name: /Chọn phiên bản bot READY của bạn/i })).toBeInTheDocument();
+      });
+
+      expect(listBotsSpy).toHaveBeenCalledTimes(2);
+      expect(listVersionsSpy).toHaveBeenCalledWith("bot-p2-owned", expect.anything());
+      expect(screen.getByText(/PageTwoBot \(v2/i)).toBeInTheDocument();
+    });
+
+    it("prevents stale detail responses from overwriting newer selection", async () => {
+      const user = userEvent.setup();
+      const compA: Competition = { id: "comp-a", name: "Alpha League", phase: "registration", tournamentId: null, createdAt: "" };
+      const compB: Competition = { id: "comp-b", name: "Beta League", phase: "registration", tournamentId: null, createdAt: "" };
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValue([compA, compB]);
+
+      let resolveA!: (val: any) => void;
+      const promiseA = new Promise((resolve) => {
+        resolveA = resolve;
+      });
+
+      let resolveB!: (val: any) => void;
+      const promiseB = new Promise((resolve) => {
+        resolveB = resolve;
+      });
+
+      vi.spyOn(client, "getCompetition").mockImplementation((id) => {
+        if (id === "comp-a") return promiseA as any;
+        if (id === "comp-b") return promiseB as any;
+        return Promise.reject(new Error("unknown"));
+      });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={authorProfile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("listitem", { name: /Sự kiện Alpha League/i })).toBeInTheDocument();
+        expect(screen.getByRole("listitem", { name: /Sự kiện Beta League/i })).toBeInTheDocument();
+      });
+
+      // User switches to Beta League before Alpha League resolves
+      await user.click(screen.getByRole("listitem", { name: /Sự kiện Beta League/i }));
+
+      // Beta League resolves first
+      resolveB({
+        competition: compB,
+        entries: [{ userId: "u-2", username: "beta-user", status: "accepted", botId: null, botName: null, botVersionId: null, versionNo: null, buildStatus: null }],
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("competition-detail")).toHaveTextContent("Beta League");
+      });
+
+      // Now late Alpha League resolves
+      resolveA({
+        competition: compA,
+        entries: [{ userId: "u-1", username: "alpha-user", status: "accepted", botId: null, botName: null, botVersionId: null, versionNo: null, buildStatus: null }],
+      });
+
+      // Assert that Beta League is still the displayed detail, NOT overwritten by Alpha
+      expect(screen.getByTestId("competition-detail")).toHaveTextContent("Beta League");
+      expect(screen.queryByText("alpha-user")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Linked Tournament & Match Error Retry", () => {
+    it("renders standings and matches, allows admin to retry errored match on running event", async () => {
+      const user = userEvent.setup();
+      const runningComp: Competition = {
+        id: "comp-running",
+        name: "Pro Arena Running",
+        phase: "running",
+        tournamentId: "tourn-live-1",
+        createdAt: "2026-10-15T00:00:00Z",
+      };
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValueOnce([runningComp]);
+      vi.spyOn(client, "getCompetition").mockResolvedValueOnce({
+        competition: runningComp,
+        entries: [],
+      });
+
+      const getTournamentSpy = vi.spyOn(gateway, "getTournament").mockResolvedValue({
+        tournament: {
+          id: "tourn-live-1",
+          name: "Pro Tournament",
+          status: "active",
+          pointScheme: "standard",
+          ranked: true,
+          createdAt: "2026-10-15T00:00:00Z",
+        },
+        standings: [
+          { botId: "bot-1", botName: "AlphaBot", points: 3, matchesPlayed: 1, wins: 1, draws: 0, losses: 0, rank: 1 },
+          { botId: "bot-2", botName: "BetaBot", points: 0, matchesPlayed: 1, wins: 0, draws: 0, losses: 1, rank: 2 },
+        ],
+        matches: [
+          { id: "m-1", scheduleIndex: 1, kind: "ranked", status: "completed", settledAt: "2026-10-15T00:10:00Z" },
+          { id: "m-2", scheduleIndex: 2, kind: "ranked", status: "error", settledAt: null },
+        ],
+      });
+
+      const retrySpy = vi.spyOn(client, "retryMatch").mockResolvedValueOnce({ ok: true });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={adminProfile}
+          onNavigateTournament={onNavigateTournamentMock}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("linked-tournament-panel")).toBeInTheDocument();
+      });
+
+      // Check standings rendered
+      expect(screen.getByText("AlphaBot")).toBeInTheDocument();
+      expect(screen.getByText("BetaBot")).toBeInTheDocument();
+
+      // Check errored match warning
+      expect(screen.getByTestId("errored-matches-alert")).toBeInTheDocument();
+
+      // Find retry match button for scheduleIndex 2
+      const retryBtn = screen.getByTestId("retry-match-btn-2");
+      expect(retryBtn).toBeInTheDocument();
+      await user.click(retryBtn);
+
+      expect(retrySpy).toHaveBeenCalledWith("comp-running", 2);
+
+      // Verify tournament was refreshed
+      await waitFor(() => {
+        expect(getTournamentSpy).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe("Capacity Validation", () => {
+    it("validates capacity between 2 and 128 when creating an event", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(client, "listCompetitions").mockResolvedValue([]);
+      const createSpy = vi.spyOn(client, "createCompetition");
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={adminProfile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Tạo sự kiện mới" })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "Tạo sự kiện mới" }));
+
+      // Enter name and capacity < 2
+      await user.type(screen.getByLabelText("Tên sự kiện"), "Mini Cup");
+      await user.type(screen.getByLabelText(/Số lượng tối đa/i), "1");
+
+      await user.click(screen.getByRole("button", { name: "Xác nhận tạo sự kiện" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent("Sức chứa giải đấu phải là số nguyên từ 2 đến 128 bot.");
+      });
+      expect(createSpy).not.toHaveBeenCalled();
+
+      // Enter capacity > 128
+      await user.clear(screen.getByLabelText(/Số lượng tối đa/i));
+      await user.type(screen.getByLabelText(/Số lượng tối đa/i), "200");
+
+      await user.click(screen.getByRole("button", { name: "Xác nhận tạo sự kiện" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent("Sức chứa giải đấu phải là số nguyên từ 2 đến 128 bot.");
+      });
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+  });
 });
+

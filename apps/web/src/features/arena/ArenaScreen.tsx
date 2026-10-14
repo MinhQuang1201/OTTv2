@@ -1052,6 +1052,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                 setTournamentId(tournId);
                 setActiveTab("tournaments");
               }}
+              onStartReplay={onStartReplay}
             />
           )}
         </main>

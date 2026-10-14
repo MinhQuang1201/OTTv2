@@ -47,3 +47,8 @@ export interface ReadyBotVersionOption {
   readonly versionNo: number;
   readonly profileId: string;
 }
+
+export interface RetryMatchResponse {
+  readonly ok: boolean;
+}
+

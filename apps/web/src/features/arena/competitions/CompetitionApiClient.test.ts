@@ -251,6 +251,28 @@ describe("CompetitionApiClient", () => {
     });
   });
 
+  it("retries errored match on running competition with correct URL and empty body", async () => {
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    const res = await client.retryMatch("c-running-1", 3);
+    expect(res).toEqual({ ok: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/arena/v1/competitions/c-running-1/matches/3/retry",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token-123",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({}),
+      })
+    );
+  });
+
   it("maps abort error correctly", async () => {
     const abortErr = new Error("Abort");
     abortErr.name = "AbortError";
@@ -262,3 +284,4 @@ describe("CompetitionApiClient", () => {
     });
   });
 });
+
