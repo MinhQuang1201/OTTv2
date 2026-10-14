@@ -4,6 +4,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-5);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .topBar {
@@ -12,12 +15,12 @@
   justify-content: space-between;
   gap: var(--ui-space-4);
   padding: var(--ui-space-3) var(--ui-space-5);
-  border: 1px solid var(--ui-glass-border);
-  border-radius: var(--ui-radius-panel);
+  border: 2px solid var(--ui-glass-border-strong);
   background: var(--ui-surface-1);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--ui-shadow-panel);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .topBar > div:first-child {
@@ -30,17 +33,17 @@
   font-family: var(--ui-font-display);
   font-size: var(--ui-text-md);
   font-weight: 700;
-  color: #fff;
+  color: var(--ui-text);
   margin: 0;
 }
 
 .kicker {
   color: var(--ui-seat-b);
   font-family: var(--ui-font-mono);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .14em;
+  letter-spacing: 0.1em;
 }
 
 .topBarActions {
@@ -51,21 +54,31 @@
 
 .replayLayout {
   display: grid;
-  grid-template-columns: minmax(200px, 280px) minmax(560px, 760px) minmax(240px, 320px);
+  grid-template-columns: minmax(200px, 280px) minmax(0, 1fr) minmax(240px, 320px);
   gap: var(--ui-space-6);
   align-items: start;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .sideRail {
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-4);
+  align-self: stretch;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .playersRail {
   display: grid;
   gap: var(--ui-space-4);
   align-self: stretch;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .boardContainer {
@@ -73,6 +86,10 @@
   flex-direction: column;
   align-items: center;
   gap: var(--ui-space-4);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Replay Controls */
@@ -82,12 +99,12 @@
   flex-direction: column;
   gap: var(--ui-space-3);
   padding: var(--ui-space-4);
-  border: 1px solid var(--ui-glass-border);
-  border-radius: var(--ui-radius-panel);
+  border: 2px solid var(--ui-glass-border-strong);
   background: var(--ui-surface-1);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--ui-shadow-panel);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .timelineRow {
@@ -111,18 +128,20 @@
 }
 
 .plyIndicator {
-  font-family: var(--ui-font-mono);
+  font-family: var(--ui-font-pixel), var(--ui-font-mono);
   font-size: var(--ui-text-sm);
   font-weight: 700;
-  color: #fff;
+  color: var(--ui-text);
 }
 
 .timelineSlider {
   width: 100%;
   accent-color: var(--ui-seat-b);
   cursor: pointer;
-  height: 8px;
-  border-radius: var(--ui-radius-control);
+  height: 10px;
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-0);
+  border-radius: 0;
 }
 
 .buttonRow {
@@ -173,13 +192,11 @@
 .resultSummaryOverlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--ui-z-dialog);
   display: grid;
   place-items: center;
   padding: var(--ui-space-4);
-  background: rgba(3, 8, 20, 0.75);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.65);
 }
 
 .resultSummaryPanel {
@@ -188,10 +205,9 @@
   flex-direction: column;
   gap: var(--ui-space-4);
   padding: var(--ui-space-5);
-  border: 1px solid var(--ui-glass-border);
-  border-radius: var(--ui-radius-panel);
-  background: var(--ui-surface-2);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  border: 3px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-1);
+  box-shadow: 6px 6px 0 var(--ui-glass-border-strong);
 }
 
 .resultSummaryHeader {
@@ -201,10 +217,10 @@
 }
 
 .resultTitle {
-  font-family: var(--ui-font-display);
+  font-family: var(--ui-font-pixel), var(--ui-font-display);
   font-size: var(--ui-text-xl);
   font-weight: 700;
-  color: #fff;
+  color: var(--ui-text);
   margin: 0;
 }
 
@@ -218,43 +234,45 @@
   display: inline-block;
   align-self: flex-start;
   padding: var(--ui-space-1) var(--ui-space-3);
-  border-radius: var(--ui-radius-control);
   font-family: var(--ui-font-mono);
   font-size: var(--ui-text-sm);
   font-weight: 700;
-  background: var(--ui-surface-1);
-  border: 1px solid var(--ui-glass-border);
-  color: #fff;
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  color: var(--ui-text);
 }
 
 .resultBadge[data-outcome="win"] {
   border-color: var(--ui-seat-a);
   color: var(--ui-seat-a);
-  background: rgba(255, 0, 122, 0.1);
+  box-shadow: 2px 2px 0 var(--ui-seat-a);
 }
 
 .resultBadge[data-outcome="forfeit"] {
-  border-color: #f59e0b;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
+  border-color: #d97706;
+  color: #d97706;
+  box-shadow: 2px 2px 0 #d97706;
 }
 
 .resultBadge[data-outcome="draw"] {
   border-color: var(--ui-seat-b);
   color: var(--ui-seat-b);
-  background: rgba(0, 240, 255, 0.1);
+  box-shadow: 2px 2px 0 var(--ui-seat-b);
 }
 
 .winnerText {
   margin: 0;
   font-size: var(--ui-text-sm);
   color: var(--ui-text);
+  font-family: var(--ui-font-body);
 }
 
 .resultReason {
   margin: 0;
   font-size: var(--ui-text-md);
   color: var(--ui-text);
+  font-family: var(--ui-font-body);
 }
 
 .resultMeta {
@@ -264,9 +282,10 @@
   font-size: var(--ui-text-sm);
   margin: 0;
   padding: var(--ui-space-3);
-  background: var(--ui-surface-1);
-  border-radius: var(--ui-radius-control);
-  border: 1px solid var(--ui-line);
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  font-family: var(--ui-font-mono);
 }
 
 .resultMeta dt {
@@ -276,7 +295,7 @@
 .resultMeta dd {
   margin: 0;
   font-weight: 600;
-  color: #fff;
+  color: var(--ui-text);
 }
 
 .resultSummaryFooter {
@@ -284,4 +303,64 @@
   justify-content: flex-end;
   gap: var(--ui-space-3);
   margin-top: var(--ui-space-2);
+}
+
+@media (max-width: 1080px) {
+  .replayLayout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .sideRail {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .replayLayout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ui-space-4);
+  }
+  .playersRail {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  }
+  .sideRail {
+    grid-column: auto;
+  }
+  .topBar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .topBarActions {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .replayScreen {
+    gap: var(--ui-space-3);
+  }
+  .topBar {
+    padding: var(--ui-space-2) var(--ui-space-3);
+  }
+  .replayControls {
+    padding: var(--ui-space-3) var(--ui-space-2);
+  }
+  .playersRail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .buttonRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .playbackButtons,
+  .speedSelector {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replayScreen * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

@@ -25,6 +25,7 @@ import { isArenaAvailable, resolveArenaEndpoint } from "../runtime-config";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import { AppLifecycleCoordinator, type AppLifecycleOptions } from "./AppLifecycleCoordinator";
+import { ThemeToggle } from "../shared/ui/ThemeToggle";
 import styles from "./app.module.css";
 import type { PublicMatchIdentity, PublicMatchListState } from "../features/spectator/PublicMatchList";
 
@@ -344,7 +345,10 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
         <header className={styles.header}>
           <p className={styles.brand}>OTTv2</p>
           {demo.enabled ? <span aria-label="Demo">Demo</span> : null}
-          {demo.enabled ? <div className={styles.demoTools}><ScenarioSwitcher scenario={demo.scenario} onScenarioChange={demo.setScenario} /></div> : null}
+          <div className={styles.headerControls}>
+            {demo.enabled ? <div className={styles.demoTools}><ScenarioSwitcher scenario={demo.scenario} onScenarioChange={demo.setScenario} /></div> : null}
+            <ThemeToggle />
+          </div>
         </header>
         <div className={styles.content}>
           <div className={styles.state} data-testid="app-state" data-state={appState.status}>

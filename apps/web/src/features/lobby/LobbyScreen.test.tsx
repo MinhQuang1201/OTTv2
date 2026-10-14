@@ -172,5 +172,37 @@ describe("LobbyScreen", () => {
     renderLobby({ onOpenArena, arenaAvailable: false });
     expect(screen.queryByRole("button", { name: /Vào đấu trường/i })).not.toBeInTheDocument();
   });
+
+  it("renders decorative miniBoard with core-derived initial pieces and goal flags", () => {
+    const { container } = renderLobby();
+    const miniBoard = container.querySelector('[class*="miniBoard"]');
+    expect(miniBoard).toBeInTheDocument();
+    expect(miniBoard).toHaveAttribute("aria-hidden", "true");
+
+    const cells = miniBoard?.querySelectorAll('[class*="miniCell"]');
+    expect(cells?.length).toBe(81);
+
+    // Goal flags at (0,0) and (8,8)
+    const cell00 = miniBoard?.querySelector('[data-coord="0:0"]');
+    const cell88 = miniBoard?.querySelector('[data-coord="8:8"]');
+    expect(cell00?.querySelector('[class*="miniFlag"]')).toBeInTheDocument();
+    expect(cell88?.querySelector('[class*="miniFlag"]')).toBeInTheDocument();
+
+    // Exactly 20 initial pieces from game core (10 seat A, 10 seat B)
+    const pieceSprites = miniBoard?.querySelectorAll('[class*="miniPieceSprite"]');
+    expect(pieceSprites?.length).toBe(20);
+
+    // Verify pieces are at actual coordinates, not dummy column 0
+    expect(miniBoard?.querySelector('[data-coord="4:7"] [class*="miniPieceSprite"]')).toBeInTheDocument();
+    expect(miniBoard?.querySelector('[data-coord="4:1"] [class*="miniPieceSprite"]')).toBeInTheDocument();
+    expect(miniBoard?.querySelector('[data-coord="5:7"] [class*="miniPieceSprite"]')).toBeInTheDocument();
+    expect(miniBoard?.querySelector('[data-coord="3:1"] [class*="miniPieceSprite"]')).toBeInTheDocument();
+
+    // Column 0 cells (except goal 0:0) should be empty, not dummy squares
+    const cell01 = miniBoard?.querySelector('[data-coord="0:1"]');
+    const cell02 = miniBoard?.querySelector('[data-coord="0:2"]');
+    expect(cell01?.querySelector('[class*="miniPieceSprite"]')).toBeNull();
+    expect(cell02?.querySelector('[class*="miniPieceSprite"]')).toBeNull();
+  });
 });
 

@@ -7,6 +7,7 @@ import { Button } from "../../shared/ui/Button";
 import { Panel } from "../../shared/ui/Panel";
 import { Spinner } from "../../shared/ui/Spinner";
 import { TextField } from "../../shared/ui/TextField";
+import { PixelSprite } from "../../shared/icons/PixelSprite";
 import {
   ArenaApiGateway,
   ArenaApiError,
@@ -496,7 +497,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
     const nameB = seatB ? `${seatB.botId || seatB.bot_id || "Bot"} (v${seatB.botVersionId || seatB.bot_version_id || "?"})` : "N/A";
     return (
       <div className={styles.matchParticipants}>
-        Seat A: <strong>{nameA}</strong> vs Seat B: <strong>{nameB}</strong>
+        <span className={styles.seatTagA}>Seat A: <strong>{nameA}</strong></span> <span className={styles.vsTag}>vs</span> <span className={styles.seatTagB}>Seat B: <strong>{nameB}</strong></span>
       </div>
     );
   };
@@ -534,7 +535,10 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           <Button variant="quiet" onClick={handleLobby}>
             Về sảnh
           </Button>
-          <h1 className={styles.title}>Đấu trường AI</h1>
+          <div className={styles.titleGroup}>
+            <span className={styles.kicker}>ARENA · GIẢI ĐẤU BOT</span>
+            <h1 className={styles.title}>Đấu trường AI</h1>
+          </div>
           <Button variant="secondary" onClick={handleRefresh}>
             Làm mới
           </Button>
@@ -542,13 +546,14 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         <div className={styles.topBarRight}>
           {userProfile ? (
             <div className={styles.userInfo}>
+              <PixelSprite kind="bot" size={16} decorative />
               <span>
                 Xin chào, <strong>{userProfile.user.username}</strong>
               </span>
               <Badge status={userProfile.user.role === "admin" ? "warning" : "info"}>
                 {userProfile.user.role}
               </Badge>
-              <span>
+              <span className={styles.permissionBadge}>
                 Nộp code: {userProfile.canSubmitSource ? "Được phép" : "Khóa"}
               </span>
               <Button variant="quiet" onClick={handleLogout}>
@@ -588,7 +593,8 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           className={[styles.tabBtn, activeTab === "leaderboard" ? styles.tabBtnActive : ""].join(" ")}
           onClick={() => setActiveTab("leaderboard")}
         >
-          Bảng xếp hạng
+          <PixelSprite kind="trophy" size={14} decorative />
+          <span>Bảng xếp hạng</span>
         </button>
         <button
           role="tab"
@@ -596,7 +602,8 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           className={[styles.tabBtn, activeTab === "bots" ? styles.tabBtnActive : ""].join(" ")}
           onClick={() => setActiveTab("bots")}
         >
-          Quản lý Bot
+          <PixelSprite kind="bot" size={14} decorative />
+          <span>Quản lý Bot</span>
         </button>
         <button
           role="tab"
@@ -604,7 +611,8 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           className={[styles.tabBtn, activeTab === "matches" ? styles.tabBtnActive : ""].join(" ")}
           onClick={() => setActiveTab("matches")}
         >
-          Trận đấu
+          <PixelSprite kind="flag" size={14} decorative />
+          <span>Trận đấu</span>
         </button>
         <button
           role="tab"
@@ -612,7 +620,8 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           className={[styles.tabBtn, activeTab === "tournaments" ? styles.tabBtnActive : ""].join(" ")}
           onClick={() => setActiveTab("tournaments")}
         >
-          Giải đấu
+          <PixelSprite kind="dam" size={14} decorative />
+          <span>Giải đấu</span>
         </button>
       </nav>
 
@@ -636,36 +645,38 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
               {leaderboard.length === 0 ? (
                 <div className={styles.emptyState}>Chưa có dữ liệu bảng xếp hạng.</div>
               ) : (
-                <table className={styles.dataTable}>
-                  <thead>
-                    <tr>
-                      <th>Hạng</th>
-                      <th>Tên Bot</th>
-                      <th>Bot ID</th>
-                      <th>Rating</th>
-                      <th>Số trận</th>
-                      <th>Thắng</th>
-                      <th>Hòa</th>
-                      <th>Thua</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {leaderboard.map((r) => (
-                      <tr key={r.botId}>
-                        <td>#{r.rank}</td>
-                        <td>
-                          <strong>{r.botName}</strong>
-                        </td>
-                        <td><code>{r.botId}</code></td>
-                        <td>{r.rating}</td>
-                        <td>{r.ratedGames}</td>
-                        <td>{r.wins}</td>
-                        <td>{r.draws}</td>
-                        <td>{r.losses}</td>
+                <div className={styles.tableWrap}>
+                  <table className={styles.dataTable}>
+                    <thead>
+                      <tr>
+                        <th>Hạng</th>
+                        <th>Tên Bot</th>
+                        <th>Bot ID</th>
+                        <th>Rating</th>
+                        <th>Số trận</th>
+                        <th>Thắng</th>
+                        <th>Hòa</th>
+                        <th>Thua</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {leaderboard.map((r) => (
+                        <tr key={r.botId}>
+                          <td className={styles.rankCell}>#{r.rank}</td>
+                          <td>
+                            <strong>{r.botName}</strong>
+                          </td>
+                          <td><code>{r.botId}</code></td>
+                          <td className={styles.ratingCell}>{r.rating}</td>
+                          <td>{r.ratedGames}</td>
+                          <td className={styles.winCell}>{r.wins}</td>
+                          <td className={styles.drawCell}>{r.draws}</td>
+                          <td className={styles.lossCell}>{r.losses}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </Panel>
           )}
@@ -689,37 +700,39 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                 {bots.length === 0 ? (
                   <div className={styles.emptyState}>Chưa có bot nào được đăng ký.</div>
                 ) : (
-                  <table className={styles.dataTable}>
-                    <thead>
-                      <tr>
-                        <th>Tên Bot</th>
-                        <th>Trạng thái</th>
-                        <th>Ngày tạo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bots.map((b) => (
-                        <tr key={b.id}>
-                          <td>
-                            <button
-                              type="button"
-                              className={[
-                                styles.botSelectBtn,
-                                b.id === selectedBotId ? styles.botSelectBtnActive : "",
-                              ].join(" ")}
-                              onClick={() => setSelectedBotId(b.id)}
-                              aria-label={`Chọn bot ${b.name}`}
-                            >
-                              <strong>{b.name}</strong>
-                              <div><small><code>{b.id}</code></small></div>
-                            </button>
-                          </td>
-                          <td>{renderStatusBadge(b.status)}</td>
-                          <td><small>{new Date(b.createdAt).toLocaleDateString()}</small></td>
+                  <div className={styles.tableWrap}>
+                    <table className={styles.dataTable}>
+                      <thead>
+                        <tr>
+                          <th>Tên Bot</th>
+                          <th>Trạng thái</th>
+                          <th>Ngày tạo</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {bots.map((b) => (
+                          <tr key={b.id}>
+                            <td>
+                              <button
+                                type="button"
+                                className={[
+                                  styles.botSelectBtn,
+                                  b.id === selectedBotId ? styles.botSelectBtnActive : "",
+                                ].join(" ")}
+                                onClick={() => setSelectedBotId(b.id)}
+                                aria-label={`Chọn bot ${b.name}`}
+                              >
+                                <strong>{b.name}</strong>
+                                <div><small><code>{b.id}</code></small></div>
+                              </button>
+                            </td>
+                            <td>{renderStatusBadge(b.status)}</td>
+                            <td><small>{new Date(b.createdAt).toLocaleDateString()}</small></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </Panel>
 
@@ -774,26 +787,28 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                   <div className={styles.emptyState}>Chưa có phiên bản nào cho bot này.</div>
                 ) : (
                   <div>
-                    <table className={styles.dataTable}>
-                      <thead>
-                        <tr>
-                          <th>Version</th>
-                          <th>Profile</th>
-                          <th>Build Status</th>
-                          <th>Source Digest</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {botVersions.map((v) => (
-                          <tr key={v.id}>
-                            <td>v{v.versionNo}</td>
-                            <td><code>{v.profileId}</code></td>
-                            <td>{renderStatusBadge(v.buildStatus)}</td>
-                            <td><code>{v.sourceDigest.slice(0, 14)}...</code></td>
+                    <div className={styles.tableWrap}>
+                      <table className={styles.dataTable}>
+                        <thead>
+                          <tr>
+                            <th>Version</th>
+                            <th>Profile</th>
+                            <th>Build Status</th>
+                            <th>Source Digest</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {botVersions.map((v) => (
+                            <tr key={v.id}>
+                              <td className={styles.versionCell}>v{v.versionNo}</td>
+                              <td><code>{v.profileId}</code></td>
+                              <td>{renderStatusBadge(v.buildStatus)}</td>
+                              <td><code>{v.sourceDigest.slice(0, 14)}...</code></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
                     {botVersions.some((v) => v.buildStatus === "failed") && (
                       <div className={styles.failedBuildDetails}>
@@ -919,32 +934,34 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                     {tournamentDetails.standings.length === 0 ? (
                       <div className={styles.emptyState}>Chưa có trận đấu nào được tính điểm.</div>
                     ) : (
-                      <table className={styles.dataTable}>
-                        <thead>
-                          <tr>
-                            <th>Hạng</th>
-                            <th>Bot ID</th>
-                            <th>Điểm</th>
-                            <th>Trận</th>
-                            <th>Thắng</th>
-                            <th>Hòa</th>
-                            <th>Thua</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {tournamentDetails.standings.map((s, idx) => (
-                            <tr key={s.botId}>
-                              <td>#{s.rank ?? idx + 1}</td>
-                              <td><code>{s.botId}</code></td>
-                              <td><strong>{s.points}</strong></td>
-                              <td>{s.matchesPlayed}</td>
-                              <td>{s.wins}</td>
-                              <td>{s.draws}</td>
-                              <td>{s.losses}</td>
+                      <div className={styles.tableWrap}>
+                        <table className={styles.dataTable}>
+                          <thead>
+                            <tr>
+                              <th>Hạng</th>
+                              <th>Bot ID</th>
+                              <th>Điểm</th>
+                              <th>Trận</th>
+                              <th>Thắng</th>
+                              <th>Hòa</th>
+                              <th>Thua</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {tournamentDetails.standings.map((s, idx) => (
+                              <tr key={s.botId}>
+                                <td className={styles.rankCell}>#{s.rank ?? idx + 1}</td>
+                                <td><code>{s.botId}</code></td>
+                                <td className={styles.pointsCell}><strong>{s.points}</strong></td>
+                                <td>{s.matchesPlayed}</td>
+                                <td className={styles.winCell}>{s.wins}</td>
+                                <td className={styles.drawCell}>{s.draws}</td>
+                                <td className={styles.lossCell}>{s.losses}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 ) : (

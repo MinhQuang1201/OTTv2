@@ -2,6 +2,7 @@ import type { GameResultView, Seat } from "../../shared/model/game";
 import { resultReason } from "../../shared/model/format";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
+import { PixelSprite } from "../../shared/icons/PixelSprite";
 import styles from "./result.module.css";
 
 export interface ResultDialogProps {
@@ -25,7 +26,12 @@ export function ResultDialog({ open, result, viewerSeat, playerNames, onClose, o
     <Dialog open={open} title="Kết quả" closeLabel="Đóng kết quả" onClose={onClose} className={[styles.resultDialog, styles[`outcome_${outcome}`]].join(" ")}>
       <div className={styles.outcomeContainer} data-testid="result-dialog-outcome" data-outcome={outcome}>
         <div className={styles.emblem} aria-hidden="true">
-          {outcome === "win" ? "🏆" : outcome === "loss" ? "💀" : "⚔️"}
+          <PixelSprite
+            kind={outcome === "win" ? "trophy" : outcome === "loss" ? "dam" : "flag"}
+            seat={result.winner ?? undefined}
+            size={44}
+            decorative
+          />
         </div>
         <p className={styles.resultTitle}>{title}</p>
         <p className={styles.reason}>{resultReason(result)}</p>
