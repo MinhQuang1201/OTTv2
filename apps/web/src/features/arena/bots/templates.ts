@@ -181,7 +181,7 @@ export function normalizeProfileId(profileId: string): string {
 
 export const PROFILE_DEFINITIONS: Record<string, ProfileInfo> = {
   node: {
-    id: "controlled-node",
+    id: "node",
     displayName: "Node.js (ESM)",
     language: "javascript",
     fileExtensions: [".mjs", ".js", ".txt"],
@@ -190,7 +190,7 @@ export const PROFILE_DEFINITIONS: Record<string, ProfileInfo> = {
     template: NODE_TEMPLATE,
   },
   python: {
-    id: "python-v1",
+    id: "python",
     displayName: "Python 3",
     language: "python",
     fileExtensions: [".py", ".txt"],
@@ -200,29 +200,33 @@ export const PROFILE_DEFINITIONS: Record<string, ProfileInfo> = {
   },
   cpp: {
     id: "cpp",
-    displayName: "C++17",
+    displayName: "C++17 · chỉ nhập tệp",
     language: "cpp",
     fileExtensions: [".cpp", ".cc", ".cxx", ".txt"],
-    description: "Biên dịch và thực thi C++ tiêu chuẩn C++17.",
+    description: "Biên dịch và thực thi C++ tiêu chuẩn C++17 (nhập từ tệp, không kèm mã mẫu).",
     protocolHint: "Đọc dòng NDJSON qua std::cin, xuất phản hồi ra std::cout và flush. Ghi log ra std::cerr.",
     template: CPP_TEMPLATE,
   },
   java: {
     id: "java",
-    displayName: "Java 21",
+    displayName: "Java 21 · chỉ nhập tệp",
     language: "java",
     fileExtensions: [".java", ".txt"],
-    description: "Biên dịch và thực thi Java 21 (lớp chính FirstLegal).",
+    description: "Biên dịch và thực thi Java 21 (lớp chính FirstLegal, nhập từ tệp, không kèm mã mẫu).",
     protocolHint: "Đọc luồng System.in, in phản hồi JSON một dòng ra System.out. Ghi log qua System.err.",
     template: JAVA_TEMPLATE,
   },
 };
 
+// Aliases for legacy compatibility
+PROFILE_DEFINITIONS["controlled-node"] = PROFILE_DEFINITIONS.node;
+PROFILE_DEFINITIONS["python-v1"] = PROFILE_DEFINITIONS.python;
+
 export function getProfileInfo(profileId: string): ProfileInfo {
   const normalized = normalizeProfileId(profileId);
   return (
     PROFILE_DEFINITIONS[normalized] || {
-      id: profileId,
+      id: normalized || profileId,
       displayName: profileId,
       language: "text",
       fileExtensions: [".txt", ".mjs", ".py"],

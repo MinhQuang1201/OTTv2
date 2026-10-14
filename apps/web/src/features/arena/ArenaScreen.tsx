@@ -23,7 +23,14 @@ import {
 } from "./ArenaApiGateway";
 import { CompetitionPortal } from "./competitions/CompetitionPortal";
 import styles from "./arena.module.css";
-import { BotSourceEditor, PracticeMatchPanel } from "./bots";
+import { BotSourceEditor, MAX_SOURCE_BYTES, PracticeMatchPanel, getProfileInfo, normalizeProfileId } from "./bots";
+
+function computeSourceBytes(code: string): number {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(code).length;
+  }
+  return new Blob([code]).size;
+}
 
 export type ArenaTab = "leaderboard" | "bots" | "matches" | "tournaments" | "competitions";
 
@@ -66,12 +73,14 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   // Forms
   const [newBotName, setNewBotName] = useState("");
   const [newSourceCode, setNewSourceCode] = useState("");
-  const [newProfileId, setNewProfileId] = useState("controlled-node");
+  const [availableProfiles, setAvailableProfiles] = useState<readonly string[]>(["node", "python"]);
+  const [newProfileId, setNewProfileId] = useState("node");
   const [newTournName, setNewTournName] = useState("");
 
   // Loading & error
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   // Lifecycle & cancellation guards
@@ -129,6 +138,61 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         });
     }
   }, [gateway]);
+
+  // Fetch capabilities once authenticated to determine available backend execution profiles
+  useEffect(() => {
+    if (!userProfile) return;
+    let active = true;
+    const controller = new AbortController();
+    pendingControllersRef.current.add(controller);
+    const generation = screenGenerationRef.current;
+
+    const fetchCaps = async () => {
+      // Legacy mock fallback: when gateway mock lacks getCapabilities method
+      if (typeof gateway.getCapabilities !== "function") {
+        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) return;
+        setAvailableProfiles(["node", "python"]);
+        setNewProfileId("node");
+        setCapabilitiesError(null);
+        return;
+      }
+
+      try {
+        const caps = await gateway.getCapabilities({ signal: controller.signal });
+        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) return;
+        if (caps?.profiles && Array.isArray(caps.profiles) && caps.profiles.length > 0) {
+          setAvailableProfiles(caps.profiles);
+          setCapabilitiesError(null);
+          setNewProfileId((current) => {
+            if (caps.profiles.includes(current)) return current;
+            const normalized = normalizeProfileId(current);
+            if (caps.profiles.includes(normalized)) return normalized;
+            return caps.profiles[0];
+          });
+        } else {
+          setAvailableProfiles([]);
+          setCapabilitiesError("Máy chủ không cung cấp môi trường thực thi nào.");
+        }
+      } catch (err: unknown) {
+        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current || controller.signal.aborted) {
+          return;
+        }
+        // Runtime failure: show error and disable source submission
+        setAvailableProfiles([]);
+        setCapabilitiesError((err as Error)?.message || "Không thể tải danh sách môi trường thực thi của máy chủ.");
+      } finally {
+        pendingControllersRef.current.delete(controller);
+      }
+    };
+
+    void fetchCaps();
+
+    return () => {
+      active = false;
+      controller.abort();
+      pendingControllersRef.current.delete(controller);
+    };
+  }, [userProfile, gateway]);
 
   const loadTabData = useCallback(
     async (signal: AbortSignal, currentGeneration: number) => {
@@ -263,6 +327,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   }, [loadTabData, refreshIndex]);
 
   const handleRefresh = () => {
+    setCapabilitiesError(null);
     setRefreshIndex((prev) => prev + 1);
   };
 
@@ -345,7 +410,25 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
 
   const handleUploadVersion = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedBotId || !newSourceCode.trim()) return;
+    if (!selectedBotId) return;
+    if (!userProfile?.canSubmitSource) {
+      setError("Bạn không có quyền nộp mã nguồn bot.");
+      return;
+    }
+    if (availableProfiles.length === 0) {
+      setError("Không có môi trường thực thi khả dụng từ máy chủ.");
+      return;
+    }
+    const byteLength = computeSourceBytes(newSourceCode);
+    if (!newSourceCode.trim() || byteLength === 0) {
+      setError("Mã nguồn không được để trống.");
+      return;
+    }
+    if (byteLength > MAX_SOURCE_BYTES) {
+      setError(`Kích thước mã nguồn (${byteLength} bytes) vượt quá giới hạn tối đa ${MAX_SOURCE_BYTES} bytes.`);
+      return;
+    }
+
     const controller = new AbortController();
     pendingControllersRef.current.add(controller);
     const generation = screenGenerationRef.current;
@@ -636,9 +719,9 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         </button>
       </nav>
 
-      {error && (
+      {(error || capabilitiesError) && (
         <div className={styles.errorBanner} role="alert">
-          <span>{error}</span>
+          <span>{capabilitiesError || error}</span>
           <Button variant="secondary" onClick={handleRefresh}>
             Thử lại
           </Button>
@@ -765,10 +848,29 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                         className={styles.filterSelect}
                         value={newProfileId}
                         onChange={(e) => setNewProfileId(e.target.value)}
-                        disabled={!userProfile?.canSubmitSource}
+                        disabled={!userProfile?.canSubmitSource || availableProfiles.length === 0}
                       >
-                        <option value="controlled-node">controlled-node (Node.js)</option>
-                        <option value="python-v1">python-v1 (Python)</option>
+                        {availableProfiles.length === 0 ? (
+                          <option value="">Không có môi trường khả dụng</option>
+                        ) : (
+                          availableProfiles.map((p) => {
+                            const norm = normalizeProfileId(p);
+                            const isImportOnly = norm === "cpp" || norm === "java";
+                            const info = getProfileInfo(p);
+                            const label = isImportOnly
+                              ? `${p} (${info.displayName})`
+                              : norm === "node"
+                                ? `${p} (Node.js)`
+                                : norm === "python"
+                                  ? `${p} (Python)`
+                                  : `${p} (${info.displayName})`;
+                            return (
+                              <option key={p} value={p}>
+                                {label}
+                              </option>
+                            );
+                          })
+                        )}
                       </select>
                     </div>
                     <div style={{ marginBottom: "0.5rem" }}>
@@ -776,13 +878,20 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                         value={newSourceCode}
                         onChange={setNewSourceCode}
                         profileId={newProfileId}
-                        disabled={!userProfile?.canSubmitSource}
+                        disabled={!userProfile?.canSubmitSource || availableProfiles.length === 0}
                       />
                     </div>
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={!userProfile?.canSubmitSource || !newSourceCode.trim()}
+                      disabled={
+                        !userProfile?.canSubmitSource ||
+                        availableProfiles.length === 0 ||
+                        !selectedBotId ||
+                        !newSourceCode.trim() ||
+                        computeSourceBytes(newSourceCode) === 0 ||
+                        computeSourceBytes(newSourceCode) > MAX_SOURCE_BYTES
+                      }
                     >
                       Nộp phiên bản
                     </Button>

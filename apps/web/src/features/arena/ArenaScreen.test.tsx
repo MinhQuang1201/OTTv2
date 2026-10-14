@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { ArenaScreen } from "./ArenaScreen";
@@ -16,6 +16,13 @@ describe("ArenaScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     gateway = new ArenaApiGateway({ baseUrl: "http://127.0.0.1:8787/api/arena/v1" });
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValue({
+      executor: "trusted-local-v1",
+      trusted: true,
+      untrusted: false,
+      canSubmitSource: true,
+      profiles: ["node", "python"],
+    });
   });
 
   afterEach(() => {
@@ -485,6 +492,247 @@ describe("ArenaScreen", () => {
       await Promise.resolve();
 
       expect(onStartReplayMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Profile Capabilities & Version Submission", () => {
+    it("fetches capabilities once authenticated and populates actual profile options", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["python", "node", "cpp", "java"]
+      });
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-admin", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        const select = screen.getByLabelText(/Môi trường thực thi:/i) as HTMLSelectElement;
+        expect(select).toBeInTheDocument();
+        const optionValues = Array.from(select.options).map((o) => o.value);
+        expect(optionValues).toEqual(["python", "node", "cpp", "java"]);
+      });
+
+      expect(screen.getByRole("option", { name: /cpp \(C\+\+17 · chỉ nhập tệp\)/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /java \(Java 21 · chỉ nhập tệp\)/i })).toBeInTheDocument();
+    });
+
+    it("shows error banner and disables source submission when getCapabilities fails in runtime", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "getCapabilities").mockRejectedValueOnce(new Error("Network connection failed"));
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-admin", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Network connection failed/i)).toBeInTheDocument();
+      });
+
+      const select = screen.getByLabelText(/Môi trường thực thi:/i) as HTMLSelectElement;
+      expect(select).toBeDisabled();
+      expect(screen.getByRole("option", { name: /Không có môi trường khả dụng/i })).toBeInTheDocument();
+
+      const submitBtn = screen.getByRole("button", { name: /Nộp phiên bản/i });
+      expect(submitBtn).toBeDisabled();
+    });
+
+    it("falls back safely to default profiles when getCapabilities method is absent from legacy mock", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      // Delete getCapabilities to emulate older legacy mock without capabilities API
+      (gateway as any).getCapabilities = undefined;
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-admin", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        const select = screen.getByLabelText(/Môi trường thực thi:/i) as HTMLSelectElement;
+        expect(select).toBeInTheDocument();
+        const optionValues = Array.from(select.options).map((o) => o.value);
+        expect(optionValues).toEqual(["node", "python"]);
+      });
+    });
+
+    it("submits source with actual backend profile ID and resets after submission", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["node", "python"]
+      });
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-admin", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      const uploadSpy = vi.spyOn(gateway, "uploadBotVersion").mockResolvedValueOnce({
+        version: {
+          id: "ver-new",
+          botId: "b-1",
+          versionNo: 1,
+          sourceDigest: "sha:valid",
+          profileId: "node",
+          buildStatus: "pending",
+          createdAt: "2026-10-14T00:00:00Z"
+        }
+      });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: /mã nguồn bot/i })).toBeInTheDocument();
+      });
+
+      const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
+      await user.type(textarea, "console.log('my bot');");
+
+      const submitBtn = screen.getByRole("button", { name: /Nộp phiên bản/i });
+      expect(submitBtn).toBeEnabled();
+      await user.click(submitBtn);
+
+      expect(uploadSpy).toHaveBeenCalledWith(
+        "b-1",
+        {
+          source: "console.log('my bot');",
+          profileId: "node"
+        },
+        expect.anything()
+      );
+    });
+
+    it("enforces nonempty and MAX_SOURCE_BYTES guards on source submission", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["node", "python"]
+      });
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-admin", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+      const uploadSpy = vi.spyOn(gateway, "uploadBotVersion");
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: /mã nguồn bot/i })).toBeInTheDocument();
+      });
+
+      const submitBtn = screen.getByRole("button", { name: /Nộp phiên bản/i });
+      // Initially empty: submit button disabled
+      expect(submitBtn).toBeDisabled();
+
+      const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
+      // Whitespace only: still disabled
+      await user.type(textarea, "   \n  \t  ");
+      expect(submitBtn).toBeDisabled();
+
+      // Clear
+      await user.clear(textarea);
+
+      // Oversized source (exceeding MAX_SOURCE_BYTES = 262144 bytes)
+      const oversized = "a".repeat(262_145);
+      fireEvent.change(textarea, { target: { value: oversized } });
+      expect(submitBtn).toBeDisabled();
+
+      // Valid source within limit
+      await user.clear(textarea);
+      await user.type(textarea, "console.log('valid bot');");
+      expect(submitBtn).toBeEnabled();
+
+      uploadSpy.mockResolvedValueOnce({
+        version: {
+          id: "ver-valid",
+          botId: "b-1",
+          versionNo: 1,
+          sourceDigest: "sha:valid",
+          profileId: "node",
+          buildStatus: "pending",
+          createdAt: "2026-10-14T00:00:00Z"
+        }
+      });
+      await user.click(submitBtn);
+      await waitFor(() => {
+        expect(uploadSpy).toHaveBeenCalledWith(
+          "b-1",
+          {
+            source: "console.log('valid bot');",
+            profileId: "node"
+          },
+          expect.anything()
+        );
+      });
     });
   });
 });
