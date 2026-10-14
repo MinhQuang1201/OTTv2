@@ -262,11 +262,10 @@ export function createCompetitionRepository(db, options = {}) {
 
     let capacity = 16;
     if (input.capacity !== undefined && input.capacity !== null) {
-      const cap = Number(input.capacity);
-      if (!Number.isInteger(cap) || cap < 2 || cap > 128) {
+      if (typeof input.capacity !== "number" || !Number.isInteger(input.capacity) || input.capacity < 2 || input.capacity > 128) {
         throw new CompetitionValidationError("Competition capacity must be an integer between 2 and 128");
       }
-      capacity = cap;
+      capacity = input.capacity;
     }
 
     const ranked = input.ranked === undefined ? true : Boolean(input.ranked);
@@ -625,8 +624,8 @@ export function createCompetitionRepository(db, options = {}) {
     }
 
     const sIndex = Number(scheduleIndex);
-    if (!Number.isInteger(sIndex) || sIndex < 0) {
-      throw new CompetitionValidationError("Invalid scheduleIndex: must be non-negative integer");
+    if (!Number.isInteger(sIndex) || sIndex < 0 || sIndex > 65535) {
+      throw new CompetitionValidationError("Invalid scheduleIndex: must be a non-negative integer within bounds (0..65535)");
     }
 
     const matchRow = stmts.selectTournamentMatchBySchedule.get(comp.tournament_id, sIndex);

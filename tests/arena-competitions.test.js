@@ -882,4 +882,362 @@ describe("Competition Lifecycle Backend — Task 1", () => {
       assert.equal(matchReset.status, "pending");
     });
   });
+
+  describe("6. HTTP API Strict Methods, Fields & Capacity Validation", () => {
+    let env;
+    let server;
+    let adminToken;
+    let authorToken;
+
+    before(async () => {
+      env = setupTestDb("http-strict-fields-suite");
+      seedUser(env.db, "adm-strict", "admstrict", "admin");
+      seedUser(env.db, "aut-strict", "autstrict", "author");
+      adminToken = createSession(env.db, "adm-strict").token;
+      authorToken = createSession(env.db, "aut-strict").token;
+
+      server = createArenaServer({
+        db: env.db,
+        allowedOrigins: ["http://127.0.0.1:3000"],
+        competitionRepo: env.competitionRepo,
+        tournamentRepo: env.tournamentRepo
+      });
+
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    });
+
+    after(async () => {
+      await new Promise((resolve) => server.close(resolve));
+      closeDatabase(env.db);
+    });
+
+    it("enforces exact HTTP methods on mutation endpoints (rejects non-POST with HTTP 405)", async () => {
+      const comp = env.competitionRepo.createCompetition({ name: "Method Test Event" });
+
+      const getReg = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${comp.id}/register`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${authorToken}` }
+      });
+      assert.equal(getReg.statusCode, 405);
+      assert.equal(getReg.headers["allow"], "POST");
+
+      const putAdv = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${comp.id}/advance`,
+        method: "PUT",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(putAdv.statusCode, 405);
+
+      const delRetry = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${comp.id}/matches/0/retry`,
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(delRetry.statusCode, 405);
+    });
+
+    it("rejects unexpected fields in mutation bodies with HTTP 422", async () => {
+      const comp = env.competitionRepo.createCompetition({ name: "Fields Test Event" });
+
+      // createCompetition with extraneous field
+      const createRes = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { name: "Valid Name", rogueField: "not-allowed" }
+      );
+      assert.equal(createRes.statusCode, 422);
+      assert.equal(createRes.json.error.code, "VALIDATION_ERROR");
+
+      // review with extraneous field
+      const reviewRes = await makeRequest(
+        server,
+        {
+          path: `/api/arena/v1/competitions/${comp.id}/entries/aut-strict/review`,
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { accepted: true, hack: 123 }
+      );
+      assert.equal(reviewRes.statusCode, 422);
+
+      // advance with extraneous field
+      const advRes = await makeRequest(
+        server,
+        {
+          path: `/api/arena/v1/competitions/${comp.id}/advance`,
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { expectedPhase: "registration", extra: true }
+      );
+      assert.equal(advRes.statusCode, 422);
+    });
+
+    it("strictly validates capacity as an integer between 2 and 128", async () => {
+      const cases = [
+        { capacity: "16", desc: "string number" },
+        { capacity: 16.5, desc: "float number" },
+        { capacity: 1, desc: "below minimum (1)" },
+        { capacity: 0, desc: "zero" },
+        { capacity: -4, desc: "negative" },
+        { capacity: 129, desc: "above maximum (129)" },
+        { capacity: 1000, desc: "large number" }
+      ];
+
+      for (const c of cases) {
+        const res = await makeRequest(
+          server,
+          {
+            path: "/api/arena/v1/competitions",
+            method: "POST",
+            headers: { Authorization: `Bearer ${adminToken}` }
+          },
+          { name: `Cap Test ${c.desc}`, capacity: c.capacity }
+        );
+        assert.equal(res.statusCode, 422, `Expected 422 for ${c.desc}`);
+      }
+
+      // Exact boundaries: 2 and 128 succeed
+      const minRes = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { name: "Cap 2", capacity: 2 }
+      );
+      assert.equal(minRes.statusCode, 201);
+      assert.equal(minRes.json.competition.capacity, 2);
+
+      const maxRes = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { name: "Cap 128", capacity: 128 }
+      );
+      assert.equal(maxRes.statusCode, 201);
+      assert.equal(maxRes.json.competition.capacity, 128);
+    });
+  });
+
+  describe("7. Match Retry: Wrong-Role, Non-Error, Cross-Event & Identity Preservation", () => {
+    let env;
+    let server;
+    let adminToken;
+    let authorToken;
+    let compA;
+    let compB;
+
+    before(async () => {
+      env = setupTestDb("retry-comprehensive-suite");
+      seedUser(env.db, "adm-retry", "admretry", "admin");
+      seedUser(env.db, "aut-retry", "autretry", "author");
+      adminToken = createSession(env.db, "adm-retry").token;
+      authorToken = createSession(env.db, "aut-retry").token;
+
+      // Event A with 2 bots
+      const bA1 = env.registerReadyBot("bot-ra1", "aut-ra1");
+      const bA2 = env.registerReadyBot("bot-ra2", "aut-ra2");
+      compA = env.competitionRepo.createCompetition({ name: "Event A" });
+      env.competitionRepo.registerEntry(compA.id, "aut-ra1");
+      env.competitionRepo.registerEntry(compA.id, "aut-ra2");
+      env.competitionRepo.reviewEntry(compA.id, "aut-ra1", true);
+      env.competitionRepo.reviewEntry(compA.id, "aut-ra2", true);
+      env.competitionRepo.advancePhase(compA.id, "registration");
+      env.competitionRepo.submitBotVersion(compA.id, "aut-ra1", bA1.botVersionId);
+      env.competitionRepo.submitBotVersion(compA.id, "aut-ra2", bA2.botVersionId);
+      env.competitionRepo.advancePhase(compA.id, "preparation");
+      compA = env.competitionRepo.advancePhase(compA.id, "locked"); // running
+
+      // Event B with 2 bots
+      const bB1 = env.registerReadyBot("bot-rb1", "aut-rb1");
+      const bB2 = env.registerReadyBot("bot-rb2", "aut-rb2");
+      compB = env.competitionRepo.createCompetition({ name: "Event B" });
+      env.competitionRepo.registerEntry(compB.id, "aut-rb1");
+      env.competitionRepo.registerEntry(compB.id, "aut-rb2");
+      env.competitionRepo.reviewEntry(compB.id, "aut-rb1", true);
+      env.competitionRepo.reviewEntry(compB.id, "aut-rb2", true);
+      env.competitionRepo.advancePhase(compB.id, "registration");
+      env.competitionRepo.submitBotVersion(compB.id, "aut-rb1", bB1.botVersionId);
+      env.competitionRepo.submitBotVersion(compB.id, "aut-rb2", bB2.botVersionId);
+      env.competitionRepo.advancePhase(compB.id, "preparation");
+      compB = env.competitionRepo.advancePhase(compB.id, "locked"); // running
+
+      server = createArenaServer({
+        db: env.db,
+        allowedOrigins: ["http://127.0.0.1:3000"],
+        competitionRepo: env.competitionRepo,
+        tournamentRepo: env.tournamentRepo
+      });
+
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    });
+
+    after(async () => {
+      await new Promise((resolve) => server.close(resolve));
+      closeDatabase(env.db);
+    });
+
+    it("rejects non-admin retry with HTTP 403 (wrong-role)", async () => {
+      const res = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compA.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${authorToken}` }
+      });
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, "FORBIDDEN");
+    });
+
+    it("rejects retry when match is not in error status (non-error: pending or completed)", async () => {
+      // CompA match 0 is currently 'pending'
+      const pendingRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compA.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(pendingRes.statusCode, 409);
+      assert.equal(pendingRes.json.error.code, "PHASE_MISMATCH");
+
+      // Mark CompA match 0 as 'completed'
+      env.db.prepare("UPDATE matches SET status = 'completed' WHERE tournament_id = ? AND schedule_index = 0").run(compA.tournamentId);
+
+      const completedRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compA.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(completedRes.statusCode, 409);
+      assert.equal(completedRes.json.error.code, "PHASE_MISMATCH");
+    });
+
+    it("enforces cross-event isolation: cannot retry another event's match", async () => {
+      // In Event B, set match 0 to 'error'
+      env.db.prepare("UPDATE matches SET status = 'error' WHERE tournament_id = ? AND schedule_index = 0").run(compB.tournamentId);
+
+      // Calling retry on Event A for match 0 (which is 'completed' in Event A) fails without touching Event B
+      const retryOnA = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compA.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(retryOnA.statusCode, 409);
+
+      // Event B match 0 remains 'error'
+      const matchB0 = env.db.prepare("SELECT status FROM matches WHERE tournament_id = ? AND schedule_index = 0").get(compB.tournamentId);
+      assert.equal(matchB0.status, "error");
+
+      // Requesting an out-of-range scheduleIndex on Event A returns 404 NOT_FOUND
+      const missingIndexRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compA.id}/matches/99/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(missingIndexRes.statusCode, 404);
+      assert.equal(missingIndexRes.json.error.code, "NOT_FOUND");
+    });
+
+    it("retry preserves match and job identity without duplicating records", async () => {
+      // Query match and job in Event B before retry
+      const matchRowBefore = env.db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND schedule_index = 0").get(compB.tournamentId);
+      const jobRowBefore = env.db.prepare("SELECT * FROM jobs WHERE kind = 'match' AND target_id = ?").get(matchRowBefore.id);
+
+      const totalMatchesBefore = env.db.prepare("SELECT COUNT(*) AS c FROM matches").get().c;
+      const totalJobsBefore = env.db.prepare("SELECT COUNT(*) AS c FROM jobs").get().c;
+
+      // Execute retry on Event B match 0
+      const retryRes = await makeRequest(server, {
+        path: `/api/arena/v1/competitions/${compB.id}/matches/0/retry`,
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      assert.equal(retryRes.statusCode, 200);
+      assert.equal(retryRes.json.ok, true);
+
+      // Query match and job after retry
+      const matchRowAfter = env.db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND schedule_index = 0").get(compB.tournamentId);
+      const jobRowAfter = env.db.prepare("SELECT * FROM jobs WHERE kind = 'match' AND target_id = ?").get(matchRowBefore.id);
+
+      const totalMatchesAfter = env.db.prepare("SELECT COUNT(*) AS c FROM matches").get().c;
+      const totalJobsAfter = env.db.prepare("SELECT COUNT(*) AS c FROM jobs").get().c;
+
+      // Identity preserved: exact same IDs and creation timestamps
+      assert.equal(matchRowAfter.id, matchRowBefore.id);
+      assert.equal(matchRowAfter.created_at, matchRowBefore.created_at);
+      assert.equal(matchRowAfter.status, "pending");
+
+      assert.equal(jobRowAfter.id, jobRowBefore.id);
+      assert.equal(jobRowAfter.status, "queued");
+
+      // No duplicate rows inserted
+      assert.equal(totalMatchesAfter, totalMatchesBefore);
+      assert.equal(totalJobsAfter, totalJobsBefore);
+    });
+  });
+
+  describe("8. Schema Migration Startup: Fresh & Existing Databases", () => {
+    it("starts fresh database with targetVersion='002-competitions' applying 001 and 002 cleanly", () => {
+      const freshDbPath = path.join(TEMP_BASE_DIR, "fresh-startup.db");
+      const { db, version } = openDatabase(freshDbPath, { targetVersion: "002-competitions" });
+      try {
+        assert.equal(version, "002-competitions");
+        const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version ASC").all();
+        assert.deepEqual(migrations.map((m) => m.version), ["001-arena", "002-competitions"]);
+
+        // Verify all 20 tables exist (18 arena + 2 competitions)
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
+        assert.equal(tables.length, 20);
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("upgrades existing 001-arena database to 002-competitions preserving data without corruption", () => {
+      const existingDbPath = path.join(TEMP_BASE_DIR, "existing-upgrade.db");
+
+      // 1. Initialize with default 001-arena
+      const { db: dbOld, version: vOld } = openDatabase(existingDbPath);
+      assert.equal(vOld, "001-arena");
+      seedUser(dbOld, "usr-persist", "persistuser", "author");
+      dbOld.prepare("INSERT INTO bots (id, owner_id, name) VALUES (?, ?, ?)").run("bot-persist", "usr-persist", "PersistBot");
+      closeDatabase(dbOld);
+
+      // 2. Open with targetVersion='002-competitions'
+      const { db: dbMigrated, version: vMigrated } = openDatabase(existingDbPath, { targetVersion: "002-competitions" });
+      try {
+        assert.equal(vMigrated, "002-competitions");
+
+        // Verify existing data untouched
+        const user = dbMigrated.prepare("SELECT * FROM users WHERE id = ?").get("usr-persist");
+        assert.ok(user);
+        assert.equal(user.normalized_username, "persistuser");
+
+        const bot = dbMigrated.prepare("SELECT * FROM bots WHERE id = ?").get("bot-persist");
+        assert.ok(bot);
+        assert.equal(bot.name, "PersistBot");
+
+        // Verify new tables available
+        const compTable = dbMigrated.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'competitions'").get();
+        assert.ok(compTable);
+      } finally {
+        closeDatabase(dbMigrated);
+      }
+
+      // 3. Reopening already migrated database is idempotent
+      const { db: dbReopened, version: vReopened } = openDatabase(existingDbPath);
+      try {
+        assert.equal(vReopened, "002-competitions");
+      } finally {
+        closeDatabase(dbReopened);
+      }
+    });
+  });
 });
