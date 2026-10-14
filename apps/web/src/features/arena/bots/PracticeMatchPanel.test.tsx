@@ -429,4 +429,72 @@ describe("PracticeMatchPanel", () => {
       });
     });
   });
+
+  it("aborts in-flight request on rapid refresh and ignores stale out-of-order sequence", async () => {
+    let callCount = 0;
+    const signals: AbortSignal[] = [];
+
+    (mockGateway.listBots as any).mockImplementation((opts: any) => {
+      callCount++;
+      if (opts.signal) signals.push(opts.signal);
+      if (callCount === 1) {
+        // First call: delayed response with bot-slow
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              bots: [{ id: "bot-slow", name: "SlowBot", ownerId: "user-123", status: "active" }],
+              total: 1,
+              limit: 50,
+              offset: 0,
+            });
+          }, 50);
+        });
+      }
+      // Second call: fast response with bot-fast owned by user-456
+      return Promise.resolve({
+        bots: [{ id: "bot-fast", name: "FastBot", ownerId: "user-456", status: "active" }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    (mockGateway.listReadyBotVersions as any).mockImplementation((botId: string) => {
+      return Promise.resolve({
+        versions: [
+          { id: `ver-${botId}`, botId, versionNo: 1, profileId: "controlled-node", buildStatus: "ready" },
+        ],
+      });
+    });
+
+    const { rerender } = render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-123"
+        userRole="author"
+      />
+    );
+
+    // Rerender with different userId while first request is in-flight
+    rerender(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-456"
+        userRole="author"
+      />
+    );
+
+    // FastBot (from second call) should appear and stay in the document
+    await waitFor(() => {
+      expect(screen.getByText("FastBot (v1 · controlled-node)")).toBeInTheDocument();
+    });
+
+    // The first signal should have been aborted
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Wait for the delayed first call to resolve, ensure SlowBot does NOT overwrite FastBot
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(screen.getByText("FastBot (v1 · controlled-node)")).toBeInTheDocument();
+    expect(screen.queryByText("SlowBot (v1 · controlled-node)")).not.toBeInTheDocument();
+  });
 });
