@@ -22,6 +22,7 @@ import {
   type ArenaUserProfile,
 } from "./ArenaApiGateway";
 import styles from "./arena.module.css";
+import { BotSourceEditor, PracticeMatchPanel } from "./bots";
 
 export type ArenaTab = "leaderboard" | "bots" | "matches" | "tournaments";
 
@@ -761,15 +762,10 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                       </select>
                     </div>
                     <div style={{ marginBottom: "0.5rem" }}>
-                      <label htmlFor="source-textarea" style={{ display: "block", marginBottom: "0.25rem" }}>
-                        Mã nguồn bot (UTF-8):
-                      </label>
-                      <textarea
-                        id="source-textarea"
-                        className={styles.textarea}
+                      <BotSourceEditor
                         value={newSourceCode}
-                        onChange={(e) => setNewSourceCode(e.target.value)}
-                        placeholder="export function getMove(state) { ... }"
+                        onChange={setNewSourceCode}
+                        profileId={newProfileId}
                         disabled={!userProfile?.canSubmitSource}
                       />
                     </div>
@@ -782,6 +778,20 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                     </Button>
                   </form>
                 </div>
+
+                {userProfile && userProfile.user.role !== "spectator" && (
+                  <PracticeMatchPanel
+                    gateway={gateway}
+                    userId={userProfile.user.id}
+                    userRole={userProfile.user.role}
+                    onCreated={() => {
+                      setMatchKindFilter("practice");
+                      setMatchStatusFilter("");
+                      setActiveTab("matches");
+                      setRefreshIndex((previous) => previous + 1);
+                    }}
+                  />
+                )}
 
                 {botVersions.length === 0 ? (
                   <div className={styles.emptyState}>Chưa có phiên bản nào cho bot này.</div>
