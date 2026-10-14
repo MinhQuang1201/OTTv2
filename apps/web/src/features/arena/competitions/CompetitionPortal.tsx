@@ -9,9 +9,12 @@ import type { ArenaApiGateway, ArenaUserProfile, ArenaBot } from "../ArenaApiGat
 import type { ReplayDocument } from "../../../../../../packages/arena/src/contracts/index.d.mts";
 import { CompetitionApiClient } from "./CompetitionApiClient";
 import { CompetitionDetail } from "./CompetitionDetail";
+import { CompetitionConfiguration } from "./CompetitionConfiguration";
 import type {
   Competition,
+  CompetitionCatalogResponse,
   CompetitionDetailResponse,
+  CompetitionMode,
   CompetitionPhase,
   ReadyBotVersionOption,
 } from "./types";
@@ -69,7 +72,32 @@ export function CompetitionPortal({
   const [createCapacity, setCreateCapacity] = useState("");
   const [createRanked, setCreateRanked] = useState(true);
 
+  // Extended catalog & configuration state
+  const [catalog, setCatalog] = useState<CompetitionCatalogResponse | null>(null);
+  const [createFormatId, setCreateFormatId] = useState("double-round-robin");
+  const [createMapId, setCreateMapId] = useState("classic");
+  const [createMode, setCreateMode] = useState<CompetitionMode>("ranked");
+  const [createRoundCount, setCreateRoundCount] = useState<number | "">("");
+
   const createDescId = useId();
+
+  // Load catalog on mount
+  useEffect(() => {
+    let active = true;
+    void clientRef.current.getCatalog().then((cat) => {
+      if (active && cat) {
+        setCatalog(cat);
+        if (cat.defaults) {
+          setCreateFormatId((prev) => (prev === "double-round-robin" && cat.defaults.formatId ? cat.defaults.formatId : prev));
+          setCreateMapId((prev) => (prev === "classic" && cat.defaults.mapId ? cat.defaults.mapId : prev));
+          setCreateMode((prev) => (prev === "ranked" && cat.defaults.mode ? cat.defaults.mode : prev));
+        }
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Async tracking and race-condition prevention
   const isMountedRef = useRef(true);
@@ -293,17 +321,41 @@ export function CompetitionPortal({
         name: createName.trim(),
         description: createDesc.trim() || undefined,
         capacity: capNum,
-        ranked: createRanked,
+        ranked: createRanked && createMode === "ranked",
+        formatId: createFormatId,
+        mapId: createMapId,
+        roundCount: typeof createRoundCount === "number" ? createRoundCount : undefined,
+        mode: createMode,
       });
       setCreateName("");
       setCreateDesc("");
       setCreateCapacity("");
+      setCreateFormatId(catalog?.defaults.formatId || "double-round-robin");
+      setCreateMapId(catalog?.defaults.mapId || "classic");
+      setCreateMode(catalog?.defaults.mode || "ranked");
+      setCreateRoundCount("");
       setShowCreateForm(false);
       setSuccessMsg(`Tạo sự kiện "${created.name}" thành công.`);
       setSelectedId(created.id);
       await loadCompetitions();
     } catch (err: unknown) {
       setError((err as Error)?.message || "Không thể tạo sự kiện.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleNextRound = async (expectedRound: number) => {
+    if (!selectedId) return;
+    setActionLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await clientRef.current.nextRound(selectedId, expectedRound);
+      setSuccessMsg(`Đã khởi chạy thành công Vòng ${expectedRound}.`);
+      await loadDetail(selectedId);
+    } catch (err: unknown) {
+      setError((err as Error)?.message || `Không thể bắt đầu Vòng ${expectedRound}.`);
     } finally {
       setActionLoading(false);
     }
@@ -460,17 +512,25 @@ export function CompetitionPortal({
               disabled={actionLoading}
             />
 
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={createRanked}
-                onChange={(e) => setCreateRanked(e.target.checked)}
-                disabled={actionLoading}
-              />
-              <span>Tính điểm xếp hạng Elo (Ranked)</span>
-            </label>
+            {/* Extended Format, Map, Mode & Preview Configuration */}
+            <CompetitionConfiguration
+              mode="edit"
+              catalog={catalog ?? undefined}
+              formatId={createFormatId}
+              onFormatChange={setCreateFormatId}
+              mapId={createMapId}
+              onMapChange={setCreateMapId}
+              competitionMode={createMode}
+              onModeChange={(m) => {
+                setCreateMode(m);
+                setCreateRanked(m === "ranked");
+              }}
+              roundCount={createRoundCount}
+              onRoundCountChange={setCreateRoundCount}
+              disabled={actionLoading}
+            />
 
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
               <Button type="submit" variant="primary" disabled={actionLoading || !createName.trim()}>
                 {actionLoading ? "Đang tạo..." : "Xác nhận tạo sự kiện"}
               </Button>
@@ -561,8 +621,11 @@ export function CompetitionPortal({
                 onSubmitBot={handleSubmitBot}
                 onReview={handleReview}
                 onAdvance={handleAdvance}
+                onNextRound={handleNextRound}
+                onRefresh={handleRefresh}
                 onNavigateTournament={onNavigateTournament}
                 onStartReplay={onStartReplay}
+                catalog={catalog ?? undefined}
               />
             ) : (
               <div className={styles.emptyState}>Chọn một sự kiện từ danh sách bên trái để xem chi tiết.</div>

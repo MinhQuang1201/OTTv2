@@ -197,12 +197,17 @@ describe("CompetitionPortal", () => {
       const submitBtn = screen.getByRole("button", { name: /Xác nhận tạo sự kiện/i });
       await user.click(submitBtn);
 
-      expect(createSpy).toHaveBeenCalledWith({
-        name: "Winter Cup",
-        description: "Cold battles",
-        capacity: 8,
-        ranked: true,
-      });
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Winter Cup",
+          description: "Cold battles",
+          capacity: 8,
+          ranked: true,
+          formatId: "double-round-robin",
+          mapId: "classic",
+          mode: "ranked",
+        })
+      );
 
       await waitFor(() => {
         expect(screen.getByRole("status")).toHaveTextContent(/Tạo sự kiện "Winter Cup" thành công/i);
@@ -884,6 +889,103 @@ describe("CompetitionPortal", () => {
         expect(screen.getByRole("alert")).toHaveTextContent("Sức chứa giải đấu phải là số nguyên từ 2 đến 128 bot.");
       });
       expect(createSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Extended Rounds, Maps and Modes Integration", () => {
+    it("renders CompetitionRounds and configuration view for extended competition", async () => {
+      const extComp = {
+        id: "c-ext-99",
+        name: "Swiss Extended Championship",
+        phase: "running" as const,
+        tournamentId: "t-ext-1",
+        createdAt: "2026-10-15T00:00:00Z",
+        configuration: {
+          formatId: "swiss",
+          mapId: "flanks",
+          mode: "ranked" as const,
+          roundCount: 4,
+          currentRound: 2,
+        },
+      };
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValue([extComp]);
+      vi.spyOn(client, "getCompetition").mockResolvedValue({
+        competition: extComp,
+        entries: [],
+        configuration: extComp.configuration,
+        rounds: [
+          {
+            roundNumber: 1,
+            tournamentId: "t-round-1",
+            status: "completed",
+            pairings: [{ scheduleIndex: 0, botAId: "bot-1", botBId: "bot-2" }],
+          },
+          {
+            roundNumber: 2,
+            tournamentId: "t-round-2",
+            status: "running",
+            pairings: [{ scheduleIndex: 0, botAId: "bot-1", botBId: "bot-3" }],
+          },
+        ],
+        standings: [
+          { botId: "bot-1", points: 3, matchesPlayed: 1, wins: 1, draws: 0, losses: 0, byes: 0 },
+        ],
+      });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={adminProfile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("competition-configuration-view")).toBeInTheDocument();
+        expect(screen.getByTestId("competition-rounds-panel")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("Hệ Thụy Sĩ (Swiss System)")).toBeInTheDocument();
+      expect(screen.getByText("Hai cánh (Flanks)")).toBeInTheDocument();
+      expect(screen.getByText("Tiến độ vòng đấu: Vòng 2 / 4")).toBeInTheDocument();
+    });
+
+    it("retains legacy Linked Tournament UI when competition has no configuration", async () => {
+      const legacyComp = {
+        id: "c-legacy-1",
+        name: "Legacy Direct Tournament Event",
+        phase: "running" as const,
+        tournamentId: "t-legacy-direct",
+        createdAt: "2026-10-15T00:00:00Z",
+      };
+
+      vi.spyOn(client, "listCompetitions").mockResolvedValue([legacyComp]);
+      vi.spyOn(client, "getCompetition").mockResolvedValue({
+        competition: legacyComp,
+        entries: [],
+      });
+      vi.spyOn(gateway, "getTournament").mockResolvedValue({
+        tournament: { id: "t-legacy-direct", name: "Legacy Tourn", status: "active", createdAt: "2026-10-15" } as any,
+        standings: [],
+        matches: [],
+      });
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={adminProfile}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("linked-tournament-panel")).toBeInTheDocument();
+      });
+
+      // No extended configuration view or rounds panel
+      expect(screen.queryByTestId("competition-configuration-view")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("competition-rounds-panel")).not.toBeInTheDocument();
     });
   });
 });

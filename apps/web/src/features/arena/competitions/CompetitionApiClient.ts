@@ -1,12 +1,15 @@
 import type {
   Competition,
+  CompetitionCatalogResponse,
   CompetitionDetailResponse,
   CompetitionEntry,
   CompetitionListResponse,
   CompetitionPhase,
   CreateCompetitionRequest,
+  NextRoundResponse,
   RetryMatchResponse,
 } from "./types";
+import { createDefaultCatalog } from "./catalogDefaults";
 
 export interface GatewayTokenProvider {
   getBaseUrl(): string;
@@ -139,6 +142,15 @@ export class CompetitionApiClient {
     }
   }
 
+  async getCatalog(options?: RequestOptions): Promise<CompetitionCatalogResponse> {
+    try {
+      return await this.request<CompetitionCatalogResponse>("/competition-catalog", "GET", undefined, options);
+    } catch {
+      // Fallback gracefully to default catalog if endpoint is unavailable
+      return createDefaultCatalog();
+    }
+  }
+
   async listCompetitions(options?: RequestOptions): Promise<readonly Competition[]> {
     const res = await this.request<CompetitionListResponse>("/competitions", "GET", undefined, options);
     return res.competitions || [];
@@ -223,6 +235,19 @@ export class CompetitionApiClient {
       `/competitions/${encodeURIComponent(competitionId)}/matches/${encodeURIComponent(scheduleIndex)}/retry`,
       "POST",
       {},
+      options
+    );
+  }
+
+  async nextRound(
+    competitionId: string,
+    expectedRound: number,
+    options?: RequestOptions
+  ): Promise<NextRoundResponse> {
+    return this.request<NextRoundResponse>(
+      `/competitions/${encodeURIComponent(competitionId)}/next-round`,
+      "POST",
+      { expectedRound },
       options
     );
   }

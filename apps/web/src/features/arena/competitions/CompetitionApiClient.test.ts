@@ -273,6 +273,118 @@ describe("CompetitionApiClient", () => {
     );
   });
 
+  it("gets catalog from remote endpoint successfully", async () => {
+    const fakeCatalog = {
+      maps: [{ id: "classic", revision: 1, name: "Classic", description: "Default map" }],
+      formats: [{ id: "double-round-robin", name: "Double Round-Robin", description: "DRR" }],
+      modes: [{ id: "ranked", name: "Ranked" }],
+      defaults: { mapId: "classic", formatId: "double-round-robin", mode: "ranked" },
+    };
+
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => fakeCatalog,
+    });
+
+    const res = await client.getCatalog();
+    expect(res).toEqual(fakeCatalog);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/arena/v1/competition-catalog",
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  it("falls back to default catalog when remote endpoint is not found or fails", async () => {
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: { code: "not_found", message: "Not found" } }),
+    });
+
+    const res = await client.getCatalog();
+    expect(res.maps).toHaveLength(3);
+    expect(res.formats).toHaveLength(3);
+    expect(res.defaults.mapId).toBe("classic");
+    expect(res.defaults.formatId).toBe("double-round-robin");
+  });
+
+  it("creates extended competition with formatId, mapId, roundCount, and mode", async () => {
+    const createdWithConfig: Competition = {
+      id: "c-ext-1",
+      name: "Swiss Championship",
+      phase: "registration",
+      capacity: 32,
+      ranked: true,
+      createdAt: "2026-10-15T00:00:00Z",
+      configuration: {
+        formatId: "swiss",
+        mapId: "flanks",
+        mapRevision: 1,
+        mode: "ranked",
+        roundCount: 5,
+      },
+    };
+
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ competition: createdWithConfig }),
+    });
+
+    const payload = {
+      name: "Swiss Championship",
+      capacity: 32,
+      ranked: true,
+      formatId: "swiss",
+      mapId: "flanks",
+      roundCount: 5,
+      mode: "ranked" as const,
+    };
+
+    const res = await client.createCompetition(payload);
+    expect(res).toEqual(createdWithConfig);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/arena/v1/competitions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    );
+  });
+
+  it("advances next round passing expectedRound in body", async () => {
+    const updatedComp: Competition = {
+      id: "c-running-1",
+      name: "Ongoing Event",
+      phase: "running",
+      createdAt: "2026-10-15T00:00:00Z",
+      configuration: {
+        formatId: "swiss",
+        mapId: "classic",
+        mode: "ranked",
+        currentRound: 2,
+        roundCount: 5,
+      },
+    };
+
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ competition: updatedComp }),
+    });
+
+    const res = await client.nextRound("c-running-1", 2);
+    expect(res.competition.configuration?.currentRound).toBe(2);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/arena/v1/competitions/c-running-1/next-round",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expectedRound: 2 }),
+      })
+    );
+  });
+
   it("maps abort error correctly", async () => {
     const abortErr = new Error("Abort");
     abortErr.name = "AbortError";

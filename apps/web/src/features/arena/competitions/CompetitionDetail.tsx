@@ -7,7 +7,10 @@ import type { ReplayDocument } from "../../../../../../packages/arena/src/contra
 import type { CompetitionApiClient } from "./CompetitionApiClient";
 import { CompetitionRoster } from "./CompetitionRoster";
 import { CompetitionLinkedTournament } from "./CompetitionLinkedTournament";
+import { CompetitionConfiguration } from "./CompetitionConfiguration";
+import { CompetitionRounds } from "./CompetitionRounds";
 import type {
+  CompetitionCatalogResponse,
   CompetitionDetailResponse,
   CompetitionPhase,
   ReadyBotVersionOption,
@@ -29,8 +32,11 @@ export interface CompetitionDetailProps {
   readonly onSubmitBot: (e: FormEvent) => void;
   readonly onReview: (userId: string, accepted: boolean) => void;
   readonly onAdvance: (expectedPhase: CompetitionPhase) => void;
+  readonly onNextRound?: (expectedRound: number) => Promise<void>;
+  readonly onRefresh?: () => void;
   readonly onNavigateTournament?: (tournamentId: string) => void;
   readonly onStartReplay?: (replayDoc: ReplayDocument) => void;
+  readonly catalog?: CompetitionCatalogResponse;
 }
 
 const NEXT_PHASE_MAP: Partial<Record<CompetitionPhase, CompetitionPhase>> = {
@@ -71,10 +77,14 @@ export function CompetitionDetail({
   onSubmitBot,
   onReview,
   onAdvance,
+  onNextRound,
+  onRefresh,
   onNavigateTournament,
   onStartReplay,
+  catalog,
 }: CompetitionDetailProps) {
   const comp = detail.competition;
+  const compConfig = comp.configuration || detail.configuration;
   const entries = detail.entries;
   const isAdmin = userProfile?.user.role === "admin";
   const isAuthor = userProfile?.user.role === "author";
@@ -120,7 +130,7 @@ export function CompetitionDetail({
           </span>
         </div>
 
-        {comp.tournamentId && (
+        {comp.tournamentId && !compConfig && (
           <div style={{ marginTop: "0.5rem" }}>
             <button
               type="button"
@@ -131,6 +141,17 @@ export function CompetitionDetail({
               <PixelSprite kind="trophy" size={14} decorative />
               <span>Xem giải đấu liên kết: <code>{comp.tournamentId}</code></span>
             </button>
+          </div>
+        )}
+
+        {/* Extended Competition Configuration Card */}
+        {compConfig && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <CompetitionConfiguration
+              mode="view"
+              configuration={compConfig}
+              catalog={catalog}
+            />
           </div>
         )}
       </div>
@@ -185,8 +206,22 @@ export function CompetitionDetail({
         </div>
       )}
 
-      {/* Linked Tournament Section (if tournament exists) */}
-      {comp.tournamentId && (
+      {/* Extended Rounds Progression (if configuration exists) OR Legacy Linked Tournament */}
+      {compConfig ? (
+        <CompetitionRounds
+          competitionId={comp.id}
+          phase={comp.phase}
+          configuration={compConfig}
+          rounds={detail.rounds}
+          standings={detail.standings}
+          isAdmin={isAdmin}
+          actionLoading={actionLoading}
+          onNextRound={onNextRound ?? (async () => {})}
+          onRefresh={onRefresh ?? (() => {})}
+          onNavigateTournament={onNavigateTournament}
+          onStartReplay={onStartReplay}
+        />
+      ) : comp.tournamentId ? (
         <CompetitionLinkedTournament
           competitionId={comp.id}
           competitionPhase={comp.phase}
@@ -197,7 +232,7 @@ export function CompetitionDetail({
           onNavigateTournament={onNavigateTournament}
           onStartReplay={onStartReplay}
         />
-      )}
+      ) : null}
 
       {/* Participants Roster & Author Actions */}
       <CompetitionRoster
