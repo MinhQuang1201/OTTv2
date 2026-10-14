@@ -1,0 +1,395 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  flex-wrap: wrap;
+  padding: var(--ui-space-3);
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-0);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  box-sizing: border-box;
+}
+
+.headerTitle {
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-base);
+  font-weight: 700;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--ui-text);
+  letter-spacing: 0.05em;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+}
+
+.gridTwoCols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: var(--ui-space-5);
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.listWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  width: 100%;
+}
+
+.competitionCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-3);
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  cursor: pointer;
+  text-align: left;
+  transition: transform var(--ui-motion-fast) var(--ui-ease-standard);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.competitionCard:hover {
+  background: var(--ui-surface-1);
+  transform: translateY(-1px);
+}
+
+.competitionCard:focus-visible {
+  outline: 3px solid var(--ui-focus);
+  outline-offset: 1px;
+}
+
+.competitionCardSelected {
+  border-color: var(--ui-seat-b) !important;
+  box-shadow: 3px 3px 0 var(--ui-seat-b) !important;
+  background: var(--ui-surface-1) !important;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-sm);
+  font-weight: 700;
+  color: var(--ui-text);
+  margin: 0;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-muted);
+  flex-wrap: wrap;
+}
+
+.cardDescription {
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-subtle);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.detailHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding-bottom: var(--ui-space-3);
+  border-bottom: 2px solid var(--ui-glass-border-strong);
+}
+
+.detailTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+}
+
+.detailTitle {
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-lg);
+  font-weight: 800;
+  color: var(--ui-text);
+  margin: 0;
+}
+
+.detailDescription {
+  font-size: var(--ui-text-sm);
+  color: var(--ui-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.detailBadges {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+}
+
+.tournamentLinkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--ui-surface-1);
+  color: var(--ui-seat-b);
+  border: 2px solid var(--ui-seat-b);
+  box-shadow: 2px 2px 0 var(--ui-seat-b);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.tournamentLinkBtn:hover {
+  background: var(--ui-surface-0);
+  transform: translateY(-1px);
+}
+
+.tournamentLinkBtn:focus-visible {
+  outline: 2px solid var(--ui-focus);
+}
+
+.actionBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-4);
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  box-sizing: border-box;
+}
+
+.actionBox h3 {
+  margin: 0;
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ui-text);
+}
+
+.advanceControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-3);
+  background: var(--ui-surface-1);
+  border: 2px solid var(--ui-glass-border-strong);
+}
+
+.advanceHint {
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-muted);
+  font-family: var(--ui-font-mono);
+}
+
+.formBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-4);
+  background: var(--ui-surface-0);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  margin-bottom: var(--ui-space-3);
+  box-sizing: border-box;
+}
+
+.formBox h3 {
+  margin: 0;
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ui-text);
+}
+
+.tableWrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-0);
+  box-shadow: 2px 2px 0 var(--ui-glass-border-strong);
+  box-sizing: border-box;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ui-text-sm);
+  text-align: left;
+  font-family: var(--ui-font-body);
+}
+
+.dataTable th {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  background: var(--ui-surface-1);
+  color: var(--ui-text-muted);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--ui-glass-border-strong);
+}
+
+.dataTable td {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-glass-border);
+  color: var(--ui-text);
+  vertical-align: middle;
+}
+
+.dataTable tr:hover td {
+  background: var(--ui-surface-1);
+}
+
+.selectInput {
+  padding: 6px 10px;
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  border: 2px solid var(--ui-glass-border-strong);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  font-weight: 600;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.selectInput:focus-visible {
+  outline: 2px solid var(--ui-focus);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: var(--ui-space-2);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-xs);
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.textarea:focus-visible {
+  outline: 2px solid var(--ui-focus);
+}
+
+.errorBanner {
+  padding: var(--ui-space-3);
+  background: rgba(200, 50, 50, 0.12);
+  color: var(--ui-danger);
+  border: 2px solid var(--ui-danger);
+  box-shadow: 2px 2px 0 var(--ui-danger);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  font-family: var(--ui-font-body);
+  font-weight: 600;
+  font-size: var(--ui-text-sm);
+}
+
+.infoBanner {
+  padding: var(--ui-space-3);
+  background: rgba(35, 100, 170, 0.12);
+  color: var(--ui-seat-b);
+  border: 2px solid var(--ui-seat-b);
+  box-shadow: 2px 2px 0 var(--ui-seat-b);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-sm);
+}
+
+.successBanner {
+  padding: var(--ui-space-3);
+  background: rgba(40, 167, 69, 0.12);
+  color: var(--ui-success);
+  border: 2px solid var(--ui-success);
+  box-shadow: 2px 2px 0 var(--ui-success);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-sm);
+}
+
+.emptyState {
+  padding: var(--ui-space-6);
+  text-align: center;
+  color: var(--ui-text-muted);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-sm);
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-text-sm);
+  font-family: var(--ui-font-body);
+  cursor: pointer;
+}
+
+.entryReviewActions {
+  display: flex;
+  gap: var(--ui-space-1);
+}
+
+@media (max-width: 900px) {
+  .gridTwoCols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .competitionCard,
+  .tournamentLinkBtn {
+    transition: none;
+    transform: none;
+  }
+}

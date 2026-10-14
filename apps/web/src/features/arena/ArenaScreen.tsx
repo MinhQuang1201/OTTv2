@@ -21,10 +21,11 @@ import {
   type ArenaTournamentDetailsResponse,
   type ArenaUserProfile,
 } from "./ArenaApiGateway";
+import { CompetitionPortal } from "./competitions/CompetitionPortal";
 import styles from "./arena.module.css";
 import { BotSourceEditor, PracticeMatchPanel } from "./bots";
 
-export type ArenaTab = "leaderboard" | "bots" | "matches" | "tournaments";
+export type ArenaTab = "leaderboard" | "bots" | "matches" | "tournaments" | "competitions";
 
 export interface ArenaScreenProps {
   readonly gateway: ArenaApiGateway;
@@ -624,6 +625,15 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           <PixelSprite kind="dam" size={14} decorative />
           <span>Giải đấu</span>
         </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "competitions"}
+          className={[styles.tabBtn, activeTab === "competitions" ? styles.tabBtnActive : ""].join(" ")}
+          onClick={() => setActiveTab("competitions")}
+        >
+          <PixelSprite kind="trophy" size={14} decorative />
+          <span>Sự kiện thi đấu</span>
+        </button>
       </nav>
 
       {error && (
@@ -1032,6 +1042,17 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                 </Panel>
               )}
             </div>
+          )}
+
+          {activeTab === "competitions" && (
+            <CompetitionPortal
+              gateway={gateway}
+              userProfile={userProfile}
+              onNavigateTournament={(tournId) => {
+                setTournamentId(tournId);
+                setActiveTab("tournaments");
+              }}
+            />
           )}
         </main>
       )}
