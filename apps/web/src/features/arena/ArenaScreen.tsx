@@ -719,9 +719,18 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         </button>
       </nav>
 
-      {(error || capabilitiesError) && (
+      {capabilitiesError && (
         <div className={styles.errorBanner} role="alert">
-          <span>{capabilitiesError || error}</span>
+          <span>{capabilitiesError}</span>
+          <Button variant="secondary" onClick={handleRefresh}>
+            Thử lại
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <div className={styles.errorBanner} role="alert">
+          <span>{error}</span>
           <Button variant="secondary" onClick={handleRefresh}>
             Thử lại
           </Button>

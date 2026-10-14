@@ -530,8 +530,8 @@ describe("ArenaScreen", () => {
         expect(optionValues).toEqual(["python", "node", "cpp", "java"]);
       });
 
-      expect(screen.getByRole("option", { name: /cpp \(C\+\+17 · chỉ nhập tệp\)/i })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: /java \(Java 21 · chỉ nhập tệp\)/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /cpp \(C\+\+17 \(chỉ nhập tệp\)\)/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /java \(Java 21 \(chỉ nhập tệp\)\)/i })).toBeInTheDocument();
     });
 
     it("shows error banner and disables source submission when getCapabilities fails in runtime", async () => {
@@ -687,16 +687,17 @@ describe("ArenaScreen", () => {
 
       await waitFor(() => {
         expect(screen.getByRole("textbox", { name: /mã nguồn bot/i })).toBeInTheDocument();
+        const profileSelect = screen.getByLabelText(/Môi trường thực thi:/i) as HTMLSelectElement;
+        expect(profileSelect.value).toBe("node");
       });
 
-      const submitBtn = screen.getByRole("button", { name: /Nộp phiên bản/i });
       // Initially empty: submit button disabled
-      expect(submitBtn).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Nộp phiên bản/i })).toBeDisabled();
 
       const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
       // Whitespace only: still disabled
       await user.type(textarea, "   \n  \t  ");
-      expect(submitBtn).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Nộp phiên bản/i })).toBeDisabled();
 
       // Clear
       await user.clear(textarea);
@@ -704,12 +705,12 @@ describe("ArenaScreen", () => {
       // Oversized source (exceeding MAX_SOURCE_BYTES = 262144 bytes)
       const oversized = "a".repeat(262_145);
       fireEvent.change(textarea, { target: { value: oversized } });
-      expect(submitBtn).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Nộp phiên bản/i })).toBeDisabled();
 
       // Valid source within limit
       await user.clear(textarea);
       await user.type(textarea, "console.log('valid bot');");
-      expect(submitBtn).toBeEnabled();
+      expect(screen.getByRole("button", { name: /Nộp phiên bản/i })).toBeEnabled();
 
       uploadSpy.mockResolvedValueOnce({
         version: {
@@ -722,7 +723,8 @@ describe("ArenaScreen", () => {
           createdAt: "2026-10-14T00:00:00Z"
         }
       });
-      await user.click(submitBtn);
+      const liveSubmitBtn = screen.getByRole("button", { name: /Nộp phiên bản/i });
+      await user.click(liveSubmitBtn);
       await waitFor(() => {
         expect(uploadSpy).toHaveBeenCalledWith(
           "b-1",

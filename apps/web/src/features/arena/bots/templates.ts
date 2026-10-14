@@ -200,7 +200,7 @@ export const PROFILE_DEFINITIONS: Record<string, ProfileInfo> = {
   },
   cpp: {
     id: "cpp",
-    displayName: "C++17 · chỉ nhập tệp",
+    displayName: "C++17 (chỉ nhập tệp)",
     language: "cpp",
     fileExtensions: [".cpp", ".cc", ".cxx", ".txt"],
     description: "Biên dịch và thực thi C++ tiêu chuẩn C++17 (nhập từ tệp, không kèm mã mẫu).",
@@ -209,7 +209,7 @@ export const PROFILE_DEFINITIONS: Record<string, ProfileInfo> = {
   },
   java: {
     id: "java",
-    displayName: "Java 21 · chỉ nhập tệp",
+    displayName: "Java 21 (chỉ nhập tệp)",
     language: "java",
     fileExtensions: [".java", ".txt"],
     description: "Biên dịch và thực thi Java 21 (lớp chính FirstLegal, nhập từ tệp, không kèm mã mẫu).",
