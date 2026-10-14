@@ -109,6 +109,19 @@ export interface ArenaMatchDetails extends ArenaMatchSummary {
   readonly result?: ArenaMatchResult | null;
 }
 
+export interface ArenaCreatePracticeMatchResponse {
+  readonly match: {
+    readonly id: string;
+    readonly kind: "practice" | "ranked";
+    readonly ladderId: string;
+    readonly status: ArenaMatchStatus;
+    readonly participants: {
+      readonly A: ArenaMatchParticipant;
+      readonly B: ArenaMatchParticipant;
+    } | readonly ArenaMatchParticipant[];
+  };
+}
+
 export interface ArenaMatchListResponse {
   readonly matches: readonly ArenaMatchSummary[];
   readonly total: number;
@@ -417,6 +430,28 @@ export class ArenaApiGateway {
       options
     );
     return res.match;
+  }
+
+  async createPracticeMatch(
+    data: {
+      participants: {
+        A: { botVersionId: string };
+        B: { botVersionId: string };
+      };
+      ladderId?: string;
+    },
+    options: RequestOptions = {}
+  ): Promise<ArenaCreatePracticeMatchResponse> {
+    const idempotencyKey = options.idempotencyKey || generateIdempotencyKey();
+    const payload = {
+      kind: "practice",
+      ladderId: data.ladderId || "ladder-main",
+      participants: data.participants,
+    };
+    return this.request<ArenaCreatePracticeMatchResponse>("/matches", "POST", payload, {
+      ...options,
+      idempotencyKey,
+    });
   }
 
   async getMatchReplay(matchId: string, options?: RequestOptions): Promise<ArenaMatchReplayResponse> {

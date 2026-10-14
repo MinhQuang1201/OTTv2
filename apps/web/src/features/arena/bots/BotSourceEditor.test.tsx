@@ -1,0 +1,314 @@
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BotSourceEditor, MAX_SOURCE_BYTES } from "./BotSourceEditor";
+import { getProfileInfo, getTemplateForProfile, normalizeProfileId } from "./templates";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("templates and profile normalization", () => {
+  it("normalizes alias profile IDs correctly", () => {
+    expect(normalizeProfileId("controlled-node")).toBe("node");
+    expect(normalizeProfileId("NODE")).toBe("node");
+    expect(normalizeProfileId("javascript")).toBe("node");
+    expect(normalizeProfileId("js")).toBe("node");
+    expect(normalizeProfileId("python-v1")).toBe("python");
+    expect(normalizeProfileId("PYTHON")).toBe("python");
+    expect(normalizeProfileId("cpp")).toBe("cpp");
+    expect(normalizeProfileId("C++")).toBe("cpp");
+    expect(normalizeProfileId("java")).toBe("java");
+  });
+
+  it("provides valid Arena Protocol v1 templates without fictitious getMove API", () => {
+    const nodeTmpl = getTemplateForProfile("controlled-node");
+    expect(nodeTmpl).toContain("PROTOCOL_VERSION = 1");
+    expect(nodeTmpl).toContain("legalMoves[0]");
+    expect(nodeTmpl).not.toContain("export function getMove(");
+
+    const pyTmpl = getTemplateForProfile("python-v1");
+    expect(pyTmpl).toContain("PROTOCOL_VERSION = 1");
+    expect(pyTmpl).toContain("legal_moves[0]");
+    expect(pyTmpl).not.toContain("def getMove(");
+
+    const cppTmpl = getTemplateForProfile("cpp");
+    expect(cppTmpl).toContain("PROTOCOL_VERSION = 1");
+    expect(cppTmpl).toContain("legalMoves");
+
+    const javaTmpl = getTemplateForProfile("java");
+    expect(javaTmpl).toContain("PROTOCOL_VERSION = 1");
+    expect(javaTmpl).toContain("FirstLegal");
+  });
+
+  it("returns fallback profile info for unknown profile IDs", () => {
+    const info = getProfileInfo("custom-env-99");
+    expect(info.id).toBe("custom-env-99");
+    expect(info.template).toBeTruthy();
+  });
+});
+
+describe("BotSourceEditor component", () => {
+  it("renders textarea with initial value and profile badge", () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value="const myBot = 1;"
+        onChange={onChange}
+        profileId="controlled-node"
+      />
+    );
+
+    expect(screen.getByRole("textbox", { name: /mã nguồn bot/i })).toHaveValue("const myBot = 1;");
+    expect(screen.getByTitle("Môi trường: Node.js (ESM)")).toBeInTheDocument();
+    expect(screen.getByText(/Giao thức Arena Protocol v1/i)).toBeInTheDocument();
+  });
+
+  it("calls onChange when typing in textarea", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="controlled-node"
+      />
+    );
+
+    const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
+    fireEvent.change(textarea, { target: { value: "console.log('hi');" } });
+
+    expect(onChange).toHaveBeenCalledWith("console.log('hi');");
+  });
+
+  it("loads starter template directly when draft is empty", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="python-v1"
+      />
+    );
+
+    const templateBtn = screen.getByRole("button", { name: /Tải mã mẫu starter/i });
+    fireEvent.click(templateBtn);
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalled();
+    const loadedCode = onChange.mock.calls[0][0];
+    expect(loadedCode).toContain("Arena AI Protocol v1 - Python Starter Bot");
+  });
+
+  it("asks confirmation before overwriting nonempty draft with template", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const onChange = vi.fn();
+
+    // 1. User cancels confirmation
+    confirmSpy.mockReturnValueOnce(false);
+    const { rerender } = render(
+      <BotSourceEditor
+        value="existing important bot code"
+        onChange={onChange}
+        profileId="controlled-node"
+      />
+    );
+
+    const templateBtn = screen.getByRole("button", { name: /Tải mã mẫu starter/i });
+    fireEvent.click(templateBtn);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+
+    // 2. User accepts confirmation
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(templateBtn);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0]).toContain("Arena AI Protocol v1 - Node.js Starter Bot");
+  });
+
+  it("handles keyboard tab key by inserting 2 spaces", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value="const x = 1;"
+        onChange={onChange}
+        profileId="controlled-node"
+      />
+    );
+
+    const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i }) as HTMLTextAreaElement;
+    textarea.selectionStart = 0;
+    textarea.selectionEnd = 0;
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+
+    expect(onChange).toHaveBeenCalledWith("  const x = 1;");
+  });
+
+  it("toggles hint box visibility", () => {
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={vi.fn()}
+        profileId="cpp"
+      />
+    );
+
+    expect(screen.getByText(/Giao thức Arena Protocol v1/i)).toBeInTheDocument();
+    const toggleBtn = screen.getByRole("button", { name: /Ẩn hướng dẫn/i });
+    fireEvent.click(toggleBtn);
+
+    expect(screen.queryByText(/Giao thức Arena Protocol v1/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Hiện hướng dẫn/i })).toBeInTheDocument();
+  });
+
+  it("accurately computes live UTF-8 byte length for multi-byte unicode strings", () => {
+    // "Đấu trường" has multi-byte UTF-8 characters:
+    // 'Đ' = 2 bytes, 'ấ' = 3 bytes, 'ư' = 2 bytes, 'ờ' = 3 bytes, etc.
+    const unicodeText = "Đấu trường AI";
+    const expectedBytes = new TextEncoder().encode(unicodeText).length;
+
+    render(
+      <BotSourceEditor
+        value={unicodeText}
+        onChange={vi.fn()}
+        profileId="node"
+      />
+    );
+
+    // Verify byte count displays accurately
+    expect(screen.getByText(`${expectedBytes} B`)).toBeInTheDocument();
+    expect(screen.getByText("Dòng: 1")).toBeInTheDocument();
+    expect(screen.getByText(`Ký tự: ${unicodeText.length}`)).toBeInTheDocument();
+  });
+
+  it("warns when source code exceeds maxBytes", () => {
+    const tinyLimit = 10;
+    const largeCode = "this string is definitely more than 10 bytes";
+
+    render(
+      <BotSourceEditor
+        value={largeCode}
+        onChange={vi.fn()}
+        profileId="node"
+        maxBytes={tinyLimit}
+      />
+    );
+
+    expect(screen.getByText(/Vượt giới hạn!/i)).toBeInTheDocument();
+    expect(screen.getByText(/vượt quá giới hạn tối đa cho phép/i)).toBeInTheDocument();
+  });
+
+  it("rejects file import when file size exceeds maxBytes", async () => {
+    const onChange = vi.fn();
+    const tinyLimit = 100;
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="node"
+        maxBytes={tinyLimit}
+      />
+    );
+
+    // Create oversized file
+    const oversizedContent = "A".repeat(200);
+    const file = new File([oversizedContent], "giant_bot.js", { type: "text/javascript" });
+
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    expect(hiddenInput).toBeInTheDocument();
+
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(/vượt quá kích thước tối đa cho phép/i)).toBeInTheDocument();
+
+    // Dismiss alert
+    const dismissBtn = screen.getByRole("button", { name: /Đóng thông báo lỗi/i });
+    fireEvent.click(dismissBtn);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("imports valid file content and updates value", async () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value=""
+        onChange={onChange}
+        profileId="python-v1"
+      />
+    );
+
+    const validContent = "import sys\nprint('hello bot')\n";
+    const file = new File([validContent], "bot.py", { type: "text/x-python" });
+
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(validContent);
+    });
+  });
+
+  it("confirms before overwriting nonempty draft on file import", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const onChange = vi.fn();
+
+    // User cancels
+    confirmSpy.mockReturnValueOnce(false);
+    render(
+      <BotSourceEditor
+        value="my current draft code"
+        onChange={onChange}
+        profileId="python-v1"
+      />
+    );
+
+    const file = new File(["new code"], "bot.py", { type: "text/x-python" });
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+
+    // User confirms
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("new code");
+    });
+  });
+
+  it("disables all controls when disabled prop is true", () => {
+    const onChange = vi.fn();
+    render(
+      <BotSourceEditor
+        value="code"
+        onChange={onChange}
+        profileId="controlled-node"
+        disabled={true}
+      />
+    );
+
+    const textarea = screen.getByRole("textbox", { name: /mã nguồn bot/i });
+    expect(textarea).toBeDisabled();
+
+    const templateBtn = screen.getByRole("button", { name: /Tải mã mẫu starter/i });
+    expect(templateBtn).toBeDisabled();
+
+    const fileBtn = screen.getByRole("button", { name: /Nhập mã nguồn từ tệp/i });
+    expect(fileBtn).toBeDisabled();
+
+    const hiddenInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    expect(hiddenInput).toBeDisabled();
+
+    fireEvent.click(templateBtn);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

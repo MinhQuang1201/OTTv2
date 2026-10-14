@@ -239,6 +239,58 @@ describe("ArenaApiGateway", () => {
       expect(res.job?.id).toBe("job-1");
     });
 
+    it("creates practice match with kind practice and idempotency key", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          match: {
+            id: "match-prac-1",
+            kind: "practice",
+            ladderId: "ladder-main",
+            status: "pending",
+            participants: {
+              A: { seat: "A", botVersionId: "v-1" },
+              B: { seat: "B", botVersionId: "v-2" }
+            }
+          }
+        })
+      });
+
+      const res = await gateway.createPracticeMatch(
+        {
+          participants: {
+            A: { botVersionId: "v-1" },
+            B: { botVersionId: "v-2" }
+          }
+        },
+        { idempotencyKey: "idem-prac-1" }
+      );
+
+      expect(res.match.id).toBe("match-prac-1");
+      expect(res.match.kind).toBe("practice");
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/matches"),
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Idempotency-Key": "idem-prac-1",
+            "Content-Type": "application/json"
+          }),
+          body: JSON.stringify({
+            kind: "practice",
+            ladderId: "ladder-main",
+            participants: {
+              A: { botVersionId: "v-1" },
+              B: { botVersionId: "v-2" }
+            }
+          })
+        })
+      );
+    });
+
     it("retrieves leaderboard with ladderId parameter", async () => {
       gateway.setToken("token-xyz");
       fetchMock.mockResolvedValueOnce({
