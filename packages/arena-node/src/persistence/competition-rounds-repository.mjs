@@ -42,27 +42,16 @@ import {
   getCompetitionRoundHistory
 } from "./competition-standings-calculator.mjs";
 
-// Exact plan imports from domain packages (resolved dynamically to handle initial absence before supervisor supplies commits)
-let listMaps, getMap, createMapState;
-let listFormats, getRoundCount, pairRound;
-
-try {
-  const mapsMod = await import("../../../arena/src/domain/maps/index.mjs");
-  listMaps = mapsMod.listMaps;
-  getMap = mapsMod.getMap;
-  createMapState = mapsMod.createMapState;
-} catch (err) {
-  if (err?.code !== "ERR_MODULE_NOT_FOUND") throw err;
-}
-
-try {
-  const formatsMod = await import("../../../arena/src/domain/formats/index.mjs");
-  listFormats = formatsMod.listFormats;
-  getRoundCount = formatsMod.getRoundCount;
-  pairRound = formatsMod.pairRound;
-} catch (err) {
-  if (err?.code !== "ERR_MODULE_NOT_FOUND") throw err;
-}
+import {
+  listMaps,
+  getMap,
+  createMapState
+} from "../../../arena/src/domain/maps/index.mjs";
+import {
+  listFormats,
+  getRoundCount,
+  pairRound
+} from "../../../arena/src/domain/formats/index.mjs";
 
 export {
   IdempotencyConflictError,
@@ -324,6 +313,23 @@ export function createCompetitionRoundsRepository(db, options = {}) {
   function createExtendedCompetition(input = {}, opts = {}) {
     const { actorId, idempotencyKey } = opts;
 
+    const allowedKeys = new Set([
+      "id",
+      "name",
+      "description",
+      "capacity",
+      "ranked",
+      "formatId",
+      "mapId",
+      "roundCount",
+      "mode"
+    ]);
+    for (const key of Object.keys(input)) {
+      if (!allowedKeys.has(key)) {
+        throw new CompetitionValidationError(`Unexpected field '${key}' in create competition input`);
+      }
+    }
+
     const rawName = input.name;
     if (typeof rawName !== "string" || rawName.trim().length === 0) {
       throw new CompetitionValidationError("Competition name is required and cannot be empty");
@@ -398,7 +404,7 @@ export function createCompetitionRoundsRepository(db, options = {}) {
       throw new CompetitionValidationError(`Unknown map: '${mapId}'`);
     }
 
-    const mapRevision = mapDescriptor.revision || 1;
+    const mapRevision = Number(mapDescriptor.revision) || 1;
     let initialCoreState = null;
     if (typeof maps.createMapState === "function") {
       initialCoreState = maps.createMapState(mapId, mapRevision);
@@ -416,8 +422,11 @@ export function createCompetitionRoundsRepository(db, options = {}) {
     // ── Round Count Validation ──────────────────────────────────────────────
     let roundCount = 1;
     if (input.roundCount !== undefined && input.roundCount !== null) {
-      if (typeof input.roundCount !== "number" || !Number.isInteger(input.roundCount) || input.roundCount < 1 || input.roundCount > 32) {
-        throw new CompetitionValidationError("Field 'roundCount' must be an integer between 1 and 32");
+      if (typeof input.roundCount !== "number" || !Number.isInteger(input.roundCount) || input.roundCount < 1 || input.roundCount > 254) {
+        throw new CompetitionValidationError("Field 'roundCount' must be an integer between 1 and 254");
+      }
+      if (formatId === "swiss" && input.roundCount > 32) {
+        throw new CompetitionValidationError("Swiss format roundCount cannot exceed 32");
       }
       roundCount = input.roundCount;
     }
@@ -621,7 +630,7 @@ export function createCompetitionRoundsRepository(db, options = {}) {
             }
           }
 
-          if (!derivedRounds || derivedRounds < 1 || derivedRounds > 32) {
+          if (!derivedRounds || derivedRounds < 1 || derivedRounds > 254) {
             throw new CompetitionValidationError(`Invalid derived roundCount: ${derivedRounds}`);
           }
 
@@ -786,10 +795,15 @@ export function createCompetitionRoundsRepository(db, options = {}) {
    * - Previous round tournament matches are 100% complete with 0 errored.
    */
   function nextRound(competitionId, expectedRound, opts = {}) {
-    const expRound = Number(expectedRound);
-    if (!Number.isInteger(expRound) || expRound < 1 || expRound > 32) {
-      throw new CompetitionValidationError("Field 'expectedRound' must be an integer between 1 and 32");
+    if (
+      typeof expectedRound !== "number" ||
+      !Number.isInteger(expectedRound) ||
+      expectedRound < 1 ||
+      expectedRound > 254
+    ) {
+      throw new CompetitionValidationError("Field 'expectedRound' must be an integer between 1 and 254");
     }
+    const expRound = expectedRound;
 
     return withTransaction(db, () => {
       const comp = stmts.selectCompetition.get(competitionId);

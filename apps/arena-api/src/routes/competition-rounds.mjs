@@ -121,10 +121,16 @@ export async function handleNextRoundRoute(req, res, ctx, competitionId) {
       return sendError(res, 422, "VALIDATION_ERROR", "Field 'expectedRound' is required", {}, req);
     }
 
-    const expRound = Number(body.expectedRound);
-    if (!Number.isInteger(expRound) || expRound < 1 || expRound > 32) {
-      return sendError(res, 422, "VALIDATION_ERROR", "Field 'expectedRound' must be an integer between 1 and 32", {}, req);
+    if (
+      typeof body.expectedRound !== "number" ||
+      !Number.isInteger(body.expectedRound) ||
+      body.expectedRound < 1 ||
+      body.expectedRound > 254
+    ) {
+      return sendError(res, 422, "VALIDATION_ERROR", "Field 'expectedRound' must be an integer between 1 and 254", {}, req);
     }
+
+    const expRound = body.expectedRound;
 
     if (!competitionRoundsRepo) {
       return sendError(res, 500, "INTERNAL_ERROR", "Competition rounds repository not available", {}, req);

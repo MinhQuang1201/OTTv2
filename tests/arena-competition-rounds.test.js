@@ -539,6 +539,48 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
         const snapshot = JSON.parse(row.map_snapshot_json);
         assert.equal(snapshot.descriptor.id, "flanks");
         assert.equal(snapshot.initialState.mapId, "flanks");
+
+        // 3. Rejects unexpected fields in createExtendedCompetition
+        assert.throws(
+          () => {
+            roundsRepo.createExtendedCompetition({
+              name: "Unexpected Field Event",
+              invalidKey: 123
+            });
+          },
+          (err) => err instanceof CompetitionValidationError && err.message.includes("Unexpected field 'invalidKey'")
+        );
+
+        // 4. Rejects roundCount > 254
+        assert.throws(
+          () => {
+            roundsRepo.createExtendedCompetition({
+              name: "Out of Bounds Rounds",
+              roundCount: 255
+            });
+          },
+          (err) => err instanceof CompetitionValidationError && err.message.includes("between 1 and 254")
+        );
+
+        // 5. Rejects Swiss roundCount > 32
+        assert.throws(
+          () => {
+            roundsRepo.createExtendedCompetition({
+              name: "Swiss Exceeds 32",
+              formatId: "swiss",
+              roundCount: 33
+            });
+          },
+          (err) => err instanceof CompetitionValidationError && err.message.includes("Swiss format roundCount cannot exceed 32")
+        );
+
+        // 6. Accepts roundCount up to 254 for double round-robin
+        const compMax = roundsRepo.createExtendedCompetition({
+          name: "Max RR Event",
+          formatId: "double-round-robin",
+          roundCount: 254
+        });
+        assert.equal(compMax.roundCount, 254);
       } finally {
         closeDatabase(db);
       }
@@ -612,6 +654,87 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
         closeDatabase(db);
       }
     });
+
+    it("validates chosen rounds for Swiss format at lock and rejects invalid round counts", () => {
+      const { db } = createTestDb();
+      try {
+        const baseCompRepo = createCompetitionRepository(db);
+        // Use real formats domain
+        const roundsRepo = createCompetitionRoundsRepository(db);
+
+        seedUser(db, { id: "u-1", username: "u1" });
+        seedUser(db, { id: "u-2", username: "u2" });
+        seedUser(db, { id: "u-3", username: "u3" });
+
+        seedBot(db, { id: "b-1", ownerId: "u-1", name: "B1" });
+        seedBot(db, { id: "b-2", ownerId: "u-2", name: "B2" });
+        seedBot(db, { id: "b-3", ownerId: "u-3", name: "B3" });
+
+        seedReadyVersion(db, { id: "bv-1", botId: "b-1" });
+        seedReadyVersion(db, { id: "bv-2", botId: "b-2" });
+        seedReadyVersion(db, { id: "bv-3", botId: "b-3" });
+
+        // Create Swiss competition with requested roundCount = 10
+        // For 3 participants, max allowed Swiss rounds is min(32, 3-1) = 2 rounds!
+        const comp = roundsRepo.createExtendedCompetition({
+          name: "Invalid Swiss Round Count Event",
+          formatId: "swiss",
+          roundCount: 10
+        });
+
+        baseCompRepo.registerEntry(comp.id, "u-1");
+        baseCompRepo.registerEntry(comp.id, "u-2");
+        baseCompRepo.registerEntry(comp.id, "u-3");
+        baseCompRepo.reviewEntry(comp.id, "u-1", true);
+        baseCompRepo.reviewEntry(comp.id, "u-2", true);
+        baseCompRepo.reviewEntry(comp.id, "u-3", true);
+
+        roundsRepo.advanceExtendedPhase(comp.id, "registration");
+        baseCompRepo.submitBotVersion(comp.id, "u-1", "bv-1");
+        baseCompRepo.submitBotVersion(comp.id, "u-2", "bv-2");
+        baseCompRepo.submitBotVersion(comp.id, "u-3", "bv-3");
+
+        // Advance preparation -> locked MUST fail because 10 rounds exceeds max allowed 2
+        assert.throws(
+          () => roundsRepo.advanceExtendedPhase(comp.id, "preparation"),
+          (err) => err instanceof CompetitionValidationError && err.message.includes("Swiss requestedRounds must be between 1 and 2")
+        );
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("pins full frozen map snapshot with 180° rotational symmetry using real maps domain", () => {
+      const { db } = createTestDb();
+      try {
+        // Use real domain directly
+        const roundsRepo = createCompetitionRoundsRepository(db);
+
+        const compFlanks = roundsRepo.createExtendedCompetition({
+          name: "Flanks Tournament",
+          mapId: "flanks",
+          formatId: "single-round-robin"
+        });
+
+        const row = db.prepare("SELECT map_id, map_revision, map_snapshot_json FROM competitions WHERE id = ?").get(compFlanks.id);
+        assert.equal(row.map_id, "flanks");
+        assert.equal(row.map_revision, 1);
+        assert.ok(row.map_snapshot_json);
+
+        const snapshot = JSON.parse(row.map_snapshot_json);
+        assert.equal(snapshot.descriptor.id, "flanks");
+        assert.equal(snapshot.descriptor.revision, 1);
+        assert.equal(snapshot.initialState.turn, "A");
+        assert.equal(snapshot.initialState.pieces.length, 20); // 10 per seat
+
+        const piecesA = snapshot.initialState.pieces.filter((p) => p.player === "A");
+        const piecesB = snapshot.initialState.pieces.filter((p) => p.player === "B");
+        assert.equal(piecesA.length, 10);
+        assert.equal(piecesB.length, 10);
+      } finally {
+        closeDatabase(db);
+      }
+    });
   });
 
   // ── 4. Explicit Next-Round Progression ─────────────────────────────────────
@@ -659,10 +782,24 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
           (err) => err instanceof CompetitionPhaseError && err.message.includes("Expected round 2 does not match current round 1")
         );
 
-        // Out of bounds expectedRound throws validation error
+        // Out of bounds expectedRound throws validation error (> 254 or < 1)
         assert.throws(
-          () => roundsRepo.nextRound(comp.id, 99),
-          (err) => err instanceof CompetitionValidationError
+          () => roundsRepo.nextRound(comp.id, 255),
+          (err) => err instanceof CompetitionValidationError && err.message.includes("between 1 and 254")
+        );
+        assert.throws(
+          () => roundsRepo.nextRound(comp.id, 0),
+          (err) => err instanceof CompetitionValidationError && err.message.includes("between 1 and 254")
+        );
+
+        // Non-number expectedRound throws validation error (no string or boolean coercion)
+        assert.throws(
+          () => roundsRepo.nextRound(comp.id, "1"),
+          (err) => err instanceof CompetitionValidationError && err.message.includes("between 1 and 254")
+        );
+        assert.throws(
+          () => roundsRepo.nextRound(comp.id, true),
+          (err) => err instanceof CompetitionValidationError && err.message.includes("between 1 and 254")
         );
 
         // 2. Blocked because round 1 matches are still running (pending)
@@ -772,6 +909,83 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
         // Now completion succeeds!
         const completedComp = roundsRepo.advanceExtendedPhase(comp.id, "running");
         assert.equal(completedComp.phase, "completed");
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("supports round progression beyond round 32 up to 254 for large double round-robin events", () => {
+      const { db } = createTestDb();
+      try {
+        const roundsRepo = createCompetitionRoundsRepository(db, {
+          mapsDomain: mockMapsDomain,
+          formatsDomain: mockFormatsDomain
+        });
+
+        seedUser(db, { id: "u-x32", username: "x32" });
+        seedUser(db, { id: "u-y32", username: "y32" });
+        seedBot(db, { id: "bot-x32", ownerId: "u-x32", name: "X32-Bot" });
+        seedBot(db, { id: "bot-y32", ownerId: "u-y32", name: "Y32-Bot" });
+        seedReadyVersion(db, { id: "bv-x32", botId: "bot-x32" });
+        seedReadyVersion(db, { id: "bv-y32", botId: "bot-y32" });
+
+        // Create competition configured with 50 rounds
+        const comp = roundsRepo.createExtendedCompetition({
+          name: "Mega 50-Round Marathon",
+          formatId: "double-round-robin",
+          roundCount: 50,
+          mode: "ranked"
+        });
+
+        // Seed accepted competition entries
+        db.prepare(`
+          INSERT INTO competition_entries (competition_id, user_id, bot_id, bot_version_id, status)
+          VALUES (?, 'u-x32', 'bot-x32', 'bv-x32', 'accepted'),
+                 (?, 'u-y32', 'bot-y32', 'bv-y32', 'accepted')
+        `).run(comp.id, comp.id);
+
+        // Seed a tournament for round 32
+        const tournRepo = createTournamentRepository(db);
+        const t32 = tournRepo.createTournament({
+          id: `${comp.id}-r32`,
+          name: "Round 32 Tournament",
+          ranked: true,
+          ladderId: "ladder-main",
+          rulesetJson: "{}",
+          policyJson: "{}",
+          initialStateJson: JSON.stringify({ mapId: "classic" }),
+          entries: [{ botId: "bot-x32", botVersionId: "bv-x32" }, { botId: "bot-y32", botVersionId: "bv-y32" }],
+          schedule: [{ scheduleIndex: 0, botAId: "bot-x32", botBId: "bot-y32" }]
+        });
+
+        // Mark tournament 32 completed
+        db.prepare("UPDATE matches SET status = 'completed' WHERE tournament_id = ?").run(t32.id);
+        db.prepare("UPDATE tournaments SET status = 'completed' WHERE id = ?").run(t32.id);
+
+        // Insert round 32 record and set competition to running at round 32
+        db.prepare(`
+          INSERT INTO competition_rounds (competition_id, round_number, tournament_id, status, pairings_json, byes_json, warnings_json)
+          VALUES (?, 32, ?, 'running', '[]', '[]', '[]')
+        `).run(comp.id, t32.id);
+
+        db.prepare(`
+          UPDATE competitions
+          SET phase = 'running', tournament_id = ?, current_round = 32, round_count = 50
+          WHERE id = ?
+        `).run(t32.id, comp.id);
+
+        // Advancing from round 32 to round 33 with expectedRound = 32
+        const r33Comp = roundsRepo.nextRound(comp.id, 32);
+        assert.equal(r33Comp.currentRound, 33);
+        assert.ok(r33Comp.tournamentId.includes("-r33"));
+
+        const r33Row = db.prepare("SELECT * FROM competition_rounds WHERE competition_id = ? AND round_number = 33").get(comp.id);
+        assert.ok(r33Row);
+        assert.equal(r33Row.status, "running");
+
+        // Verify round 32 was marked completed
+        const r32Row = db.prepare("SELECT status FROM competition_rounds WHERE competition_id = ? AND round_number = 32").get(comp.id);
+        assert.equal(r32Row.status, "completed");
       } finally {
         closeDatabase(db);
       }
@@ -920,6 +1134,72 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
       );
       assert.equal(res422.statusCode, 422);
       assert.equal(res422.body.error.code, "VALIDATION_ERROR");
+
+      // 3. String coercion attempt rejected
+      const resString = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions/comp-test/next-round",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { expectedRound: "1" }
+      );
+      assert.equal(resString.statusCode, 422);
+      assert.equal(resString.body.error.code, "VALIDATION_ERROR");
+      assert.ok(resString.body.error.message.includes("between 1 and 254"));
+
+      // 4. Boolean coercion attempt rejected
+      const resBool = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions/comp-test/next-round",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { expectedRound: true }
+      );
+      assert.equal(resBool.statusCode, 422);
+      assert.equal(resBool.body.error.code, "VALIDATION_ERROR");
+
+      // 5. Out of bounds (> 254) rejected
+      const res255 = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions/comp-test/next-round",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { expectedRound: 255 }
+      );
+      assert.equal(res255.statusCode, 422);
+      assert.equal(res255.body.error.code, "VALIDATION_ERROR");
+
+      // 6. Out of bounds (< 1) rejected
+      const res0 = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions/comp-test/next-round",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        { expectedRound: 0 }
+      );
+      assert.equal(res0.statusCode, 422);
+      assert.equal(res0.body.error.code, "VALIDATION_ERROR");
+
+      // 7. Missing expectedRound rejected
+      const resMissing = await makeRequest(
+        server,
+        {
+          path: "/api/arena/v1/competitions/comp-test/next-round",
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` }
+        },
+        {}
+      );
+      assert.equal(resMissing.statusCode, 422);
+      assert.equal(resMissing.body.error.code, "VALIDATION_ERROR");
     });
   });
 });
