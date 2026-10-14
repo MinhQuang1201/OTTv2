@@ -56,118 +56,126 @@ export function PracticeMatchPanel({
   const isAdmin = userRole === "admin";
   const isSpectator = userRole === "spectator";
   const isMountedRef = useRef(true);
+  const activeControllerRef = useRef<AbortController | null>(null);
+  const reqSeqRef = useRef<number>(0);
 
   // Load active bots via bounded pagination and retrieve READY versions
-  const loadReadyVersions = useCallback(
-    async (signal?: AbortSignal) => {
-      setLoading(true);
-      setError(null);
-      try {
-        let offset = 0;
-        let total = Infinity;
-        const fetchedBots: ArenaBot[] = [];
-        let page = 0;
+  const loadReadyVersions = useCallback(async () => {
+    activeControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeControllerRef.current = controller;
+    const seq = ++reqSeqRef.current;
+    const signal = controller.signal;
 
-        // Bounded pagination: up to MAX_PAGES (250 bots)
-        while (offset < total && page < MAX_PAGES) {
-          if (signal?.aborted || !isMountedRef.current) return;
-          const botsRes = await gateway.listBots({ limit: PAGE_SIZE, offset, signal });
-          fetchedBots.push(...botsRes.bots);
-          total = botsRes.total;
-          offset += botsRes.bots.length;
-          page += 1;
-          if (botsRes.bots.length === 0 || offset >= total) break;
-        }
+    setLoading(true);
+    setError(null);
+    try {
+      let offset = 0;
+      let total = Infinity;
+      const fetchedBots: ArenaBot[] = [];
+      let page = 0;
 
-        if (signal?.aborted || !isMountedRef.current) return;
+      // Bounded pagination: up to MAX_PAGES (250 bots)
+      while (offset < total && page < MAX_PAGES) {
+        if (signal.aborted || !isMountedRef.current) return;
+        const botsRes = await gateway.listBots({ limit: PAGE_SIZE, offset, signal });
+        fetchedBots.push(...botsRes.bots);
+        total = botsRes.total;
+        offset += botsRes.bots.length;
+        page += 1;
+        if (botsRes.bots.length === 0 || offset >= total) break;
+      }
 
-        setPaginationInfo({
-          loadedCount: fetchedBots.length,
-          totalCount: total,
-          hasMore: total > fetchedBots.length,
-        });
+      if (signal.aborted || !isMountedRef.current || seq !== reqSeqRef.current) return;
 
-        // Filter: active bots only
-        const activeBots = fetchedBots.filter((bot) => bot.status === "active");
+      setPaginationInfo({
+        loadedCount: fetchedBots.length,
+        totalCount: total,
+        hasMore: total > fetchedBots.length,
+      });
 
-        const readyList: ReadyBotVersionOption[] = [];
-        const failedBotErrors: string[] = [];
+      // Filter: active bots only
+      const activeBots = fetchedBots.filter((bot) => bot.status === "active");
 
-        for (const bot of activeBots) {
-          if (signal?.aborted || !isMountedRef.current) return;
-          try {
-            const verRes = await gateway.listBotVersions(bot.id, { signal });
-            for (const v of verRes.versions) {
-              if (v.buildStatus === "ready") {
-                readyList.push({
-                  versionId: v.id,
-                  botId: bot.id,
-                  botName: bot.name,
-                  ownerId: bot.ownerId,
-                  versionNo: v.versionNo,
-                  profileId: v.profileId,
-                  isOwned: bot.ownerId === userId,
-                });
-              }
+      const readyList: ReadyBotVersionOption[] = [];
+      const failedBotErrors: string[] = [];
+
+      for (const bot of activeBots) {
+        if (signal.aborted || !isMountedRef.current || seq !== reqSeqRef.current) return;
+        try {
+          const verRes =
+            typeof gateway.listReadyBotVersions === "function"
+              ? await gateway.listReadyBotVersions(bot.id, { signal })
+              : await gateway.listBotVersions(bot.id, { signal });
+          for (const v of verRes.versions) {
+            if ("buildStatus" in v && (v as { buildStatus?: string }).buildStatus !== "ready") {
+              continue;
             }
-          } catch (err: unknown) {
-            if (signal?.aborted || !isMountedRef.current) return;
-            const msg = (err as Error)?.message || "Lỗi tải phiên bản";
-            failedBotErrors.push(`${bot.name} (${bot.id}): ${msg}`);
+            readyList.push({
+              versionId: v.id,
+              botId: bot.id,
+              botName: bot.name,
+              ownerId: bot.ownerId,
+              versionNo: v.versionNo,
+              profileId: v.profileId,
+              isOwned: bot.ownerId === userId,
+            });
           }
-        }
-
-        if (isMountedRef.current && !signal?.aborted) {
-          setAllReadyVersions(readyList);
-
-          if (failedBotErrors.length > 0) {
-            setError(`Không thể tải phiên bản cho ${failedBotErrors.length} bot: ${failedBotErrors.join("; ")}`);
-          }
-
-          // Evaluate valid candidate selections
-          const validSeatA = isAdmin || isSpectator ? readyList : readyList.filter((v) => v.isOwned);
-          const validSeatB = readyList;
-
-          const candidateA = validSeatA[0] || null;
-          const candidateB = candidateA
-            ? validSeatB.find((v) => v.versionId !== candidateA.versionId) || validSeatB[0]
-            : validSeatB[0] || null;
-
-          // Reset stale or invalid selections
-          setSelectedVerA((current) => {
-            if (current && validSeatA.some((opt) => opt.versionId === current)) {
-              return current;
-            }
-            return candidateA?.versionId || "";
-          });
-
-          setSelectedVerB((current) => {
-            if (current && validSeatB.some((opt) => opt.versionId === current)) {
-              return current;
-            }
-            return candidateB?.versionId || "";
-          });
-        }
-      } catch (err: unknown) {
-        if (signal?.aborted || !isMountedRef.current) return;
-        setError((err as Error)?.message || "Không thể tải danh sách bot cho trận đấu tập.");
-      } finally {
-        if (isMountedRef.current && !signal?.aborted) {
-          setLoading(false);
+        } catch (err: unknown) {
+          if (signal.aborted || !isMountedRef.current || seq !== reqSeqRef.current) return;
+          const msg = (err as Error)?.message || "Lỗi tải phiên bản";
+          failedBotErrors.push(`${bot.name} (${bot.id}): ${msg}`);
         }
       }
-    },
-    [gateway, userId, isAdmin, isSpectator]
-  );
+
+      if (isMountedRef.current && !signal.aborted && seq === reqSeqRef.current) {
+        setAllReadyVersions(readyList);
+
+        if (failedBotErrors.length > 0) {
+          setError(`Không thể tải phiên bản cho ${failedBotErrors.length} bot: ${failedBotErrors.join("; ")}`);
+        }
+
+        // Evaluate valid candidate selections
+        const validSeatA = isAdmin || isSpectator ? readyList : readyList.filter((v) => v.isOwned);
+        const validSeatB = readyList;
+
+        const candidateA = validSeatA[0] || null;
+        const candidateB = candidateA
+          ? validSeatB.find((v) => v.versionId !== candidateA.versionId) || validSeatB[0]
+          : validSeatB[0] || null;
+
+        // Reset stale or invalid selections
+        setSelectedVerA((current) => {
+          if (current && validSeatA.some((opt) => opt.versionId === current)) {
+            return current;
+          }
+          return candidateA?.versionId || "";
+        });
+
+        setSelectedVerB((current) => {
+          if (current && validSeatB.some((opt) => opt.versionId === current)) {
+            return current;
+          }
+          return candidateB?.versionId || "";
+        });
+      }
+    } catch (err: unknown) {
+      if (signal.aborted || !isMountedRef.current || seq !== reqSeqRef.current) return;
+      setError((err as Error)?.message || "Không thể tải danh sách bot cho trận đấu tập.");
+    } finally {
+      if (isMountedRef.current && !signal.aborted && seq === reqSeqRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [gateway, userId, isAdmin, isSpectator]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    const controller = new AbortController();
-    void loadReadyVersions(controller.signal);
+    void loadReadyVersions();
 
     return () => {
       isMountedRef.current = false;
-      controller.abort();
+      activeControllerRef.current?.abort();
     };
   }, [loadReadyVersions, userId, userRole]);
 

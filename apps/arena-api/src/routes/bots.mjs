@@ -7,6 +7,7 @@
  * - GET /api/arena/v1/bots: Paginated list of bots (author sees owned + public active; admin sees all).
  * - POST /api/arena/v1/bots: Creates a stable bot. Requires Idempotency-Key. Owner is req.user.id.
  * - GET /api/arena/v1/bots/:id/versions: Lists versions with bounded logs. Owner/admin only.
+ * - GET /api/arena/v1/bots/:id/ready-versions: Lists active bot's ready versions (public metadata only). Any authenticated role.
  * - POST /api/arena/v1/bots/:id/versions: Uploads source inline UTF-8, enqueues build job.
  *     In trusted mode: restricted to admin (author cannot submit arbitrary source).
  *     Rejects shell/path parameters. Requires Idempotency-Key.
@@ -310,5 +311,35 @@ export async function handleBotsRoute(req, res, ctx) {
     }
   }
 
+  // ── Route matching: /api/arena/v1/bots/:id/ready-versions ─────────────────
+  const readyVersionsMatch = pathname.match(/^\/api\/arena\/v1\/bots\/([^/]+)\/ready-versions\/?$/);
+  if (readyVersionsMatch) {
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      return sendError(res, 405, "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed. Expected GET`, {}, req);
+    }
+
+    const botId = readyVersionsMatch[1];
+    const bot = botRepo.getBot(botId);
+    if (!bot || bot.status !== "active") {
+      return sendError(res, 404, "NOT_FOUND", `Bot not found or not active: ${botId}`, {}, req);
+    }
+
+    const versions = botRepo.listBotVersions(botId);
+    const readyVersions = versions.filter((v) => v.build_status === "ready");
+
+    return sendJson(res, 200, {
+      versions: readyVersions.map((v) => ({
+        id: v.id,
+        botId: v.bot_id,
+        versionNo: v.version_no,
+        profileId: v.profile_id,
+        buildStatus: "ready",
+        createdAt: v.created_at
+      }))
+    });
+  }
+
   return sendError(res, 404, "NOT_FOUND", `Endpoint not found: ${pathname}`, {}, req);
 }
+

@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArenaApiGateway } from "../ArenaApiGateway";
@@ -39,6 +41,35 @@ describe("PracticeMatchPanel", () => {
                 versionNo: 2,
                 profileId: "controlled-node",
                 buildStatus: "building", // not ready
+              },
+            ],
+          });
+        }
+        if (botId === "bot-other") {
+          return Promise.resolve({
+            versions: [
+              {
+                id: "ver-other-1",
+                botId: "bot-other",
+                versionNo: 1,
+                profileId: "python-v1",
+                buildStatus: "ready",
+              },
+            ],
+          });
+        }
+        return Promise.resolve({ versions: [] });
+      }),
+      listReadyBotVersions: vi.fn().mockImplementation((botId: string) => {
+        if (botId === "bot-mine") {
+          return Promise.resolve({
+            versions: [
+              {
+                id: "ver-mine-1",
+                botId: "bot-mine",
+                versionNo: 1,
+                profileId: "controlled-node",
+                buildStatus: "ready",
               },
             ],
           });
@@ -230,7 +261,7 @@ describe("PracticeMatchPanel", () => {
       return Promise.resolve({ bots: page2Bots, total: 51, limit: 50, offset: 50 });
     });
 
-    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+    (mockGateway.listReadyBotVersions as any).mockImplementation((botId: string) => {
       if (botId === "bot-mine-p2") {
         return Promise.resolve({
           versions: [
@@ -269,7 +300,7 @@ describe("PracticeMatchPanel", () => {
       offset: 0,
     });
 
-    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+    (mockGateway.listReadyBotVersions as any).mockImplementation((botId: string) => {
       return Promise.resolve({
         versions: [
           { id: `ver-${botId}`, botId, versionNo: 1, profileId: "controlled-node", buildStatus: "ready" },
@@ -309,7 +340,7 @@ describe("PracticeMatchPanel", () => {
     });
 
     // Now bot-mine deletes ver-mine-1 and has ver-mine-updated only
-    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+    (mockGateway.listReadyBotVersions as any).mockImplementation((botId: string) => {
       if (botId === "bot-mine") {
         return Promise.resolve({
           versions: [
@@ -351,7 +382,7 @@ describe("PracticeMatchPanel", () => {
   });
 
   it("visibly displays errors when bot version retrieval fails", async () => {
-    (mockGateway.listBotVersions as any).mockRejectedValueOnce(
+    (mockGateway.listReadyBotVersions as any).mockRejectedValueOnce(
       new Error("Failed to load versions from DB")
     );
 
@@ -366,6 +397,36 @@ describe("PracticeMatchPanel", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.getByText(/Không thể tải phiên bản cho.*bot/i)).toBeInTheDocument();
+    });
+  });
+
+  it("allows author to select opponent bot ready version for Seat B and creates match", async () => {
+    render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-123"
+        userRole="author"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /phiên bản bot seat b/i })).toBeInTheDocument();
+    });
+
+    const selectB = screen.getByRole("combobox", { name: /phiên bản bot seat b/i }) as HTMLSelectElement;
+    fireEvent.change(selectB, { target: { value: "ver-other-1" } });
+    expect(selectB.value).toBe("ver-other-1");
+
+    const startBtn = screen.getByRole("button", { name: /bắt đầu trận đấu tập/i });
+    fireEvent.click(startBtn);
+
+    await waitFor(() => {
+      expect(mockGateway.createPracticeMatch).toHaveBeenCalledWith({
+        participants: {
+          A: { botVersionId: "ver-mine-1" },
+          B: { botVersionId: "ver-other-1" },
+        },
+      });
     });
   });
 });

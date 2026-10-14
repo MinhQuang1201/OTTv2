@@ -210,6 +210,37 @@ describe("ArenaApiGateway", () => {
       expect(res.versions[0].buildStatus).toBe("ready");
     });
 
+    it("lists ready bot versions via /ready-versions with public metadata", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          versions: [
+            {
+              id: "v-ready-1",
+              botId: "bot-opponent",
+              versionNo: 2,
+              profileId: "controlled-node",
+              buildStatus: "ready",
+              createdAt: "2026-10-14T00:00:00Z"
+            }
+          ]
+        })
+      });
+
+      const res = await gateway.listReadyBotVersions("bot-opponent");
+      expect(res.versions).toHaveLength(1);
+      expect(res.versions[0].id).toBe("v-ready-1");
+      expect(res.versions[0].botId).toBe("bot-opponent");
+      expect(res.versions[0].buildStatus).toBe("ready");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/bots/bot-opponent/ready-versions",
+        expect.objectContaining({ method: "GET" })
+      );
+    });
+
     it("uploads bot version with Idempotency-Key", async () => {
       gateway.setToken("token-xyz");
       fetchMock.mockResolvedValueOnce({

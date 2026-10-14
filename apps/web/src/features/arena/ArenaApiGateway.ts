@@ -65,6 +65,19 @@ export interface ArenaBotVersionListResponse {
   readonly versions: readonly ArenaBotVersion[];
 }
 
+export interface ArenaReadyBotVersion {
+  readonly id: string;
+  readonly botId: string;
+  readonly versionNo: number;
+  readonly profileId: string;
+  readonly buildStatus: "ready";
+  readonly createdAt: string;
+}
+
+export interface ArenaReadyBotVersionListResponse {
+  readonly versions: readonly ArenaReadyBotVersion[];
+}
+
 export interface ArenaBotVersionUploadResult {
   readonly version: ArenaBotVersion;
   readonly job?: {
@@ -383,6 +396,16 @@ export class ArenaApiGateway {
   async listBotVersions(botId: string, options?: RequestOptions): Promise<ArenaBotVersionListResponse> {
     return this.request<ArenaBotVersionListResponse>(`/bots/${encodeURIComponent(botId)}/versions`, "GET", undefined, options);
   }
+
+  async listReadyBotVersions(botId: string, options?: RequestOptions): Promise<ArenaReadyBotVersionListResponse> {
+    return this.request<ArenaReadyBotVersionListResponse>(
+      `/bots/${encodeURIComponent(botId)}/ready-versions`,
+      "GET",
+      undefined,
+      options
+    );
+  }
+
 
   async uploadBotVersion(
     botId: string,
