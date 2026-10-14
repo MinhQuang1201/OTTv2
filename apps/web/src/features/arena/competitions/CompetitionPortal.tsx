@@ -74,30 +74,48 @@ export function CompetitionPortal({
 
   // Extended catalog & configuration state
   const [catalog, setCatalog] = useState<CompetitionCatalogResponse | null>(null);
-  const [createFormatId, setCreateFormatId] = useState("double-round-robin");
-  const [createMapId, setCreateMapId] = useState("classic");
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [createFormatId, setCreateFormatId] = useState("");
+  const [createMapId, setCreateMapId] = useState("");
   const [createMode, setCreateMode] = useState<CompetitionMode>("ranked");
   const [createRoundCount, setCreateRoundCount] = useState<number | "">("");
 
   const createDescId = useId();
 
-  // Load catalog on mount
-  useEffect(() => {
-    let active = true;
-    void clientRef.current.getCatalog().then((cat) => {
-      if (active && cat) {
+  const loadCatalog = useCallback(async () => {
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      const cat = await clientRef.current.getCatalog();
+      if (isMountedRef.current) {
         setCatalog(cat);
-        if (cat.defaults) {
-          setCreateFormatId((prev) => (prev === "double-round-robin" && cat.defaults.formatId ? cat.defaults.formatId : prev));
-          setCreateMapId((prev) => (prev === "classic" && cat.defaults.mapId ? cat.defaults.mapId : prev));
-          setCreateMode((prev) => (prev === "ranked" && cat.defaults.mode ? cat.defaults.mode : prev));
+        if (cat) {
+          const defaultFormat = cat.defaults?.formatId || cat.formats[0]?.id || "";
+          const defaultMap = cat.defaults?.mapId || cat.maps[0]?.id || "";
+          const defaultMode = cat.defaults?.mode || (cat.modes[0]?.id as CompetitionMode) || "ranked";
+          setCreateFormatId(defaultFormat);
+          setCreateMapId(defaultMap);
+          setCreateMode(defaultMode);
+          setCreateRanked(defaultMode === "ranked");
         }
       }
-    });
-    return () => {
-      active = false;
-    };
+    } catch (err: unknown) {
+      if (isMountedRef.current) {
+        setCatalog(null);
+        setCatalogError((err as Error)?.message || "Không thể tải danh mục cấu hình giải đấu từ máy chủ.");
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setCatalogLoading(false);
+      }
+    }
   }, []);
+
+  // Load catalog on mount
+  useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
 
   // Async tracking and race-condition prevention
   const isMountedRef = useRef(true);
@@ -329,10 +347,9 @@ export function CompetitionPortal({
       });
       setCreateName("");
       setCreateDesc("");
-      setCreateCapacity("");
-      setCreateFormatId(catalog?.defaults.formatId || "double-round-robin");
-      setCreateMapId(catalog?.defaults.mapId || "classic");
-      setCreateMode(catalog?.defaults.mode || "ranked");
+      setCreateFormatId(catalog?.defaults?.formatId || catalog?.formats[0]?.id || "");
+      setCreateMapId(catalog?.defaults?.mapId || catalog?.maps[0]?.id || "");
+      setCreateMode(catalog?.defaults?.mode || (catalog?.modes[0]?.id as CompetitionMode) || "ranked");
       setCreateRoundCount("");
       setShowCreateForm(false);
       setSuccessMsg(`Tạo sự kiện "${created.name}" thành công.`);
@@ -513,25 +530,58 @@ export function CompetitionPortal({
             />
 
             {/* Extended Format, Map, Mode & Preview Configuration */}
-            <CompetitionConfiguration
-              mode="edit"
-              catalog={catalog ?? undefined}
-              formatId={createFormatId}
-              onFormatChange={setCreateFormatId}
-              mapId={createMapId}
-              onMapChange={setCreateMapId}
-              competitionMode={createMode}
-              onModeChange={(m) => {
-                setCreateMode(m);
-                setCreateRanked(m === "ranked");
-              }}
-              roundCount={createRoundCount}
-              onRoundCountChange={setCreateRoundCount}
-              disabled={actionLoading}
-            />
+            {catalogLoading && (
+              <div className={styles.loadingBox} data-testid="catalog-loading">
+                Đang tải danh mục cấu hình giải đấu từ máy chủ...
+              </div>
+            )}
+
+            {catalogError && (
+              <div
+                className={styles.errorBanner}
+                role="alert"
+                data-testid="catalog-error-alert"
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}
+              >
+                <span>Không thể tải cấu hình giải đấu: {catalogError}</span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadCatalog()}
+                  disabled={catalogLoading}
+                  data-testid="retry-catalog-btn"
+                >
+                  Thử lại
+                </Button>
+              </div>
+            )}
+
+            {catalog ? (
+              <CompetitionConfiguration
+                mode="edit"
+                catalog={catalog}
+                formatId={createFormatId}
+                onFormatChange={setCreateFormatId}
+                mapId={createMapId}
+                onMapChange={setCreateMapId}
+                competitionMode={createMode}
+                onModeChange={(m) => {
+                  setCreateMode(m);
+                  setCreateRanked(m === "ranked");
+                }}
+                roundCount={createRoundCount}
+                onRoundCountChange={setCreateRoundCount}
+                disabled={actionLoading}
+              />
+            ) : null}
 
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-              <Button type="submit" variant="primary" disabled={actionLoading || !createName.trim()}>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={actionLoading || !createName.trim() || catalogLoading || !catalog}
+                data-testid="submit-create-competition-btn"
+              >
                 {actionLoading ? "Đang tạo..." : "Xác nhận tạo sự kiện"}
               </Button>
               <Button variant="quiet" onClick={() => setShowCreateForm(false)} disabled={actionLoading}>

@@ -1,5 +1,4 @@
 export * from "./types";
-export * from "./catalogDefaults";
 export * from "./CompetitionApiClient";
 export * from "./CompetitionRoster";
 export * from "./CompetitionLinkedTournament";

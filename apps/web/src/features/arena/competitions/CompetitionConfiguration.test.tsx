@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createDefaultCatalog, DEFAULT_MAPS } from "./catalogDefaults";
+import { createMockCatalog, MOCK_MAPS } from "./competitionTestFixtures";
 import { CompetitionConfiguration } from "./CompetitionConfiguration";
 import { CompetitionMapPreview } from "./CompetitionMapPreview";
 
@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("CompetitionMapPreview", () => {
   it("renders 81 accessible readonly grid cells and labels pieces, seats, and goals", () => {
-    const classicMap = DEFAULT_MAPS[0];
+    const classicMap = MOCK_MAPS[0];
     render(<CompetitionMapPreview map={classicMap} />);
 
     // Must render exactly 81 cells for a 9x9 board
@@ -48,7 +48,7 @@ describe("CompetitionMapPreview", () => {
 });
 
 describe("CompetitionConfiguration", () => {
-  const catalog = createDefaultCatalog();
+  const catalog = createMockCatalog();
 
   describe("Edit mode", () => {
     it("renders native selects for format, map, and mode, and triggers change callbacks", () => {
@@ -161,6 +161,27 @@ describe("CompetitionConfiguration", () => {
       expect(screen.getByRole("combobox", { name: /chọn chế độ tính điểm/i })).toBeDisabled();
       expect(screen.getByLabelText(/số vòng thi đấu hệ thụy sĩ/i)).toBeDisabled();
     });
+
+    it("renders empty state without inventing capabilities when catalog is null", () => {
+      render(
+        <CompetitionConfiguration
+          mode="edit"
+          catalog={null}
+          formatId="classic"
+          onFormatChange={vi.fn()}
+          mapId="classic"
+          onMapChange={vi.fn()}
+          competitionMode="ranked"
+          onModeChange={vi.fn()}
+          roundCount=""
+          onRoundCountChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId("configuration-no-catalog")).toHaveTextContent(
+        "Chưa có dữ liệu danh mục thể thức & bản đồ từ máy chủ."
+      );
+    });
   });
 
   describe("View mode", () => {
@@ -183,6 +204,7 @@ describe("CompetitionConfiguration", () => {
       expect(screen.getByText("Cấu hình thể thức & Bản đồ")).toBeInTheDocument();
       expect(screen.getByText("Hệ Thụy Sĩ (Swiss System)")).toBeInTheDocument();
       expect(screen.getByText("Hai cánh (Flanks)")).toBeInTheDocument();
+      expect(screen.getByText("(v1)")).toBeInTheDocument();
       expect(screen.getByText("Vòng 2 / 5")).toBeInTheDocument();
       expect(screen.getByText("Xếp hạng Elo")).toBeInTheDocument();
 
@@ -195,6 +217,34 @@ describe("CompetitionConfiguration", () => {
 
       expect(screen.getByTestId("map-grid-table")).toBeInTheDocument();
       expect(screen.getAllByRole("gridcell")).toHaveLength(81);
+    });
+
+    it("renders raw configuration and shows unavailable message if map data is missing in catalog", () => {
+      render(
+        <CompetitionConfiguration
+          mode="view"
+          catalog={null}
+          configuration={{
+            formatId: "custom-format",
+            mapId: "custom-map",
+            mapRevision: 1,
+            mode: "practice",
+            roundCount: 4,
+          }}
+        />
+      );
+
+      expect(screen.getByText("custom-format")).toBeInTheDocument();
+      expect(screen.getByText("custom-map")).toBeInTheDocument();
+      expect(screen.getByText("(v1)")).toBeInTheDocument();
+      expect(screen.getByText("Tập luyện (Practice)")).toBeInTheDocument();
+
+      const toggleBtn = screen.getByRole("button", { name: /xem bố cục bản đồ thi đấu/i });
+      fireEvent.click(toggleBtn);
+
+      expect(
+        screen.getByText("Dữ liệu bố cục quân cờ của bản đồ này không khả dụng từ máy chủ.")
+      ).toBeInTheDocument();
     });
   });
 });

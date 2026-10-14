@@ -295,18 +295,14 @@ describe("CompetitionApiClient", () => {
     );
   });
 
-  it("falls back to default catalog when remote endpoint is not found or fails", async () => {
+  it("throws CompetitionApiError when remote catalog endpoint fails without static fallback", async () => {
     (fetch as any).mockResolvedValueOnce({
       ok: false,
       status: 404,
-      json: async () => ({ error: { code: "not_found", message: "Not found" } }),
+      json: async () => ({ error: { code: "not_found", message: "Catalog not found" } }),
     });
 
-    const res = await client.getCatalog();
-    expect(res.maps).toHaveLength(3);
-    expect(res.formats).toHaveLength(3);
-    expect(res.defaults.mapId).toBe("classic");
-    expect(res.defaults.formatId).toBe("double-round-robin");
+    await expect(client.getCatalog()).rejects.toThrow(CompetitionApiError);
   });
 
   it("creates extended competition with formatId, mapId, roundCount, and mode", async () => {

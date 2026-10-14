@@ -9,7 +9,6 @@ import type {
   NextRoundResponse,
   RetryMatchResponse,
 } from "./types";
-import { createDefaultCatalog } from "./catalogDefaults";
 
 export interface GatewayTokenProvider {
   getBaseUrl(): string;
@@ -117,7 +116,7 @@ export class CompetitionApiClient {
           ? "unprocessable_entity"
           : "api_error");
       const message = backendError?.message || `Máy chủ phản hồi với mã lỗi HTTP ${response.status}`;
-      const requestId = backendError?.requestId || response.headers.get("x-request-id") || undefined;
+      const requestId = backendError?.requestId || response.headers?.get?.("x-request-id") || undefined;
       const details = backendError?.details || undefined;
 
       throw new CompetitionApiError(message, {
@@ -143,12 +142,7 @@ export class CompetitionApiClient {
   }
 
   async getCatalog(options?: RequestOptions): Promise<CompetitionCatalogResponse> {
-    try {
-      return await this.request<CompetitionCatalogResponse>("/competition-catalog", "GET", undefined, options);
-    } catch {
-      // Fallback gracefully to default catalog if endpoint is unavailable
-      return createDefaultCatalog();
-    }
+    return this.request<CompetitionCatalogResponse>("/competition-catalog", "GET", undefined, options);
   }
 
   async listCompetitions(options?: RequestOptions): Promise<readonly Competition[]> {

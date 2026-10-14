@@ -2,7 +2,6 @@ import { useId, useMemo, useState } from "react";
 import { Button } from "../../../shared/ui/Button";
 import { Badge } from "../../../shared/ui/Badge";
 import { TextField } from "../../../shared/ui/TextField";
-import { createDefaultCatalog } from "./catalogDefaults";
 import { CompetitionMapPreview } from "./CompetitionMapPreview";
 import type {
   CompetitionCatalogResponse,
@@ -13,7 +12,7 @@ import styles from "./competitions.module.css";
 
 export interface CompetitionConfigurationEditProps {
   readonly mode: "edit";
-  readonly catalog?: CompetitionCatalogResponse;
+  readonly catalog?: CompetitionCatalogResponse | null;
   readonly formatId: string;
   readonly onFormatChange: (formatId: string) => void;
   readonly mapId: string;
@@ -28,7 +27,7 @@ export interface CompetitionConfigurationEditProps {
 export interface CompetitionConfigurationViewProps {
   readonly mode: "view";
   readonly configuration: CompetitionConfig;
-  readonly catalog?: CompetitionCatalogResponse;
+  readonly catalog?: CompetitionCatalogResponse | null;
 }
 
 export type CompetitionConfigurationProps =
@@ -42,22 +41,13 @@ export function CompetitionConfiguration(props: CompetitionConfigurationProps) {
 
   const [showMapModal, setShowMapModal] = useState(false);
 
-  // Fallback to default catalog if not provided
-  const catalog = props.catalog ?? createDefaultCatalog();
-
   if (props.mode === "view") {
     const config = props.configuration;
-    const format = catalog.formats.find((f) => f.id === config.formatId) || {
-      id: config.formatId,
-      name: config.formatId,
-      description: "",
-    };
-    const map = catalog.maps.find((m) => m.id === config.mapId) || {
-      id: config.mapId,
-      revision: config.mapRevision ?? 1,
-      name: config.mapId,
-      description: "",
-    };
+    const format = props.catalog?.formats.find((f) => f.id === config.formatId);
+    const map = props.catalog?.maps.find((m) => m.id === config.mapId);
+    const formatName = format?.name || config.formatId;
+    const mapName = map?.name || config.mapId;
+    const mapRevision = typeof config.mapRevision === "number" ? config.mapRevision : 1;
 
     return (
       <div className={styles.configCard} data-testid="competition-configuration-view">
@@ -73,11 +63,16 @@ export function CompetitionConfiguration(props: CompetitionConfigurationProps) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.5rem", marginTop: "0.25rem" }}>
           <div>
             <span style={{ fontSize: "var(--ui-text-xs)", color: "var(--ui-text-muted)" }}>Thể thức:</span>
-            <div><strong>{format.name}</strong></div>
+            <div><strong>{formatName}</strong></div>
           </div>
           <div>
             <span style={{ fontSize: "var(--ui-text-xs)", color: "var(--ui-text-muted)" }}>Bản đồ thi đấu:</span>
-            <div><strong>{map.name}</strong></div>
+            <div>
+              <strong>{mapName}</strong>
+              <span style={{ fontSize: "var(--ui-text-xs)", color: "var(--ui-text-muted)", marginLeft: "0.25rem" }}>
+                (v{mapRevision})
+              </span>
+            </div>
           </div>
           {config.roundCount ? (
             <div>
@@ -104,7 +99,13 @@ export function CompetitionConfiguration(props: CompetitionConfigurationProps) {
 
         {showMapModal && (
           <div style={{ marginTop: "0.75rem" }}>
-            <CompetitionMapPreview map={map} />
+            {map?.initialState ? (
+              <CompetitionMapPreview map={map} />
+            ) : (
+              <div className={styles.emptyState}>
+                Dữ liệu bố cục quân cờ của bản đồ này không khả dụng từ máy chủ.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -113,6 +114,7 @@ export function CompetitionConfiguration(props: CompetitionConfigurationProps) {
 
   // Edit mode
   const {
+    catalog,
     formatId,
     onFormatChange,
     mapId,
@@ -123,6 +125,14 @@ export function CompetitionConfiguration(props: CompetitionConfigurationProps) {
     onRoundCountChange,
     disabled = false,
   } = props;
+
+  if (!catalog) {
+    return (
+      <div className={styles.emptyState} data-testid="configuration-no-catalog">
+        Chưa có dữ liệu danh mục thể thức & bản đồ từ máy chủ.
+      </div>
+    );
+  }
 
   const selectedMap = useMemo(() => {
     return catalog.maps.find((m) => m.id === mapId) || catalog.maps[0];

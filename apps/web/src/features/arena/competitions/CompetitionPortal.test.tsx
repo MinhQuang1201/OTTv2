@@ -7,6 +7,7 @@ import { CompetitionPortal } from "./CompetitionPortal";
 import { CompetitionApiClient, CompetitionApiError } from "./CompetitionApiClient";
 import { ArenaApiGateway, type ArenaUserProfile } from "../ArenaApiGateway";
 import type { Competition, CompetitionDetailResponse, CompetitionEntry } from "./types";
+import { createMockCatalog } from "./competitionTestFixtures";
 
 describe("CompetitionPortal", () => {
   let gateway: ArenaApiGateway;
@@ -50,6 +51,7 @@ describe("CompetitionPortal", () => {
     vi.clearAllMocks();
     gateway = new ArenaApiGateway({ baseUrl: "http://127.0.0.1:8787/api/arena/v1" });
     client = new CompetitionApiClient(gateway);
+    vi.spyOn(client, "getCatalog").mockResolvedValue(createMockCatalog());
   });
 
   afterEach(() => {
@@ -986,6 +988,59 @@ describe("CompetitionPortal", () => {
       // No extended configuration view or rounds panel
       expect(screen.queryByTestId("competition-configuration-view")).not.toBeInTheDocument();
       expect(screen.queryByTestId("competition-rounds-panel")).not.toBeInTheDocument();
+    });
+
+    it("displays visible error alert, disables create submission when getCatalog fails, and recovers on retry", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(client, "listCompetitions").mockResolvedValue(sampleCompetitions);
+      vi.spyOn(client, "getCompetition").mockResolvedValue({
+        competition: sampleCompetitions[0],
+        entries: [],
+      });
+
+      // Initially catalog fails to load
+      vi.spyOn(client, "getCatalog")
+        .mockRejectedValueOnce(new Error("Lỗi kết nối /competition-catalog 500"))
+        .mockResolvedValue(createMockCatalog());
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={adminProfile}
+        />
+      );
+
+      // Open create form
+      const openCreateBtn = await screen.findByRole("button", { name: /Tạo sự kiện mới/i });
+      await user.click(openCreateBtn);
+
+      // Verify visible error alert is shown
+      await waitFor(() => {
+        expect(screen.getByTestId("catalog-error-alert")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("catalog-error-alert")).toHaveTextContent("Lỗi kết nối /competition-catalog 500");
+
+      // Verify create submission button is disabled
+      const submitBtn = screen.getByTestId("submit-create-competition-btn");
+      expect(submitBtn).toBeDisabled();
+
+      // Extended configuration inputs must NOT be rendered with fake data
+      expect(screen.queryByTestId("competition-configuration-edit")).not.toBeInTheDocument();
+
+      // Click retry button
+      const retryBtn = screen.getByTestId("retry-catalog-btn");
+      await user.click(retryBtn);
+
+      // Verify error clears, configuration inputs appear, and submit button can be enabled
+      await waitFor(() => {
+        expect(screen.queryByTestId("catalog-error-alert")).not.toBeInTheDocument();
+        expect(screen.getByTestId("competition-configuration-edit")).toBeInTheDocument();
+      });
+
+      const nameInput = screen.getByLabelText(/Tên sự kiện/i);
+      await user.type(nameInput, "New Grand Prix");
+      expect(submitBtn).toBeEnabled();
     });
   });
 });
