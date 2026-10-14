@@ -18,6 +18,9 @@ describe("PracticeMatchPanel", () => {
           { id: "bot-mine", name: "MyBot", ownerId: "user-123", status: "active" },
           { id: "bot-other", name: "RivalBot", ownerId: "user-999", status: "active" },
         ],
+        total: 2,
+        limit: 50,
+        offset: 0,
       }),
       listBotVersions: vi.fn().mockImplementation((botId: string) => {
         if (botId === "bot-mine") {
@@ -79,7 +82,6 @@ describe("PracticeMatchPanel", () => {
       />
     );
 
-    // After resolution
     await waitFor(() => {
       expect(screen.getByText("MyBot (v1 · controlled-node)")).toBeInTheDocument();
     });
@@ -130,7 +132,6 @@ describe("PracticeMatchPanel", () => {
     const selectA = screen.getByRole("combobox", { name: /phiên bản bot seat a/i }) as HTMLSelectElement;
     const optionsA = Array.from(selectA.options).map((o) => o.value);
 
-    // Admin can choose ver-mine-1 or ver-other-1 for Seat A
     expect(optionsA).toContain("ver-mine-1");
     expect(optionsA).toContain("ver-other-1");
   });
@@ -192,7 +193,6 @@ describe("PracticeMatchPanel", () => {
   });
 
   it("renders empty state when author owns no READY versions", async () => {
-    // User 9999 has no bots
     render(
       <PracticeMatchPanel
         gateway={mockGateway as ArenaApiGateway}
@@ -208,5 +208,164 @@ describe("PracticeMatchPanel", () => {
     });
 
     expect(screen.queryByRole("button", { name: /bắt đầu trận đấu tập/i })).not.toBeInTheDocument();
+  });
+
+  it("discovers own bot beyond page 1 via bounded pagination", async () => {
+    // Page 1 contains 50 rival bots; page 2 contains user's own bot
+    const page1Bots = Array.from({ length: 50 }, (_, i) => ({
+      id: `bot-rival-${i}`,
+      name: `RivalBot_${i}`,
+      ownerId: "user-rival",
+      status: "active",
+    }));
+
+    const page2Bots = [
+      { id: "bot-mine-p2", name: "DeepMineBot", ownerId: "user-p2", status: "active" },
+    ];
+
+    (mockGateway.listBots as any).mockImplementation((opts: any) => {
+      if (opts.offset === 0) {
+        return Promise.resolve({ bots: page1Bots, total: 51, limit: 50, offset: 0 });
+      }
+      return Promise.resolve({ bots: page2Bots, total: 51, limit: 50, offset: 50 });
+    });
+
+    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+      if (botId === "bot-mine-p2") {
+        return Promise.resolve({
+          versions: [
+            { id: "ver-deep-1", botId, versionNo: 1, profileId: "controlled-node", buildStatus: "ready" },
+          ],
+        });
+      }
+      return Promise.resolve({ versions: [] });
+    });
+
+    render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-p2"
+        userRole="author"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("DeepMineBot (v1 · controlled-node)")).toBeInTheDocument();
+    });
+
+    const selectA = screen.getByRole("combobox", { name: /phiên bản bot seat a/i }) as HTMLSelectElement;
+    expect(selectA.value).toBe("ver-deep-1");
+  });
+
+  it("filters out inactive bots even if they have ready versions", async () => {
+    (mockGateway.listBots as any).mockResolvedValueOnce({
+      bots: [
+        { id: "bot-active", name: "ActiveBot", ownerId: "user-123", status: "active" },
+        { id: "bot-archived", name: "ArchivedBot", ownerId: "user-123", status: "archived" },
+        { id: "bot-disabled", name: "DisabledBot", ownerId: "user-999", status: "disabled" },
+      ],
+      total: 3,
+      limit: 50,
+      offset: 0,
+    });
+
+    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+      return Promise.resolve({
+        versions: [
+          { id: `ver-${botId}`, botId, versionNo: 1, profileId: "controlled-node", buildStatus: "ready" },
+        ],
+      });
+    });
+
+    render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-123"
+        userRole="author"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ActiveBot (v1 · controlled-node)")).toBeInTheDocument();
+    });
+
+    // Neither archived nor disabled bot should be listed
+    expect(screen.queryByText(/ArchivedBot/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/DisabledBot/i)).not.toBeInTheDocument();
+  });
+
+  it("resets stale selection when previously selected version is absent on refresh", async () => {
+    const { rerender } = render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-123"
+        userRole="author"
+      />
+    );
+
+    await waitFor(() => {
+      const selectA = screen.getByRole("combobox", { name: /phiên bản bot seat a/i }) as HTMLSelectElement;
+      expect(selectA.value).toBe("ver-mine-1");
+    });
+
+    // Now bot-mine deletes ver-mine-1 and has ver-mine-updated only
+    (mockGateway.listBotVersions as any).mockImplementation((botId: string) => {
+      if (botId === "bot-mine") {
+        return Promise.resolve({
+          versions: [
+            { id: "ver-mine-updated", botId, versionNo: 2, profileId: "controlled-node", buildStatus: "ready" },
+          ],
+        });
+      }
+      return Promise.resolve({ versions: [] });
+    });
+
+    const refreshBtn = screen.getByRole("button", { name: /làm mới danh sách/i });
+    fireEvent.click(refreshBtn);
+
+    await waitFor(() => {
+      const selectA = screen.getByRole("combobox", { name: /phiên bản bot seat a/i }) as HTMLSelectElement;
+      // Stale selection ver-mine-1 must be reset to ver-mine-updated
+      expect(selectA.value).toBe("ver-mine-updated");
+    });
+  });
+
+  it("prohibits spectator role from submitting practice matches", async () => {
+    render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-spec"
+        userRole="spectator"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Vai trò Khán giả \(spectator\) chỉ có quyền theo dõi/i)).toBeInTheDocument();
+    });
+
+    const startBtn = screen.getByRole("button", { name: /bắt đầu trận đấu tập/i });
+    expect(startBtn).toBeDisabled();
+
+    fireEvent.click(startBtn);
+    expect(mockGateway.createPracticeMatch).not.toHaveBeenCalled();
+  });
+
+  it("visibly displays errors when bot version retrieval fails", async () => {
+    (mockGateway.listBotVersions as any).mockRejectedValueOnce(
+      new Error("Failed to load versions from DB")
+    );
+
+    render(
+      <PracticeMatchPanel
+        gateway={mockGateway as ArenaApiGateway}
+        userId="user-123"
+        userRole="author"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByText(/Không thể tải phiên bản cho.*bot/i)).toBeInTheDocument();
+    });
   });
 });

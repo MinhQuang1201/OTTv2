@@ -141,6 +141,26 @@
   font-family: var(--ui-font-body);
   font-size: var(--ui-text-xs);
   font-weight: 600;
+.infoBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  background: rgba(35, 100, 170, 0.12);
+  color: var(--ui-seat-b);
+  border: 2px solid var(--ui-seat-b);
+  box-shadow: 2px 2px 0 var(--ui-seat-b);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-xs);
+  font-weight: 600;
+}
+
+.paginationNote {
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-muted);
+  padding: 2px 4px;
 }
 
 @media (max-width: 680px) {
