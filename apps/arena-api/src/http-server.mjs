@@ -29,7 +29,9 @@ import { authenticate, checkRole } from "./auth/authorization.mjs";
 import { handleBotsRoute } from "./routes/bots.mjs";
 import { handleMatchesRoute } from "./routes/matches.mjs";
 import { handleTournamentsRoute } from "./routes/tournaments.mjs";
+import { handleCompetitionsRoute } from "./routes/competitions.mjs";
 import { handleLeaderboardRoute } from "./routes/leaderboard.mjs";
+import { createCompetitionRepository } from "../../../packages/arena-node/src/persistence/competition-repository.mjs";
 
 /**
  * Sends a structured JSON success response.
@@ -166,12 +168,16 @@ export function createArenaServer(options) {
     jobQueue = null,
     botVersionService = null,
     profileRegistry = null,
-    finalizer = null
+    finalizer = null,
+    competitionRepo = null
   } = options;
 
   if (!db) {
     throw new TypeError("createArenaServer requires options.db");
   }
+
+  const resolvedCompetitionRepo =
+    competitionRepo || createCompetitionRepository(db, { tournamentRepo });
 
   const server = http.createServer(async (req, res) => {
     // 1. Assign trace request ID
@@ -343,6 +349,17 @@ export function createArenaServer(options) {
       if (pathname.startsWith("/api/arena/v1/tournaments")) {
         return handleTournamentsRoute(req, res, {
           db,
+          tournamentRepo,
+          parsedUrl,
+          maxBodyBytes
+        });
+      }
+
+      // ── Routes: /competitions ───────────────────────────────────────────────
+      if (pathname.startsWith("/api/arena/v1/competitions")) {
+        return handleCompetitionsRoute(req, res, {
+          db,
+          competitionRepo: resolvedCompetitionRepo,
           tournamentRepo,
           parsedUrl,
           maxBodyBytes

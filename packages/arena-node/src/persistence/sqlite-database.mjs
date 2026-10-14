@@ -33,8 +33,40 @@ const DEFAULT_MIGRATION_SQL_PATH = resolve(
   "migrations/001-arena.sql"
 );
 
+/** List of migration definitions recognized by this codebase. */
+export const MIGRATIONS = [
+  { version: "001-arena", path: resolve(__dirname, "migrations/001-arena.sql") },
+  { version: "002-competitions", path: resolve(__dirname, "migrations/002-competitions.sql") }
+];
+
 /** Set of schema migration versions recognized by this codebase. */
-const KNOWN_VERSIONS = new Set(["001-arena"]);
+const KNOWN_VERSIONS = new Set(MIGRATIONS.map((m) => m.version));
+
+/**
+ * Applies a specific migration if not already present in schema_migrations.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} migrationVersion
+ */
+export function applyMigration(db, migrationVersion) {
+  const m = MIGRATIONS.find((x) => x.version === migrationVersion);
+  if (!m) {
+    throw new Error(`Unknown migration: '${migrationVersion}'`);
+  }
+  const hasMigrationsTable = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
+    .get();
+
+  if (hasMigrationsTable) {
+    const row = db
+      .prepare("SELECT version FROM schema_migrations WHERE version = ?")
+      .get(migrationVersion);
+    if (row) return;
+  }
+
+  const sql = readFileSync(m.path, "utf8");
+  db.exec(sql);
+}
 
 /**
  * Loads better-sqlite3 from the given path or by default module resolution.
@@ -66,10 +98,17 @@ function loadDriver(sqlitePath) {
  * @param {string|null} [options.sqlitePath=null] - Override path to better-sqlite3 module.
  * @param {string|null} [options.migrationSql=null]  - SQL string to run instead of file.
  * @param {string|null} [options.nativeBinding=null] - Override path to native binding (.node).
+ * @param {string|null} [options.targetVersion=null] - Migration target version (e.g. '002-competitions', 'latest').
  * @returns {{ db: import('better-sqlite3').Database, version: string }}
  */
 export function openDatabase(dbPath, options = {}) {
-  const { sqlitePath = null, migrationSql = null, nativeBinding = null, ...driverOptions } = options;
+  const {
+    sqlitePath = null,
+    migrationSql = null,
+    nativeBinding = null,
+    targetVersion = null,
+    ...driverOptions
+  } = options;
 
   // Resolve native binding from explicit option or environment configuration only.
   // No hardcoded developer paths in production modules.
@@ -90,14 +129,24 @@ export function openDatabase(dbPath, options = {}) {
     // Wait up to 5 s before returning SQLITE_BUSY instead of failing immediately.
     db.pragma("busy_timeout = 5000");
 
+    // If explicit migrationSql override provided, run it directly (preserves test override semantics)
+    if (migrationSql !== null) {
+      db.exec(migrationSql);
+      const row = db
+        .prepare("SELECT version FROM schema_migrations WHERE version = ?")
+        .get("001-arena");
+      return { db, version: row ? row.version : "001-arena" };
+    }
+
     // ── Check Schema Migrations Before Applying DDL ───────────────────────────
     const hasMigrationsTable = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
       .get();
 
+    let appliedVersions = [];
     if (hasMigrationsTable) {
       const appliedRows = db.prepare("SELECT version FROM schema_migrations").all();
-      const appliedVersions = appliedRows.map((r) => r.version);
+      appliedVersions = appliedRows.map((r) => r.version);
 
       // Fail-closed check: reject if database contains unknown or newer migrations
       for (const ver of appliedVersions) {
@@ -108,26 +157,57 @@ export function openDatabase(dbPath, options = {}) {
         }
       }
 
-      // If 001-arena is already applied, skip migration (idempotent, already up-to-date)
+      // If specific targetVersion requested:
+      if (targetVersion) {
+        const target = targetVersion === "latest" ? MIGRATIONS[MIGRATIONS.length - 1].version : targetVersion;
+        const targetIndex = MIGRATIONS.findIndex((m) => m.version === target);
+        if (targetIndex === -1) {
+          throw new Error(`Unknown target schema version: '${targetVersion}'`);
+        }
+        for (let i = 0; i <= targetIndex; i++) {
+          const m = MIGRATIONS[i];
+          if (!appliedVersions.includes(m.version)) {
+            const sql = readFileSync(m.path, "utf8");
+            db.exec(sql);
+            appliedVersions.push(m.version);
+          }
+        }
+        return { db, version: target };
+      }
+
+      // If no targetVersion specified and 001-arena is already applied, return current version
       if (appliedVersions.includes("001-arena")) {
-        return { db, version: "001-arena" };
+        const currentVersion = appliedVersions.includes("002-competitions") ? "002-competitions" : "001-arena";
+        return { db, version: currentVersion };
       }
     }
 
-    // ── Run Migration Transactionally ──────────────────────────────────────────
-    const sql = migrationSql ?? readFileSync(DEFAULT_MIGRATION_SQL_PATH, "utf8");
+    // Fresh database: apply migration up to targetVersion (default 001-arena for backwards compatibility)
+    const target = targetVersion
+      ? (targetVersion === "latest" ? MIGRATIONS[MIGRATIONS.length - 1].version : targetVersion)
+      : "001-arena";
+    const targetIndex = MIGRATIONS.findIndex((m) => m.version === target);
+    if (targetIndex === -1) {
+      throw new Error(`Unknown target schema version: '${target}'`);
+    }
 
-    // The migration script wraps itself in BEGIN IMMEDIATE … COMMIT.
-    db.exec(sql);
+    for (let i = 0; i <= targetIndex; i++) {
+      const m = MIGRATIONS[i];
+      if (!appliedVersions.includes(m.version)) {
+        const sql = readFileSync(m.path, "utf8");
+        db.exec(sql);
+        appliedVersions.push(m.version);
+      }
+    }
 
     // ── Verify Schema Version ─────────────────────────────────────────────────
     const row = db
       .prepare("SELECT version FROM schema_migrations WHERE version = ?")
-      .get("001-arena");
+      .get(target);
 
     if (!row) {
       throw new Error(
-        "Arena schema migration failed: version 001-arena not found in schema_migrations"
+        `Arena schema migration failed: version ${target} not found in schema_migrations`
       );
     }
 
