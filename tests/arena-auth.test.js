@@ -226,8 +226,29 @@ describe("Arena Auth & Accounts — Task 14", () => {
     ]);
     assert.equal(dupCode, 1, "Duplicate username CLI must fail with code 1");
 
+    // Reject invalid status on create
+    let capturedErr = "";
+    const invalidStatusCode = await manageUserCli([
+      "create",
+      "--username",
+      "charlie-invalid",
+      "--role",
+      "author",
+      "--password",
+      "Pass123!",
+      "--status",
+      "invalid_status",
+      "--db",
+      env.dbPath
+    ], {
+      stderr: (msg) => { capturedErr += msg; }
+    });
+    assert.equal(invalidStatusCode, 1, "Invalid status CLI must fail with code 1");
+    assert.match(capturedErr, /invalid status/i, "Must report invalid status error");
+
     closeDatabase(env.db);
   });
+
 
   it("creates opaque session token, stores SHA256 in DB with 24h TTL, and revokes on logout", async () => {
     const env = setupTestEnv("session-tokens");

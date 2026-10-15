@@ -4,7 +4,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { server } = require("../server");
+const { server, isPrivatePath } = require("../server");
 
 function request(port, pathname) {
   return new Promise((resolve, reject) => {
@@ -60,6 +60,12 @@ test("denies a public-path symlink to a file outside the project", async () => {
     await fs.writeFile(targetPath, "private");
     await fs.symlink(tempDir, linkPath, "junction");
     assert.equal((await request(server.address().port, `/${name}/outside.txt`)).statusCode, 403);
+  } catch (symErr) {
+    if (symErr.code === "EPERM" || symErr.code === "EACCES") {
+      // Platform permissions unavailable on Windows without Developer Mode
+      return;
+    }
+    throw symErr;
   } finally {
     await fs.unlink(linkPath).catch(() => {});
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -74,9 +80,53 @@ test("denies a public-path symlink into a private project directory", async () =
   try {
     await fs.symlink(path.join(root, "apps", "worker"), linkPath, "junction");
     assert.equal((await request(server.address().port, `/${name}/wrangler.jsonc`)).statusCode, 403);
+  } catch (symErr) {
+    if (symErr.code === "EPERM" || symErr.code === "EACCES") {
+      return;
+    }
+    throw symErr;
   } finally {
     await fs.unlink(linkPath).catch(() => {});
   }
+});
+
+test("denies a public-path symlink into repository directory outside public root", async () => {
+  const root = path.resolve(__dirname, "..");
+  const name = `server-test-escape-${process.pid}-${Date.now()}`;
+  const linkPath = path.join(root, "apps", "web", "dist", name);
+
+  try {
+    await fs.symlink(path.join(root, "packages", "game-core"), linkPath, "junction");
+    assert.equal((await request(server.address().port, `/${name}/src/rules.js`)).statusCode, 403);
+  } catch (symErr) {
+    if (symErr.code === "EPERM" || symErr.code === "EACCES") {
+      return;
+    }
+    throw symErr;
+  } finally {
+    await fs.unlink(linkPath).catch(() => {});
+  }
+});
+
+test("isPrivatePath portably normalizes POSIX and Windows relative paths", () => {
+  const root = path.resolve(__dirname, "..");
+
+  const sensitiveFiles = [
+    path.join(root, "packages", "game-core", "src", "room.js"),
+    path.join(root, "apps", "worker", "wrangler.jsonc"),
+    path.join(root, "packages", "protocol", "src", "index.ts"),
+    path.join(root, "server.js"),
+    path.join(root, "package.json"),
+    path.join(root, ".env")
+  ];
+
+  for (const f of sensitiveFiles) {
+    assert.equal(isPrivatePath(f), true, `Must deny sensitive file: ${f}`);
+  }
+
+  // Non-private public assets must not be denied
+  assert.equal(isPrivatePath(path.join(root, "apps", "web", "dist", "index.html")), false);
+  assert.equal(isPrivatePath(path.join(root, "apps", "web", "dist", "assets", "index.js")), false);
 });
 
 test("serves a public asset", async () => {
@@ -92,6 +142,12 @@ test("serves only the built React app", async () => {
   assert.equal((await request(port, "/src/main.tsx")).statusCode, 404);
   assert.equal((await request(port, "/apps/web/src/legacy/game.js")).statusCode, 404);
   assert.equal((await request(port, "/packages/game-client/src/playhtml-bootstrap.js")).statusCode, 404);
+});
+
+test("returns 404 for directory paths (original 404 contract)", async () => {
+  const port = server.address().port;
+  assert.equal((await request(port, "/fonts")).statusCode, 404);
+  assert.equal((await request(port, "/assets")).statusCode, 404);
 });
 
 test("serves static fonts with correct font MIME types", async () => {
@@ -143,5 +199,3 @@ test("serves static fonts with correct font MIME types", async () => {
     await fs.rm(fixtureDir, { recursive: true, force: true });
   }
 });
-
-

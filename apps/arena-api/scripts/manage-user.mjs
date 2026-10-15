@@ -167,13 +167,20 @@ export async function manageUserCli(argv, io = {}) {
         return 1;
       }
 
+      const validStatuses = new Set(["active", "suspended", "deleted"]);
+      const status = parsed.status || "active";
+      if (!validStatuses.has(status)) {
+        stderr(`Error: invalid status "${status}". Must be active, suspended, or deleted.`);
+        return 1;
+      }
+
       const userId = `usr-${randomUUID()}`;
       const passwordHash = hashPassword(password);
 
       db.prepare(`
         INSERT INTO users (id, normalized_username, password_hash, role, status)
         VALUES (?, ?, ?, ?, ?)
-      `).run(userId, normalizedUsername, passwordHash, parsed.role, parsed.status || "active");
+      `).run(userId, normalizedUsername, passwordHash, parsed.role, status);
 
       stdout(`User created successfully: ${normalizedUsername} (${userId}) [role: ${parsed.role}]`);
       return 0;
