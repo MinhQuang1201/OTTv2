@@ -25,7 +25,20 @@ export interface CompetitionPortalProps {
   readonly userProfile: ArenaUserProfile | null;
   readonly onNavigateTournament?: (tournamentId: string) => void;
   readonly onStartReplay?: (replayDoc: ReplayDocument) => void;
+  readonly onUnauthorized?: (failedSessionOrToken?: number | string | null) => void;
   readonly client?: CompetitionApiClient;
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { statusCode?: unknown }).statusCode ?? (err as { status?: unknown }).status;
+  if (status === 401) return true;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === "string") {
+    const upper = code.toUpperCase();
+    if (upper === "UNAUTHORIZED" || upper === "AUTH_FAILED") return true;
+  }
+  return false;
 }
 
 const PHASE_BADGE_STATUS: Record<CompetitionPhase, BadgeStatus> = {
@@ -41,12 +54,28 @@ export function CompetitionPortal({
   userProfile,
   onNavigateTournament,
   onStartReplay,
+  onUnauthorized,
   client: injectedClient,
 }: CompetitionPortalProps) {
   const clientRef = useRef<CompetitionApiClient>(injectedClient ?? new CompetitionApiClient(gateway));
   useEffect(() => {
     clientRef.current = injectedClient ?? new CompetitionApiClient(gateway);
   }, [injectedClient, gateway]);
+
+  const notifyUnauthorized = useCallback(
+    (err: unknown) => {
+      if (isUnauthorizedError(err)) {
+        const gatewayWithGen = gateway as { getSessionGeneration?(): number };
+        const failedSession =
+          (err as { sessionGeneration?: number }).sessionGeneration ??
+          (typeof gatewayWithGen.getSessionGeneration === "function"
+            ? gatewayWithGen.getSessionGeneration()
+            : (err as { token?: string | null }).token ?? gateway.getToken());
+        onUnauthorized?.(failedSession);
+      }
+    },
+    [gateway, onUnauthorized]
+  );
 
   const [competitions, setCompetitions] = useState<readonly Competition[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -101,6 +130,7 @@ export function CompetitionPortal({
         }
       }
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       if (isMountedRef.current) {
         setCatalog(null);
         setCatalogError((err as Error)?.message || "Không thể tải danh mục cấu hình giải đấu từ máy chủ.");
@@ -110,7 +140,7 @@ export function CompetitionPortal({
         setCatalogLoading(false);
       }
     }
-  }, []);
+  }, [notifyUnauthorized]);
 
   // Load catalog on mount
   useEffect(() => {
@@ -169,6 +199,7 @@ export function CompetitionPortal({
         setSelectedId((prev) => prev || (list.length > 0 ? list[0].id : null));
       }
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       if (isMountedRef.current && !controller.signal.aborted) {
         setError((err as Error)?.message || "Không thể tải danh sách sự kiện.");
       }
@@ -177,7 +208,7 @@ export function CompetitionPortal({
         setLoading(false);
       }
     }
-  }, []);
+  }, [notifyUnauthorized]);
 
   const loadDetail = useCallback(async (id: string) => {
     detailAbortControllerRef.current?.abort();
@@ -193,6 +224,7 @@ export function CompetitionPortal({
         setDetail(res);
       }
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       if (isMountedRef.current && reqSeq === detailReqSeqRef.current && !controller.signal.aborted) {
         setError((err as Error)?.message || "Không thể tải chi tiết sự kiện.");
       }
@@ -201,7 +233,7 @@ export function CompetitionPortal({
         setDetailLoading(false);
       }
     }
-  }, []);
+  }, [notifyUnauthorized]);
 
   // Initial load
   useEffect(() => {
@@ -254,6 +286,7 @@ export function CompetitionPortal({
             offset += botsRes.bots.length;
           } catch (err: unknown) {
             if ((err as Error)?.name === "AbortError" || controller.signal.aborted) return;
+            notifyUnauthorized(err);
             botFetchError = true;
             break;
           }
@@ -279,6 +312,7 @@ export function CompetitionPortal({
             }
           } catch (err: unknown) {
             if ((err as Error)?.name === "AbortError" || controller.signal.aborted) return;
+            notifyUnauthorized(err);
             versionErrors++;
           }
         }
@@ -356,6 +390,7 @@ export function CompetitionPortal({
       setSelectedId(created.id);
       await loadCompetitions();
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || "Không thể tạo sự kiện.");
     } finally {
       setActionLoading(false);
@@ -372,6 +407,7 @@ export function CompetitionPortal({
       setSuccessMsg(`Đã khởi chạy thành công Vòng ${expectedRound}.`);
       await loadDetail(selectedId);
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || `Không thể bắt đầu Vòng ${expectedRound}.`);
     } finally {
       setActionLoading(false);
@@ -388,6 +424,7 @@ export function CompetitionPortal({
       setSuccessMsg("Đăng ký tham gia thành công. Đang chờ ban tổ chức duyệt.");
       await loadDetail(selectedId);
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || "Không thể đăng ký tham gia sự kiện.");
     } finally {
       setActionLoading(false);
@@ -404,6 +441,7 @@ export function CompetitionPortal({
       setSuccessMsg(accepted ? "Đã duyệt người tham gia." : "Đã từ chối người tham gia.");
       await loadDetail(selectedId);
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || "Không thể cập nhật hồ sơ người tham gia.");
     } finally {
       setActionLoading(false);
@@ -421,6 +459,7 @@ export function CompetitionPortal({
       setSuccessMsg("Nộp phiên bản bot thành công.");
       await loadDetail(selectedId);
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || "Không thể nộp phiên bản bot.");
     } finally {
       setActionLoading(false);
@@ -438,6 +477,7 @@ export function CompetitionPortal({
       await loadDetail(selectedId);
       await loadCompetitions();
     } catch (err: unknown) {
+      notifyUnauthorized(err);
       setError((err as Error)?.message || "Không thể chuyển giai đoạn sự kiện.");
     } finally {
       setActionLoading(false);

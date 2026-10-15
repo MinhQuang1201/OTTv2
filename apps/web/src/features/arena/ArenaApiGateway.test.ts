@@ -404,6 +404,141 @@ describe("ArenaApiGateway", () => {
         expect(err.code).toBe("invalid_replay");
       }
     });
+
+    it("runs draft execution and returns referee diagnostics", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          status: "success",
+          isolation: "container",
+          compile: { status: "ok", logs: "" },
+          execution: {
+            legal: true,
+            move: { from: { x: 4, y: 7 }, to: { x: 4, y: 8 } },
+            comment: "draft test move",
+            elapsedMs: 25
+          },
+          nextState: { turn: "B", pieces: [] }
+        })
+      });
+
+      const res = await gateway.runDraft("bot-1", {
+        source: "some bot code",
+        profileId: "node",
+        mapId: "classic"
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.isolation).toBe("container");
+      expect(res.execution?.legal).toBe(true);
+      expect(res.execution?.move?.to.y).toBe(8);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/bots/bot-1/draft/run",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer token-xyz",
+            "Content-Type": "application/json"
+          }),
+          body: JSON.stringify({
+            source: "some bot code",
+            profileId: "node",
+            mapId: "classic"
+          })
+        })
+      );
+    });
+
+    it("fetches incremental live frames with afterPly and attemptNo query parameters", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          matchId: "m-live-1",
+          status: "running",
+          terminal: false,
+          attemptNo: 1,
+          currentPly: 2,
+          reset: false,
+          frames: [
+            { ply: 1, seat: "A", move: { from: { x: 4, y: 7 }, to: { x: 4, y: 8 } } },
+            { ply: 2, seat: "B", move: { from: { x: 4, y: 1 }, to: { x: 4, y: 2 } } }
+          ]
+        })
+      });
+
+      const res = await gateway.getLiveFrames("m-live-1", {
+        afterPly: 0,
+        attemptNo: 1,
+        limit: 50
+      });
+
+      expect(res.matchId).toBe("m-live-1");
+      expect(res.status).toBe("running");
+      expect(res.frames).toHaveLength(2);
+      expect(res.reset).toBe(false);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/matches/m-live-1/live?afterPly=0&attemptNo=1&limit=50",
+        expect.objectContaining({
+          method: "GET",
+          headers: expect.objectContaining({
+            Authorization: "Bearer token-xyz"
+          })
+        })
+      );
+    });
+
+    it("receives reset: true from live frames endpoint when worker resets attempt", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          matchId: "m-live-1",
+          status: "running",
+          terminal: false,
+          attemptNo: 2,
+          currentPly: 0,
+          reset: true,
+          frames: [{ ply: 0, seat: null, move: null }]
+        })
+      });
+
+      const res = await gateway.getLiveFrames("m-live-1", { afterPly: 5, attemptNo: 1 });
+      expect(res.reset).toBe(true);
+      expect(res.attemptNo).toBe(2);
+      expect(res.frames).toHaveLength(1);
+    });
+
+    it("receives terminal: true and replayUrl when match finalized and pruned", async () => {
+      gateway.setToken("token-xyz");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          matchId: "m-live-1",
+          status: "completed",
+          terminal: true,
+          replayUrl: "/api/arena/v1/matches/m-live-1/replay",
+          attemptNo: 0,
+          currentPly: 0,
+          reset: false,
+          frames: []
+        })
+      });
+
+      const res = await gateway.getLiveFrames("m-live-1", { afterPly: 10 });
+      expect(res.terminal).toBe(true);
+      expect(res.status).toBe("completed");
+      expect(res.replayUrl).toBe("/api/arena/v1/matches/m-live-1/replay");
+    });
   });
 
   describe("Error Mapping & Taxonomy", () => {

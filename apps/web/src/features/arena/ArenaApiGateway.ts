@@ -87,6 +87,73 @@ export interface ArenaBotVersionUploadResult {
   } | null;
 }
 
+export type DraftIsolationMode = "container" | "trusted-process";
+
+export interface DraftCompileResult {
+  readonly status: "ok" | "failed";
+  readonly logs: string;
+}
+
+export interface DraftExecutionResult {
+  readonly legal?: boolean;
+  readonly move?: {
+    readonly from: { readonly x: number; readonly y: number };
+    readonly to: { readonly x: number; readonly y: number };
+  };
+  readonly comment?: string | null;
+  readonly elapsedMs?: number;
+  readonly error?: string;
+}
+
+export interface DraftRunResult {
+  readonly status: "success" | "compile_error" | "execution_error" | "unavailable";
+  readonly isolation?: DraftIsolationMode;
+  readonly error?: string;
+  readonly details?: Record<string, unknown>;
+  readonly compile?: DraftCompileResult;
+  readonly execution?: DraftExecutionResult;
+  readonly nextState?: object;
+}
+
+export interface LiveFrameRecord {
+  readonly ply: number;
+  readonly seat?: Seat | "A" | "B" | null;
+  readonly move?: {
+    readonly from: { readonly x: number; readonly y: number };
+    readonly to: { readonly x: number; readonly y: number };
+  } | null;
+  readonly capturedPieceId?: string | null;
+  readonly capturedPieceType?: string | null;
+  readonly elapsedMs?: number;
+  readonly remainingMs?: number;
+  readonly comment?: string | null;
+  readonly clock?: {
+    readonly remainingMs?: { readonly A?: number; readonly B?: number };
+    readonly runningSeat?: Seat | "A" | "B" | null;
+    readonly [key: string]: unknown;
+  } | object;
+  readonly state?: {
+    readonly turn?: string | null;
+    readonly winner?: string | null;
+    readonly reason?: string | null;
+    readonly pieces?: readonly any[];
+    readonly clock?: any;
+    readonly [key: string]: unknown;
+  } | object;
+  readonly [key: string]: unknown;
+}
+
+export interface LiveFramesQueryResult {
+  readonly matchId: string;
+  readonly status: string;
+  readonly terminal: boolean;
+  readonly replayUrl?: string | null;
+  readonly attemptNo: number;
+  readonly currentPly: number;
+  readonly reset: boolean;
+  readonly frames: readonly LiveFrameRecord[];
+}
+
 export interface ArenaMatchParticipant {
   readonly match_id?: string;
   readonly matchId?: string;
@@ -424,6 +491,19 @@ export class ArenaApiGateway {
     );
   }
 
+  async runDraft(
+    botId: string,
+    data: { source: string; profileId: string; mapId?: string },
+    options: RequestOptions = {}
+  ): Promise<DraftRunResult> {
+    return this.request<DraftRunResult>(
+      `/bots/${encodeURIComponent(botId)}/draft/run`,
+      "POST",
+      data,
+      options
+    );
+  }
+
   async listMatches(
     options: {
       ladderId?: string;
@@ -494,6 +574,30 @@ export class ArenaApiGateway {
       });
     }
     return res;
+  }
+
+  async getLiveFrames(
+    matchId: string,
+    params: { afterPly?: number; attemptNo?: number | null; limit?: number } = {},
+    options: RequestOptions = {}
+  ): Promise<LiveFramesQueryResult> {
+    const searchParams = new URLSearchParams();
+    if (params.afterPly !== undefined) {
+      searchParams.set("afterPly", String(params.afterPly));
+    }
+    if (params.attemptNo !== undefined && params.attemptNo !== null) {
+      searchParams.set("attemptNo", String(params.attemptNo));
+    }
+    if (params.limit !== undefined) {
+      searchParams.set("limit", String(params.limit));
+    }
+    const qs = searchParams.toString();
+    return this.request<LiveFramesQueryResult>(
+      `/matches/${encodeURIComponent(matchId)}/live${qs ? `?${qs}` : ""}`,
+      "GET",
+      undefined,
+      options
+    );
   }
 
   async listTournaments(options?: RequestOptions): Promise<readonly ArenaTournamentSummary[]> {

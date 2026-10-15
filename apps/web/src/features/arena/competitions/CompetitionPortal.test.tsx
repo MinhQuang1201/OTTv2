@@ -105,6 +105,37 @@ describe("CompetitionPortal", () => {
       });
     });
 
+    it("notifies onUnauthorized with opaque session identifier when API returns HTTP 401", async () => {
+      const onUnauthorizedMock = vi.fn();
+      gateway.setToken("expired-token-xyz");
+      const gatewayWithGen = gateway as { getSessionGeneration?(): number };
+      const currentGen =
+        typeof gatewayWithGen.getSessionGeneration === "function"
+          ? gatewayWithGen.getSessionGeneration()
+          : gateway.getToken();
+      vi.spyOn(client, "listCompetitions").mockRejectedValueOnce(
+        new CompetitionApiError("Authentication required", {
+          code: "UNAUTHORIZED",
+          statusCode: 401,
+          token: "expired-token-xyz",
+          sessionGeneration: typeof gatewayWithGen.getSessionGeneration === "function" ? (currentGen as number) : undefined,
+        })
+      );
+
+      render(
+        <CompetitionPortal
+          gateway={gateway}
+          client={client}
+          userProfile={authorProfile}
+          onUnauthorized={onUnauthorizedMock}
+        />
+      );
+
+      await waitFor(() => {
+        expect(onUnauthorizedMock).toHaveBeenCalledWith(currentGen);
+      });
+    });
+
     it("displays error banner and retries when clicking Thử lại", async () => {
       const user = userEvent.setup();
       vi.spyOn(client, "listCompetitions")
@@ -931,7 +962,7 @@ describe("CompetitionPortal", () => {
           },
         ],
         standings: [
-          { botId: "bot-1", points: 3, matchesPlayed: 1, wins: 1, draws: 0, losses: 0, byes: 0 },
+          { botId: "bot-1", points: 3, played: 1, wins: 1, draws: 0, losses: 0, byeCount: 0 },
         ],
       });
 

@@ -13,6 +13,7 @@ import type {
 export interface GatewayTokenProvider {
   getBaseUrl(): string;
   getToken(): string | null;
+  getSessionGeneration?(): number;
 }
 
 export interface RequestOptions {
@@ -25,6 +26,7 @@ export class CompetitionApiError extends Error {
   readonly statusCode: number;
   readonly requestId?: string;
   readonly details?: Record<string, unknown>;
+  readonly sessionGeneration?: number;
 
   constructor(
     message: string,
@@ -33,6 +35,8 @@ export class CompetitionApiError extends Error {
       statusCode: number;
       requestId?: string;
       details?: Record<string, unknown>;
+      sessionGeneration?: number;
+      token?: string | null;
     }
   ) {
     super(message);
@@ -41,7 +45,25 @@ export class CompetitionApiError extends Error {
     this.statusCode = options.statusCode;
     this.requestId = options.requestId;
     this.details = options.details;
+    this.sessionGeneration = options.sessionGeneration;
+
+    // Security & Privacy: Never enumerate or serialize raw bearer tokens in Error objects
+    if (options.token !== undefined) {
+      Object.defineProperty(this, "token", {
+        value: options.token,
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      });
+    }
   }
+}
+
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export class CompetitionApiClient {
@@ -66,6 +88,11 @@ export class CompetitionApiClient {
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
+
+    const sessionGeneration =
+      typeof this.gateway.getSessionGeneration === "function"
+        ? this.gateway.getSessionGeneration()
+        : undefined;
 
     if (options.idempotencyKey) {
       headers["Idempotency-Key"] = options.idempotencyKey;
@@ -124,6 +151,7 @@ export class CompetitionApiClient {
         statusCode: response.status,
         requestId,
         details,
+        sessionGeneration,
       });
     }
 
@@ -153,7 +181,7 @@ export class CompetitionApiClient {
   async createCompetition(data: CreateCompetitionRequest, options?: RequestOptions): Promise<Competition> {
     const res = await this.request<{ competition: Competition }>("/competitions", "POST", data, {
       ...options,
-      idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+      idempotencyKey: options?.idempotencyKey || generateIdempotencyKey(),
     });
     return res.competition;
   }
@@ -246,4 +274,3 @@ export class CompetitionApiClient {
     );
   }
 }
-

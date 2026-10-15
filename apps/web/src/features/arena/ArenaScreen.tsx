@@ -13,6 +13,7 @@ import {
   ArenaApiError,
   type ArenaBot,
   type ArenaBotVersion,
+  type ArenaCapabilities,
   type ArenaLeaderboardRating,
   type ArenaMatchDetails,
   type ArenaMatchParticipant,
@@ -23,7 +24,15 @@ import {
 } from "./ArenaApiGateway";
 import { CompetitionPortal } from "./competitions/CompetitionPortal";
 import styles from "./arena.module.css";
-import { BotSourceEditor, MAX_SOURCE_BYTES, PracticeMatchPanel, getProfileInfo, normalizeProfileId } from "./bots";
+import {
+  BotSourceEditor,
+  DraftPreviewPanel,
+  MAX_SOURCE_BYTES,
+  PracticeMatchPanel,
+  getProfileInfo,
+  normalizeProfileId,
+} from "./bots";
+import { LiveMatchPanel } from "./matches";
 
 function computeSourceBytes(code: string): number {
   if (typeof TextEncoder !== "undefined") {
@@ -65,6 +74,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const [matchDetailsMap, setMatchDetailsMap] = useState<Record<string, ArenaMatchDetails>>({});
   const [matchKindFilter, setMatchKindFilter] = useState<string>("");
   const [matchStatusFilter, setMatchStatusFilter] = useState<string>("");
+  const [liveMatchId, setLiveMatchId] = useState<string | null>(null);
   const [tournamentId, setTournamentId] = useState("tourn-main");
   const [tournamentDetails, setTournamentDetails] = useState<ArenaTournamentDetailsResponse | null>(null);
   const [readyVersionsForTourney, setReadyVersionsForTourney] = useState<readonly ReadyBotVersionOption[]>([]);
@@ -76,6 +86,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const [availableProfiles, setAvailableProfiles] = useState<readonly string[]>(["node", "python"]);
   const [newProfileId, setNewProfileId] = useState("node");
   const [newTournName, setNewTournName] = useState("");
+  const [capabilities, setCapabilities] = useState<ArenaCapabilities | null>(null);
 
   // Loading & error
   const [loading, setLoading] = useState(false);
@@ -87,6 +98,13 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const isMountedRef = useRef(true);
   const screenGenerationRef = useRef(0);
   const pendingControllersRef = useRef(new Set<AbortController>());
+  const draftRunnerRef = useRef<(() => Promise<void>) | null>(null);
+
+  const handleRunDraftFromEditor = useCallback(() => {
+    if (draftRunnerRef.current) {
+      void draftRunnerRef.current();
+    }
+  }, []);
 
   const abortAllPending = useCallback(() => {
     for (const controller of pendingControllersRef.current) {
@@ -160,6 +178,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
       try {
         const caps = await gateway.getCapabilities({ signal: controller.signal });
         if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) return;
+        setCapabilities(caps);
         if (caps?.profiles && Array.isArray(caps.profiles) && caps.profiles.length > 0) {
           setAvailableProfiles(caps.profiles);
           setCapabilitiesError(null);
@@ -371,7 +390,37 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
     }
   };
 
+  const handleSessionExpired = useCallback(
+    (failedSessionOrToken?: number | string | null) => {
+      // Guard against stale 401 from superseded session when user already has a new session
+      const gatewayWithGen = gateway as { getSessionGeneration?(): number };
+      if (
+        typeof failedSessionOrToken === "number" &&
+        typeof gatewayWithGen.getSessionGeneration === "function"
+      ) {
+        if (failedSessionOrToken !== gatewayWithGen.getSessionGeneration()) {
+          return;
+        }
+      } else if (typeof failedSessionOrToken === "number") {
+        return;
+      } else if (typeof failedSessionOrToken === "string") {
+        const currentToken = gateway.getToken();
+        if (currentToken && failedSessionOrToken !== currentToken) {
+          return;
+        }
+      }
+      abortAllPending();
+      screenGenerationRef.current += 1;
+      gateway.setToken(null);
+      setUserProfile(null);
+      handleRefresh();
+    },
+    [gateway, abortAllPending]
+  );
+
   const handleLogout = async () => {
+    abortAllPending();
+    screenGenerationRef.current += 1;
     const controller = new AbortController();
     pendingControllersRef.current.add(controller);
     const generation = screenGenerationRef.current;
@@ -665,7 +714,11 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
               <Button type="submit" variant="primary" disabled={isLoggingIn}>
                 {isLoggingIn ? "Đang xử lý..." : "Đăng nhập"}
               </Button>
-              {loginError && <span className={styles.errorBanner}>{loginError}</span>}
+              {loginError && (
+                <span className={styles.errorBanner} role="alert" data-testid="login-error-alert">
+                  {loginError}
+                </span>
+              )}
             </form>
           )}
         </div>
@@ -887,6 +940,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                         value={newSourceCode}
                         onChange={setNewSourceCode}
                         profileId={newProfileId}
+                        onRunDraft={handleRunDraftFromEditor}
                         disabled={!userProfile?.canSubmitSource || availableProfiles.length === 0}
                       />
                     </div>
@@ -905,6 +959,21 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                       Nộp phiên bản
                     </Button>
                   </form>
+
+                  {selectedBotId && (
+                    <DraftPreviewPanel
+                      gateway={gateway}
+                      botId={selectedBotId}
+                      currentSource={newSourceCode}
+                      currentProfileId={newProfileId}
+                      savedVersions={botVersions}
+                      availableProfiles={availableProfiles}
+                      capabilities={capabilities}
+                      onRegisterRunDraft={(runner) => {
+                        draftRunnerRef.current = runner;
+                      }}
+                    />
+                  )}
                 </div>
 
                 {userProfile && userProfile.user.role !== "spectator" && (
@@ -968,6 +1037,16 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
 
           {activeTab === "matches" && (
             <Panel heading="Lịch sử trận đấu Arena">
+              {liveMatchId && (
+                <div style={{ marginBottom: "1.25rem" }}>
+                  <LiveMatchPanel
+                    gateway={gateway}
+                    matchId={liveMatchId}
+                    onClose={() => setLiveMatchId(null)}
+                    onStartReplay={onStartReplay}
+                  />
+                </div>
+              )}
               <div className={styles.filterBar}>
                 <div>
                   <label htmlFor="filter-kind" style={{ marginRight: "0.5rem" }}>Loại trận:</label>
@@ -1024,6 +1103,15 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                           {!details && (
                             <Button variant="quiet" onClick={() => handleLoadMatchDetails(m.id)}>
                               Chi tiết
+                            </Button>
+                          )}
+                          {(m.status === "active" || m.status === "pending") && (
+                            <Button
+                              variant="secondary"
+                              onClick={() => setLiveMatchId(m.id)}
+                              data-testid={`match-live-${m.id}`}
+                            >
+                              Xem trực tiếp
                             </Button>
                           )}
                           {m.status === "completed" && (
@@ -1171,6 +1259,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                 setActiveTab("tournaments");
               }}
               onStartReplay={onStartReplay}
+              onUnauthorized={handleSessionExpired}
             />
           )}
         </main>

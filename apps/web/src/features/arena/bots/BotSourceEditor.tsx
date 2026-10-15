@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type UIEvent } from "react";
 import { getProfileInfo, getTemplateForProfile, type ProfileInfo } from "./templates";
+import { tokenizeCode } from "./codeTokenizer";
 import styles from "./botEditor.module.css";
 
 export const MAX_SOURCE_BYTES = 262_144; // 256 KiB default limit for bot sources
@@ -8,6 +9,7 @@ export interface BotSourceEditorProps {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly profileId: string;
+  readonly onRunDraft?: () => void;
   readonly disabled?: boolean;
   readonly maxBytes?: number;
   readonly className?: string;
@@ -30,6 +32,7 @@ export function BotSourceEditor({
   value,
   onChange,
   profileId,
+  onRunDraft,
   disabled = false,
   maxBytes = MAX_SOURCE_BYTES,
   className,
@@ -69,6 +72,9 @@ export function BotSourceEditor({
     }
   }, [profileId]);
 
+  const overlayRef = useRef<HTMLPreElement>(null);
+  const lineNumbersRef = useRef<HTMLDivElement>(null);
+
   const profileInfo: ProfileInfo = useMemo(() => getProfileInfo(profileId), [profileId]);
 
   const byteLength = useMemo(() => computeUtf8ByteLength(value), [value]);
@@ -77,9 +83,36 @@ export function BotSourceEditor({
   const isOverLimit = byteLength > maxBytes;
   const isNearLimit = byteLength > maxBytes * 0.9 && !isOverLimit;
 
-  // Handle Tab key inside textarea to insert 2 spaces
+  const tokens = useMemo(() => tokenizeCode(value, profileId), [value, profileId]);
+
+  const lineNumbers = useMemo(() => {
+    const count = Math.max(1, lineCount);
+    return Array.from({ length: count }, (_, i) => i + 1);
+  }, [lineCount]);
+
+  const handleScroll = useCallback((e: UIEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    if (overlayRef.current) {
+      overlayRef.current.scrollTop = target.scrollTop;
+      overlayRef.current.scrollLeft = target.scrollLeft;
+    }
+    if (lineNumbersRef.current) {
+      lineNumbersRef.current.scrollTop = target.scrollTop;
+    }
+  }, []);
+
+  // Handle Tab key (indent) and Ctrl/Cmd+Enter (run draft)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onRunDraft) {
+          onRunDraft();
+        }
+        return;
+      }
+
       if (e.key === "Tab") {
         e.preventDefault();
         const textarea = e.currentTarget;
@@ -95,7 +128,7 @@ export function BotSourceEditor({
         });
       }
     },
-    [value, onChange]
+    [value, onChange, onRunDraft]
   );
 
   // Load starter template with draft confirmation
@@ -303,35 +336,70 @@ export function BotSourceEditor({
         </div>
       )}
 
-      {/* Editor & textarea */}
+      {/* Editor & textarea with syntax highlight overlay */}
       <div className={styles.editorArea}>
-        <textarea
-          id={textareaId}
+        <div
           className={[
-            styles.sourceTextarea,
-            disabled ? styles.sourceTextareaDisabled : "",
-            isOverLimit ? styles.sourceTextareaDanger : "",
+            styles.editorContainer,
+            disabled ? styles.editorContainerDisabled : "",
+            isOverLimit ? styles.editorContainerDanger : "",
           ].join(" ")}
-          value={value}
-          onChange={(e) => {
-            activeReadIdRef.current++;
-            if (activeReaderRef.current) {
-              activeReaderRef.current.abort();
-              activeReaderRef.current = null;
-            }
-            onChange(e.target.value);
-            if (fileError) setFileError(null);
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          placeholder="// Nhập hoặc dán mã nguồn bot tại đây..."
-          aria-label="Mã nguồn bot"
-          aria-describedby={`${statusId} ${showHint ? hintId : ""}`}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoComplete="off"
-          autoCorrect="off"
-        />
+        >
+          {/* Line numbers gutter */}
+          <div className={styles.lineNumbers} aria-hidden="true" ref={lineNumbersRef}>
+            {lineNumbers.map((num) => (
+              <div key={num} className={styles.lineNumber}>
+                {num}
+              </div>
+            ))}
+          </div>
+
+          <div className={styles.textareaWrapper}>
+            {/* Syntax highlighted overlay: aria-hidden="true", never dangerouslySetInnerHTML */}
+            <pre ref={overlayRef} className={styles.syntaxOverlay} aria-hidden="true">
+              <code>
+                {tokens.map((token, idx) =>
+                  token.type === "text" ? (
+                    token.content
+                  ) : (
+                    <span key={idx} className={styles[`token_${token.type}`]}>
+                      {token.content}
+                    </span>
+                  )
+                )}
+              </code>
+            </pre>
+
+            <textarea
+              id={textareaId}
+              className={[
+                styles.sourceTextarea,
+                disabled ? styles.sourceTextareaDisabled : "",
+                isOverLimit ? styles.sourceTextareaDanger : "",
+              ].join(" ")}
+              value={value}
+              onChange={(e) => {
+                activeReadIdRef.current++;
+                if (activeReaderRef.current) {
+                  activeReaderRef.current.abort();
+                  activeReaderRef.current = null;
+                }
+                onChange(e.target.value);
+                if (fileError) setFileError(null);
+              }}
+              onKeyDown={handleKeyDown}
+              onScroll={handleScroll}
+              disabled={disabled}
+              placeholder="// Nhập hoặc dán mã nguồn bot tại đây..."
+              aria-label="Mã nguồn bot"
+              aria-describedby={`${statusId} ${showHint ? hintId : ""}`}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+            />
+          </div>
+        </div>
 
         {/* Status bar */}
         <div id={statusId} className={styles.statusBar}>

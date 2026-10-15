@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { ArenaScreen } from "./ArenaScreen";
 import { ArenaApiGateway } from "./ArenaApiGateway";
+import { CompetitionApiClient, CompetitionApiError } from "./competitions";
+import { createMockCatalog } from "./competitions/competitionTestFixtures";
 import deterministicFixture from "../../../../../tests/fixtures/arena/replays/deterministic-match.json";
 import * as replayImportMod from "../replay/replayImport";
 
@@ -735,6 +737,256 @@ describe("ArenaScreen", () => {
           expect.anything()
         );
       });
+    });
+  });
+
+  describe("Draft Workbench & Live Match Spectating Integration", () => {
+    it("renders DraftPreviewPanel in the Bots tab when a bot is selected", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "bot-1", ownerId: "u-admin", name: "AlphaBot", status: "active", createdAt: "2026-10-15T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("draft-preview-panel")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Thử nghiệm Bot \(Draft Workbench\)/i)).toBeInTheDocument();
+    });
+
+    it("renders Xem trực tiếp button for active matches and opens LiveMatchPanel", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-spectator", username: "spec", role: "spectator" },
+        canSubmitSource: false
+      });
+      gateway.setToken("spec-tok");
+
+      vi.spyOn(gateway, "listMatches").mockResolvedValue({
+        matches: [
+          {
+            id: "m-active-1",
+            kind: "ranked",
+            status: "active",
+            createdAt: "2026-10-15T00:00:00Z",
+          },
+          {
+            id: "m-completed-2",
+            kind: "practice",
+            status: "completed",
+            createdAt: "2026-10-15T00:00:00Z",
+          }
+        ],
+        total: 2,
+        limit: 20,
+        offset: 0
+      });
+
+      vi.spyOn(gateway, "getLiveFrames").mockResolvedValue({
+        matchId: "m-active-1",
+        status: "running",
+        terminal: false,
+        attemptNo: 1,
+        currentPly: 0,
+        reset: false,
+        frames: []
+      });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Trận đấu/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("match-live-m-active-1")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("match-live-m-completed-2")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("match-live-m-active-1"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("live-match-panel")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Theo dõi trực tiếp: m-active-1/i)).toBeInTheDocument();
+    });
+
+    it("invoking Ctrl+Enter inside BotSourceEditor triggers draft run without submitting upload version form", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true,
+      });
+      gateway.setToken("admin-tok");
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "bot-1", ownerId: "u-admin", name: "AlphaBot", status: "active", createdAt: "2026-10-15T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      const runDraftSpy = vi.spyOn(gateway, "runDraft").mockResolvedValue({
+        status: "success",
+        isolation: "trusted-process",
+        compile: { status: "ok", logs: "Compile OK" },
+        execution: { legal: true, elapsedMs: 12 },
+      });
+      const uploadVersionSpy = vi.spyOn(gateway, "uploadBotVersion");
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Mã nguồn bot")).toBeInTheDocument();
+      });
+
+      const textarea = screen.getByLabelText("Mã nguồn bot");
+      fireEvent.change(textarea, { target: { value: "const myMove = { from: { x: 4, y: 7 }, to: { x: 4, y: 8 } };" } });
+
+      // Press Ctrl+Enter inside the editor textarea
+      fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+      await waitFor(() => {
+        expect(runDraftSpy).toHaveBeenCalledWith(
+          "bot-1",
+          expect.objectContaining({
+            source: expect.stringContaining("const myMove"),
+          }),
+          expect.any(Object)
+        );
+      });
+
+      // Crucial: uploadBotVersion must NOT have been called!
+      expect(uploadVersionSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Accessibility & Session Invalidation", () => {
+    it("exposes accessible role alert when login fails", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "login").mockRejectedValueOnce(new Error("Tên đăng nhập hoặc mật khẩu không đúng"));
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      const userInput = screen.getByLabelText(/Tên đăng nhập/i);
+      const passInput = screen.getByLabelText(/Mật khẩu/i);
+      await user.type(userInput, "alice");
+      await user.type(passInput, "wrongpass");
+      await user.click(screen.getByRole("button", { name: /Đăng nhập/i }));
+
+      await waitFor(() => {
+        const alert = screen.getByTestId("login-error-alert");
+        expect(alert).toHaveAttribute("role", "alert");
+        expect(alert).toHaveTextContent("Tên đăng nhập hoặc mật khẩu không đúng");
+      });
+    });
+
+    it("invalidates session from CompetitionPortal HTTP 401 callback while preserving unsaved editor draft", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-author", username: "author", role: "author" },
+        canSubmitSource: true,
+      });
+      gateway.setToken("active-author-tok");
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-author", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      // Spy on CompetitionApiClient to trigger HTTP 401
+      vi.spyOn(CompetitionApiClient.prototype, "listCompetitions").mockRejectedValue(
+        new CompetitionApiError("Phiên làm việc hết hạn", {
+          code: "UNAUTHORIZED",
+          statusCode: 401,
+        })
+      );
+      vi.spyOn(CompetitionApiClient.prototype, "getCatalog").mockResolvedValue(createMockCatalog());
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      // Switch to bot management tab and type unsaved draft code into editor
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      await waitFor(() => {
+        expect(screen.getByLabelText("Mã nguồn bot")).toBeInTheDocument();
+      });
+      const textarea = screen.getByLabelText("Mã nguồn bot");
+      fireEvent.change(textarea, { target: { value: "const preservedDraftCode = 9999;" } });
+
+      // Switch to competitions tab, which will trigger the 401
+      await user.click(screen.getByRole("tab", { name: /Sự kiện thi đấu/i }));
+
+      // Verify session is invalidated: gateway token cleared, user logged out
+      await waitFor(() => {
+        expect(gateway.getToken()).toBeNull();
+        expect(screen.getByRole("button", { name: /Đăng nhập/i })).toBeInTheDocument();
+      });
+
+      // Switch back to bot tab and verify unsaved draft remains preserved
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      expect((screen.getByLabelText("Mã nguồn bot") as HTMLTextAreaElement).value).toBe("const preservedDraftCode = 9999;");
+    });
+
+    it("does not clear fresh session if 401 callback has stale superseded token", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-author", username: "author", role: "author" },
+        canSubmitSource: true,
+      });
+      gateway.setToken("fresh-token-456");
+
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-1", ownerId: "u-author", name: "MyBot", status: "active", createdAt: "2026-10-14T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      // When listCompetitions rejects, it throws with stale sessionGeneration or stale token
+      const gatewayWithGen = gateway as { getSessionGeneration?(): number };
+      const staleGen = typeof gatewayWithGen.getSessionGeneration === "function" ? 9999 : undefined;
+      vi.spyOn(CompetitionApiClient.prototype, "listCompetitions").mockRejectedValue(
+        new CompetitionApiError("Old session expired", {
+          code: "UNAUTHORIZED",
+          statusCode: 401,
+          token: "stale-token-123",
+          sessionGeneration: staleGen,
+        })
+      );
+      vi.spyOn(CompetitionApiClient.prototype, "getCatalog").mockResolvedValue(createMockCatalog());
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Đăng xuất/i })).toBeInTheDocument();
+      });
+
+      // Switch to competitions tab, triggering the 401 with stale token "stale-token-123"
+      await user.click(screen.getByRole("tab", { name: /Sự kiện thi đấu/i }));
+
+      // Wait a tick to ensure any async error processing has run
+      await waitFor(() => {
+        expect(screen.getByText("Old session expired")).toBeInTheDocument();
+      });
+
+      // Crucial: fresh session must NOT have been invalidated!
+      expect(gateway.getToken()).toBe("fresh-token-456");
+      expect(screen.getByRole("button", { name: /Đăng xuất/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Đăng nhập/i })).not.toBeInTheDocument();
     });
   });
 });

@@ -10,3 +10,8 @@ export {
   normalizeProfileId,
   type ProfileInfo,
 } from "./templates";
+export {
+  DraftPreviewPanel,
+  type DraftPreviewPanelProps,
+  type DraftPanelMode,
+} from "./DraftPreviewPanel";

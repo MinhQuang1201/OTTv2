@@ -80,11 +80,12 @@ export interface CompetitionAggregateStanding {
   readonly botId: string;
   readonly botName?: string;
   readonly points: number;
-  readonly matchesPlayed: number;
   readonly wins: number;
   readonly draws: number;
   readonly losses: number;
-  readonly byes?: number;
+  readonly played: number;
+  readonly byeCount: number;
+  readonly seatBalance?: number;
   readonly rank?: number;
 }
 

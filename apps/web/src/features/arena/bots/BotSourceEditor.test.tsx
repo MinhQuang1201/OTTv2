@@ -509,4 +509,56 @@ describe("BotSourceEditor component", () => {
       window.FileReader = originalFileReader;
     }
   });
+
+  it("invokes onRunDraft upon Ctrl+Enter and Cmd+Enter without submitting parent form", () => {
+    const onChange = vi.fn();
+    const onRunDraft = vi.fn();
+    const onSubmit = vi.fn((e) => e.preventDefault());
+
+    render(
+      <form onSubmit={onSubmit}>
+        <BotSourceEditor
+          value="const x = 1;"
+          onChange={onChange}
+          profileId="node"
+          onRunDraft={onRunDraft}
+        />
+        <button type="submit">Submit Form</button>
+      </form>
+    );
+
+    const textarea = screen.getByLabelText("Mã nguồn bot");
+
+    // Press Ctrl+Enter
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    expect(onRunDraft).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Press Cmd+Enter
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    expect(onRunDraft).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("renders syntax highlighted overlay with aria-hidden and line numbers gutter", () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <BotSourceEditor
+        value={`// Comment\nfunction test() {\n  return 42;\n}`}
+        onChange={onChange}
+        profileId="node"
+      />
+    );
+
+    const overlay = container.querySelector("pre[aria-hidden='true']");
+    expect(overlay).toBeInTheDocument();
+    expect(overlay).toHaveTextContent("function");
+    expect(overlay).toHaveTextContent("test");
+    expect(overlay).toHaveTextContent("42");
+
+    const gutter = container.querySelector("div[aria-hidden='true']");
+    expect(gutter).toBeInTheDocument();
+    expect(gutter).toHaveTextContent("1");
+    expect(gutter).toHaveTextContent("4");
+  });
 });

@@ -82,7 +82,7 @@ export function CompetitionRounds({
     setNextLoading(true);
     setError(null);
     try {
-      await onNextRound(nextRoundNumber);
+      await onNextRound(currentRoundNo);
     } catch (err: unknown) {
       setError((err as Error)?.message || `Không thể bắt đầu Vòng ${nextRoundNumber}.`);
     } finally {
@@ -176,10 +176,10 @@ export function CompetitionRounds({
           {/* Byes notification */}
           {selectedRound.byes && selectedRound.byes.length > 0 && (
             <div className={styles.byeList} role="status" aria-label="Danh sách bot nhận điểm miễn đấu">
-              <strong>Miễn đấu (Byes):</strong>
+              <strong>{configuration?.formatId === "swiss" ? "Miễn đấu (Byes):" : "Nghỉ vòng:"}</strong>
               {selectedRound.byes.map((b) => (
                 <span key={b} className={styles.erroredMatchWarning} style={{ color: "#856404" }}>
-                  Bot <code>{b}</code> (+3 điểm)
+                  Bot <code>{b}</code> ({configuration?.formatId === "swiss" ? "+3" : "0"} điểm)
                 </span>
               ))}
             </div>
@@ -250,11 +250,11 @@ export function CompetitionRounds({
                     <td><strong>#{st.rank ?? idx + 1}</strong></td>
                     <td><strong>{st.botName || st.botId}</strong></td>
                     <td><strong style={{ color: "var(--ui-primary, #2b6cb0)" }}>{st.points}</strong></td>
-                    <td>{st.matchesPlayed}</td>
+                    <td>{st.played}</td>
                     <td>{st.wins}</td>
                     <td>{st.draws}</td>
                     <td>{st.losses}</td>
-                    <td>{st.byes ?? 0}</td>
+                    <td>{st.byeCount}</td>
                   </tr>
                 ))}
               </tbody>

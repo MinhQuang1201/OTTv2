@@ -391,5 +391,53 @@ describe("CompetitionApiClient", () => {
       statusCode: 0,
     });
   });
-});
 
+  it("generates fallback idempotency key when crypto.randomUUID is unavailable", async () => {
+    const originalCrypto = globalThis.crypto;
+    // Simulate non-secure context where crypto.randomUUID is undefined
+    const cryptoWithoutUUID = { ...originalCrypto, randomUUID: undefined };
+    Object.defineProperty(globalThis, "crypto", {
+      value: cryptoWithoutUUID,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      (fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          competition: { id: "c-fallback", name: "Fallback Test", phase: "registration", createdAt: "2026-10-15T00:00:00Z" },
+        }),
+      });
+
+      const comp = await client.createCompetition({ name: "Fallback Test" });
+      expect(comp.id).toBe("c-fallback");
+      const lastCall = (fetch as any).mock.calls[(fetch as any).mock.calls.length - 1];
+      const sentHeaders = lastCall[1].headers;
+      const sentKey = sentHeaders["Idempotency-Key"];
+      expect(sentKey).toBeDefined();
+      expect(sentKey).toMatch(/^idem-\d+-[a-z0-9]+$/);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", {
+        value: originalCrypto,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  it("keeps identity data private and does not leak bearer token into Error serialization", () => {
+    const error = new CompetitionApiError("Unauthorized test", {
+      code: "UNAUTHORIZED",
+      statusCode: 401,
+      sessionGeneration: 3,
+      token: "secret-bearer-token-12345",
+    });
+
+    expect(error.sessionGeneration).toBe(3);
+    // Token is non-enumerable and never serialized
+    expect(Object.keys(error)).not.toContain("token");
+    expect(JSON.stringify(error)).not.toContain("secret-bearer-token-12345");
+  });
+});
