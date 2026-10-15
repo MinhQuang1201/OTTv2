@@ -375,6 +375,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 arenaGateway={effectiveArenaGateway}
                 arenaAvailable={effectiveArenaAvailable}
                 onOpenArena={onOpenArena}
+                onlineGateway={onlineGateway}
               />
             </ScreenBoundary>
           </div>
@@ -384,7 +385,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -401,6 +402,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly arenaGateway: ArenaApiGateway;
   readonly arenaAvailable: boolean;
   readonly onOpenArena: () => void;
+  readonly onlineGateway?: OnlineLobbyGateway;
 }) {
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error" && state.error.code === "room_unavailable" && state.snapshot?.viewer?.role === "spectator") return (
@@ -434,6 +436,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onWatchMatch={onWatchMatch}
     onOpenArena={onOpenArena}
     arenaAvailable={arenaAvailable}
+    onlineGateway={onlineGateway}
   />;
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
@@ -448,6 +451,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onWatchMatch={onWatchMatch}
     onOpenArena={onOpenArena}
     arenaAvailable={arenaAvailable}
+    onlineGateway={onlineGateway}
   />;
   if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;

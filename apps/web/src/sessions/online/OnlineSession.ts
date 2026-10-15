@@ -10,6 +10,7 @@ export interface OnlineSessionDependencies {
   readonly gateway?: OnlineLobbyGateway;
   readonly runtime?: RuntimeBridge;
   readonly clientFactory?: (options: Record<string, unknown>) => PlayhtmlGameClientLike;
+  readonly controlRequest?: (action: string, body?: unknown) => Promise<unknown>;
   readonly now?: () => number;
   readonly performanceNow?: () => number;
   readonly setInterval?: (handler: () => void, timeout: number) => ReturnType<typeof globalThis.setInterval>;
@@ -38,6 +39,7 @@ export class OnlineSession implements GameSession {
   private readonly gateway: OnlineLobbyGateway;
   private readonly runtime: RuntimeBridge;
   private readonly clientFactory: NonNullable<OnlineSessionDependencies["clientFactory"]>;
+  private readonly controlRequestFn: ((action: string, body?: unknown) => Promise<unknown>) | null;
   private readonly now: () => number;
   private readonly performanceNow: () => number;
   private readonly setIntervalFn: NonNullable<OnlineSessionDependencies["setInterval"]>;
@@ -70,6 +72,22 @@ export class OnlineSession implements GameSession {
       if (!Constructor) throw new Error("PlayHTML game client is unavailable");
       return new Constructor(options as any);
     });
+    this.controlRequestFn = deps.controlRequest ?? (
+      typeof (this.gateway as any).resumeRoom === "function" || typeof (this.gateway as any).controlRequest === "function"
+        ? async (action: string, body?: unknown) => {
+            if (action === "resume") {
+              const candidate = body as { allocationId?: string; resumeCredential?: string } | undefined;
+              if (typeof candidate?.allocationId === "string" && typeof candidate?.resumeCredential === "string") {
+                return this.gateway.resumeRoom(candidate.allocationId, candidate.resumeCredential);
+              }
+            }
+            if (typeof (this.gateway as any).controlRequest === "function") {
+              return (this.gateway as any).controlRequest(action, body);
+            }
+            throw new Error(`Unsupported control action: ${action}`);
+          }
+        : null
+    );
     this.now = deps.now ?? (() => Date.now());
     this.performanceNow = deps.performanceNow ?? (() => typeof performance !== "undefined" ? performance.now() : Date.now());
     this.setIntervalFn = deps.setInterval ?? ((handler, timeout) => globalThis.setInterval(handler, timeout));
@@ -99,9 +117,16 @@ export class OnlineSession implements GameSession {
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "preparing", connection: "connecting", error: null });
     this.publish();
     try {
+      const rawOptions = options as any;
+      const isExplicitInvite = rawOptions.intent === "invite" && typeof rawOptions.inviteToken === "string";
+      const isRoomIdInvite = options.intent === "join" && options.roomId.trim().startsWith("inv_");
       const allocation = options.intent === "create"
         ? await this.gateway.createRoom(options.playerName)
-        : await this.gateway.joinRoom(options.playerName, options.roomId);
+        : isExplicitInvite
+          ? await this.gateway.claimSeatInvite(rawOptions.inviteToken, rawOptions.playerName)
+          : isRoomIdInvite
+            ? await this.gateway.claimSeatInvite(options.roomId, options.playerName)
+            : await this.gateway.joinRoom(options.playerName, options.roomId);
       if (!this.isCurrentGeneration(generation)) return;
       this.allocation = allocation;
       if (!this.host) throw new Error("PlayHTML host is unavailable");
@@ -109,6 +134,7 @@ export class OnlineSession implements GameSession {
         connectionFactory: () => this.runtime.connectionFactory(),
         playhtmlBootstrap: (config: { host: string; room: string }) => this.runtime.bootstrap(config),
         playhtmlHost: this.host,
+        ...(this.controlRequestFn ? { controlRequest: this.controlRequestFn } : {}),
       });
       if (!this.isCurrentGeneration(generation)) return;
       this.client = client;
@@ -182,13 +208,36 @@ export class OnlineSession implements GameSession {
     bind("state", (payload) => this.applyState(payload));
     bind("gameover", (payload) => this.applyGameover(payload));
     bind("left", () => { void this.leave(); });
-    bind("error", (payload) => this.fail(error(this.snapshot.phase === "playing" ? "connection_failed" : "room_unavailable", clientMessage(payload, "Kết nối online gặp lỗi."), true)));
+    bind("error", (payload) => {
+      const err = payload as Record<string, unknown> | undefined;
+      if (err?.error === "stale_revision" || err?.code === "stale_revision") {
+        if (this.snapshot.pendingMove) {
+          this.snapshot = Object.freeze({ ...this.snapshot, pendingMove: false });
+          this.publish();
+        }
+        return;
+      }
+      this.fail(error(this.snapshot.phase === "playing" ? "connection_failed" : "room_unavailable", clientMessage(payload, "Kết nối online gặp lỗi."), true));
+    });
   }
 
   private applyState(payload: unknown): void {
     if (this.disposed || this.snapshot.phase === "finished" || !this.client || !payload || typeof payload !== "object") return;
     const message = payload as OnlineStateMessage;
-    if (!Number.isInteger(message.revision) || message.revision <= this.serverRevision) return;
+    if (!Number.isInteger(message.revision) || message.revision < this.serverRevision) return;
+    const isReconnecting = this.snapshot.connection === "reconnecting" || this.snapshot.connection === "connecting";
+    const viewerNeedsUpdate = !this.snapshot.viewer || (message.you && this.snapshot.viewerSeat !== message.you);
+    if (message.revision === this.serverRevision && !isReconnecting && !viewerNeedsUpdate && this.rawState !== null) {
+      const prevA = this.snapshot.players.A?.connected;
+      const nextA = message.players?.A?.connected !== false;
+      const prevB = this.snapshot.players.B?.connected;
+      const nextB = message.players?.B?.connected !== false;
+      const prevSpec = this.snapshot.spectatorCount;
+      const nextSpec = message.spectatorCount ?? 0;
+      if (prevA === nextA && prevB === nextB && prevSpec === nextSpec) {
+        return;
+      }
+    }
     const normalized = normalizeOnlineState(message, this.performanceNow(), this.boardRevision);
     if (!normalized) return;
     if (normalized.boardFingerprint !== this.lastFingerprint) this.boardRevision = Math.max(this.boardRevision + 1, normalized.serverRevision);

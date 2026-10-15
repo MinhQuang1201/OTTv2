@@ -7,6 +7,7 @@ const result = spawnSync(process.execPath, ["--test", "tests/browser-worker-runt
     ...process.env,
     OTT_BROWSER_RUNTIME_TEST: "1",
     OTT_SPECTATOR_RUNTIME_TEST: process.argv.includes("--spectator") ? "1" : process.env.OTT_SPECTATOR_RUNTIME_TEST,
+    OTT_RECONNECT_RUNTIME_TEST: process.argv.includes("--reconnect") ? "1" : process.env.OTT_RECONNECT_RUNTIME_TEST,
   },
 });
 

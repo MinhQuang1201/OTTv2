@@ -294,4 +294,55 @@ describe("OnlineSession", () => {
 
     expect(runtime.dispose).not.toHaveBeenCalled();
   });
+
+  it("wires controlRequest to clientFactory options so reconnect auto-resume can function", async () => {
+    let capturedOptions: Record<string, unknown> | null = null;
+    const client = new FakeClient();
+    const resumeRoomMock = vi.fn(async () => allocation);
+    const controlRequestMock = vi.fn(async () => ({ ok: true }));
+    const gateway = {
+      available: true,
+      createRoom: vi.fn(async () => allocation),
+      resumeRoom: resumeRoomMock,
+      controlRequest: controlRequestMock,
+    } as unknown as OnlineLobbyGateway;
+    const runtime = { bootstrap: vi.fn(async () => undefined), connectionFactory: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const session = new OnlineSession({
+      gateway,
+      runtime,
+      clientFactory: (opts) => { capturedOptions = opts; return client; },
+      host: "https://play.example",
+    });
+
+    await session.start({ mode: "online", intent: "create", playerName: "An" });
+    const opts = capturedOptions as Record<string, unknown> | null;
+    expect(opts).not.toBeNull();
+    expect(typeof opts?.controlRequest).toBe("function");
+    const controlReq = opts?.controlRequest as (action: string, body?: unknown) => Promise<unknown>;
+    await controlReq("resume", { allocationId: "alloc-1", resumeCredential: "cred" });
+    expect(resumeRoomMock).toHaveBeenCalledWith("alloc-1", "cred");
+    await controlReq("custom-action", { ping: true });
+    expect(controlRequestMock).toHaveBeenCalledWith("custom-action", { ping: true });
+  });
+
+  it("accepts same-revision state snapshot during reconnect, restoring capabilities, legal moves and online status", async () => {
+    const client = new FakeClient();
+    const session = sessionWith(client);
+    await session.start({ mode: "online", intent: "create", playerName: "An" });
+    client.emit("state", state(2));
+    expect(session.getSnapshot().connection).toBe("online");
+    expect(session.getSnapshot().capabilities.canMove).toBe(true);
+    expect(session.getLegalMoves({ x: 0, y: 2 }).length).toBeGreaterThan(0);
+
+    // Disconnect happens
+    client.emit("close");
+    expect(session.getSnapshot().connection).toBe("reconnecting");
+
+    // Server sends reconnected state at SAME revision (revision 2)
+    client.emit("state", state(2));
+    expect(session.getSnapshot().connection).toBe("online");
+    expect(session.getSnapshot().viewerSeat).toBe("A");
+    expect(session.getSnapshot().capabilities.canMove).toBe(true);
+    expect(session.getLegalMoves({ x: 0, y: 2 }).length).toBeGreaterThan(0);
+  });
 });

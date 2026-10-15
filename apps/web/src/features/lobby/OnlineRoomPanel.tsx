@@ -73,9 +73,12 @@ export function OnlineRoomPanel({
       <div className={styles.onlineActions}>
         <Button disabled={!isReady} onClick={create}>Tạo phòng</Button>
         <div className={styles.joinRow}>
-          <TextField label="Mã phòng" value={roomId} onChange={(event) => { setRoomId(event.currentTarget.value); if (roomError) setRoomError(null); }} error={roomError ?? undefined} placeholder="Ví dụ: room-7" autoComplete="off" />
+          <TextField label="Mã phòng" value={roomId} onChange={(event) => { setRoomId(event.currentTarget.value); if (roomError) setRoomError(null); }} error={roomError ?? undefined} placeholder="Ví dụ: room-7, K7N-M4P hoặc inv_..." autoComplete="off" />
           <Button variant="secondary" disabled={!isReady} onClick={join}>Vào phòng</Button>
         </div>
+        <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--ui-text-muted, #888)" }}>
+          Hỗ trợ mã phòng, bí danh ngắn (như K7N-M4P) hoặc mã lời mời giải đấu (inv_...).
+        </p>
       </div>
       <WaitingRoomList
         state={waitingRooms.status === "error" && !waitingRooms.onRetry && onRetryRooms ? { ...waitingRooms, onRetry: onRetryRooms } : waitingRooms}

@@ -9,3 +9,10 @@ interface Env {
   OTT_TEST_CREATOR_ATTACH_TTL_MS?: string;
   OTT_BROWSER_ORIGIN?: string;
 }
+
+declare namespace Cloudflare {
+  type Env = globalThis.Env;
+}
+
+type Document = unknown;
+type Node = unknown;

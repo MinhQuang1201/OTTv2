@@ -33,7 +33,7 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    const controlPath = /^\/control\/(create|list|join|resume|active|spectate)\/?$/.test(pathname);
+    const controlPath = /^\/control\/[a-zA-Z0-9_:-]+\/?$/.test(pathname);
     const origin = request.headers.get("origin");
     const browserOriginAllowed = typeof env.OTT_BROWSER_ORIGIN === "string" && origin === env.OTT_BROWSER_ORIGIN;
     if (request.method === "OPTIONS" && controlPath && browserOriginAllowed) {

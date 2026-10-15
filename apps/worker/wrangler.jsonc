@@ -70,6 +70,7 @@
         "OTT_TEST_CLOCK_MS": "600000",
         "OTT_TEST_RECONNECT_GRACE_MS": "300000",
         "OTT_TEST_CREATOR_ATTACH_TTL_MS": "600000",
+        "OTT_SPECTATOR_ENABLED": "true",
         "OTT_BROWSER_ORIGIN": "http://127.0.0.1:3000"
       }
     }

@@ -13,6 +13,8 @@ import { parseReplayFile } from "../replay/replayImport";
 import { getGameCoreBridge } from "../../sessions/core/gameCoreBridge";
 import { normalizeCoreState } from "../../sessions/core/normalizeCoreState";
 import type { PieceType, Seat } from "../../shared/model/game";
+import { HumanTournamentDialog } from "../tournaments/HumanTournamentDialog";
+import type { OnlineLobbyGateway } from "../../sessions/online/OnlineLobbyGateway";
 import styles from "./lobby.module.css";
 
 interface MiniBoardState {
@@ -60,6 +62,7 @@ export interface LobbyScreenProps {
   readonly onOpenArena?: () => void;
   readonly arenaAvailable?: boolean;
   readonly allowDemoWatch?: boolean;
+  readonly onlineGateway?: OnlineLobbyGateway;
 }
 
 export function LobbyScreen({
@@ -75,6 +78,7 @@ export function LobbyScreen({
   onOpenArena,
   arenaAvailable,
   allowDemoWatch,
+  onlineGateway,
 }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   const [playerNameError, setPlayerNameError] = useState<string | null>(null);
@@ -82,6 +86,7 @@ export function LobbyScreen({
   const [importError, setImportError] = useState<string | null>(null);
   const importGenerationRef = useRef(0);
   const miniBoardState = useMemo(() => getInitialMiniBoard(), []);
+  const [showTournamentDialog, setShowTournamentDialog] = useState(false);
 
   useEffect(() => setPlayerName(readPlayerName()), []);
   useEffect(() => {
@@ -269,6 +274,16 @@ export function LobbyScreen({
                 }}
               />
             )}
+            <ModeCard
+              title="Giải đấu người chơi"
+              description="Tham gia bằng mã mời hoặc tổ chức giải đấu vòng tròn / Thụy Sĩ."
+              actionLabel="Mở giải đấu"
+              icon={<PixelSprite kind="trophy" size={24} decorative />}
+              onSelect={() => {
+                importGenerationRef.current += 1;
+                setShowTournamentDialog(true);
+              }}
+            />
           </div>
           {onStartReplay && (
             <>
@@ -311,6 +326,20 @@ export function LobbyScreen({
           onWatch={onWatchMatch}
           allowDemoWatch={allowDemoWatch}
         />
+
+        {showTournamentDialog ? (
+          <HumanTournamentDialog
+            isOpen={showTournamentDialog}
+            onClose={() => setShowTournamentDialog(false)}
+            playerName={normalizedName}
+            onlineAvailable={onlineAvailability === "online"}
+            gateway={onlineGateway}
+            onJoinMatch={(code) => {
+              setShowTournamentDialog(false);
+              joinOnline(normalizedName || "Người chơi", code);
+            }}
+          />
+        ) : null}
       </div>
     </section>
   );

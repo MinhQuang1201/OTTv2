@@ -204,5 +204,17 @@ describe("LobbyScreen", () => {
     expect(cell01?.querySelector('[class*="miniPieceSprite"]')).toBeNull();
     expect(cell02?.querySelector('[class*="miniPieceSprite"]')).toBeNull();
   });
+
+  it("renders human tournament mode card and opens tournament dialog on click", async () => {
+    const user = userEvent.setup();
+    renderLobby();
+
+    const tourneyCard = screen.getByRole("button", { name: "Mở giải đấu" });
+    expect(tourneyCard).toBeInTheDocument();
+    await user.click(tourneyCard);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByText("Giải đấu người chơi").length).toBeGreaterThanOrEqual(1);
+  });
 });
 

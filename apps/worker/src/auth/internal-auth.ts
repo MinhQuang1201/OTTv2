@@ -34,7 +34,7 @@ export type CapabilityPayloadVariant = PlayerCapability | SpectatorCapability;
 export interface CapabilityTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
-  delete?(key: string): Promise<void>;
+  delete?(key: string): Promise<boolean | void>;
   list?<T>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   setAlarm?(scheduledTime: number | Date): Promise<void>;
   deleteAlarm?(): Promise<void>;
@@ -409,7 +409,7 @@ export async function verifyCapability(
   secret: string,
   token: string,
   expected: PlayerCapabilityExpectations,
-  now = Date.now(),
+  now?: number,
 ): Promise<PlayerCapability | null>;
 export async function verifyCapability(
   secret: string,
@@ -455,7 +455,7 @@ export async function verifyCapabilityDetailed(
   secret: string,
   token: string,
   expected: PlayerCapabilityExpectations,
-  now = Date.now(),
+  now?: number,
 ): Promise<PlayerCapabilityVerification>;
 export async function verifyCapabilityDetailed(
   secret: string,
@@ -501,7 +501,10 @@ export async function verifyCapabilityDetailed(
     if (typeof payload.nonce !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(payload.nonce)) return { ok: false, reason: "nonce" };
     const valid = await crypto.subtle.verify("HMAC", await keyFor(secret), fromBase64url(parts[1]), encoder.encode(encoded));
     if (!valid) return { ok: false, reason: "signature" };
-    return { ok: true, payload };
+    if (payload.v === SPECTATOR_CAPABILITY_VERSION) {
+      return { ok: true, payload: payload as SpectatorCapability };
+    }
+    return { ok: true, payload: payload as PlayerCapability };
   } catch {
     return { ok: false, reason: "parse" };
   }
@@ -514,7 +517,7 @@ export async function verifyCapabilityTransaction<T>(
   expected: PlayerCapabilityExpectations,
   transaction: CapabilityTransactionRunner,
   mutate: (payload: PlayerCapability, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
-  options: { now?: number; noncePrefix?: string } = {},
+  options?: { now?: number; noncePrefix?: string },
 ): Promise<TransactionalPlayerCapabilityVerification<T>>;
 export async function verifyCapabilityTransaction<T>(
   secret: string,
@@ -537,7 +540,7 @@ export async function verifyCapabilityTransaction<T>(
   token: string,
   expected: CapabilityExpectations,
   transaction: CapabilityTransactionRunner,
-  mutate: (payload: CapabilityPayloadVariant, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
+  mutate: (payload: any, storage: CapabilityTransaction) => Promise<{ accepted: boolean; value: T }>,
   options: { now?: number; noncePrefix?: string } = {},
 ): Promise<TransactionalCapabilityVerification<T>> {
   const verification = await verifyCapabilityDetailed(secret, token, expected, options.now ?? Date.now());
@@ -554,7 +557,7 @@ export async function verifyCapabilityTransaction<T>(
     });
   } catch (error) {
     if (typeof error === "object" && error !== null && "capabilityMutationRejected" in error && error.capabilityMutationRejected === true) {
-      return { ok: false, reason: "mutation-rejected", value: error.value as T };
+      return { ok: false, reason: "mutation-rejected", value: (error as any).value as T };
     }
     console.warn("OTT capability transaction failed", error instanceof Error ? error.message : typeof error);
     return { ok: false, reason: "transaction-failed" };
@@ -584,7 +587,13 @@ export async function verifySpectatorCapabilityTransaction<T>(
 }
 
 export interface AttachRecoveryAdapter<C, T extends { ok?: boolean }> {
-  attach(connection: C, seat: PlayerCapability["seat"], name: string | undefined, storage: CapabilityTransaction): Promise<T>;
+  attach(
+    connection: C,
+    seat: PlayerCapability["seat"],
+    name: string | undefined,
+    storage: CapabilityTransaction,
+    isLiveConnection?: (candidate: C) => boolean,
+  ): Promise<T>;
   forget(connection: C): void;
   reloadPersisted(): Promise<void>;
   scheduleAlarm(storage?: CapabilityTransaction): Promise<void>;
@@ -598,9 +607,10 @@ export async function attachWithCapabilityRecovery<C, T extends { ok?: boolean }
   transaction: CapabilityTransactionRunner,
   adapter: AttachRecoveryAdapter<C, T>,
   connection: C,
+  isLiveConnection?: (candidate: C) => boolean,
 ): Promise<TransactionalPlayerCapabilityVerification<T>> {
   const result = await verifyCapabilityTransaction(secret, token, expected, transaction, async (payload, storage) => {
-    const attached = await adapter.attach(connection, payload.seat, undefined, storage);
+    const attached = await adapter.attach(connection, payload.seat, undefined, storage, isLiveConnection);
     if (attached?.ok === true) await adapter.scheduleAlarm(storage);
     return { accepted: attached?.ok === true, value: attached };
   }, { noncePrefix: "attach-nonce" });
@@ -649,6 +659,206 @@ export async function purgeExpiredNonces(
   }
 
   return purgedCount;
+}
+
+export type SeatInviteRecord = {
+  allocationId: string;
+  roomId: string;
+  seat: PlayerCapability["seat"];
+  inviteToken: string;
+  inviteeName?: string;
+  createdAt: number;
+  expiresAt: number;
+  claimed: boolean;
+  claimedBy?: string;
+  claimStatus?: "unclaimed" | "pending" | "confirmed";
+  claimProofSalt?: string;
+  claimProofHash?: string;
+  pendingCredential?: string;
+};
+
+export const SEAT_INVITE_TTL_MS = 10 * 60_000;
+
+export async function claimProofHash(claimId: string, salt: string): Promise<string> {
+  const bytes = encoder.encode(`${salt}:${claimId}`);
+  return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+export async function verifyClaimProof(claimId: string, salt: string, expectedHash: string): Promise<boolean> {
+  if (typeof claimId !== "string" || !claimId || typeof salt !== "string" || typeof expectedHash !== "string") {
+    return false;
+  }
+  const candidate = await claimProofHash(claimId, salt);
+  return constantTimeStringEqual(candidate, expectedHash);
+}
+
+/** Issue a seat-specific invite token and store it transactionally. */
+export async function createSeatInvite(
+  storage: CapabilityTransaction,
+  input: {
+    allocationId: string;
+    roomId: string;
+    seat: PlayerCapability["seat"];
+    inviteeName?: string;
+    ttlMs?: number;
+    now?: number;
+  },
+): Promise<SeatInviteRecord> {
+  const now = input.now ?? Date.now();
+  const expiresAt = now + (input.ttlMs ?? SEAT_INVITE_TTL_MS);
+  const inviteToken = `inv_${randomBase64url(24)}`;
+  const record: SeatInviteRecord = {
+    allocationId: input.allocationId,
+    roomId: input.roomId,
+    seat: input.seat,
+    inviteToken,
+    ...(input.inviteeName ? { inviteeName: input.inviteeName } : {}),
+    createdAt: now,
+    expiresAt,
+    claimed: false,
+    claimStatus: "unclaimed",
+  };
+  await storage.put(`seat-invite:${inviteToken}`, record);
+  return record;
+}
+
+/** Claim a seat-specific invite token atomically and issue the single-use attach capability ticket. */
+export async function claimSeatInvite(
+  storage: CapabilityTransaction,
+  secret: string,
+  input: {
+    inviteToken: string;
+    playerName: string;
+    claimId?: string;
+    resumeCredential?: string;
+    now?: number;
+  },
+): Promise<
+  | { ok: true; allocationId: string; roomId: string; seat: PlayerCapability["seat"]; ticket: string; resumeCredential: string; isRetry?: boolean }
+  | { ok: false; error: "invite_not_found" | "invite_already_claimed" | "invite_expired" | "seat_already_occupied" }
+> {
+  const now = input.now ?? Date.now();
+  const inviteKey = `seat-invite:${input.inviteToken}`;
+  const invite = await storage.get<SeatInviteRecord>(inviteKey);
+  if (!invite) return { ok: false, error: "invite_not_found" };
+  if (invite.expiresAt <= now) return { ok: false, error: "invite_expired" };
+
+  if (invite.claimed) {
+    // If already confirmed: strictly consumed single-use invite
+    if (invite.claimStatus === "confirmed") {
+      return { ok: false, error: "invite_already_claimed" };
+    }
+
+    // If pending: MUST authenticate with high-entropy claimant proof, NEVER name!
+    if (invite.claimStatus === "pending") {
+      let authenticated = false;
+      let resumeCred = invite.pendingCredential;
+
+      // 1. Authenticate via claimId hash verification
+      if (invite.claimProofHash && invite.claimProofSalt && typeof input.claimId === "string" && input.claimId) {
+        if (await verifyClaimProof(input.claimId, invite.claimProofSalt, invite.claimProofHash)) {
+          authenticated = true;
+        }
+      } else if (typeof input.resumeCredential === "string" && input.resumeCredential) {
+        // 2. Authenticate via legacy owner credential verification
+        const credentialKey = `owner-credential:${invite.allocationId}:${invite.seat}`;
+        const previous = await storage.get<OwnerCredentialRecord>(credentialKey);
+        if (previous && (await verifyOwnerCredential(input.resumeCredential, previous))) {
+          authenticated = true;
+          resumeCred = input.resumeCredential;
+        }
+      }
+
+      if (authenticated && resumeCred) {
+        const ticketNonce = createCapabilityNonce();
+        const ticket = await issueCapability(secret, {
+          allocationId: invite.allocationId,
+          roomId: invite.roomId,
+          purpose: "attach",
+          seat: invite.seat,
+          now,
+          nonce: ticketNonce,
+        });
+        const ticketKey = `owner-ticket:${invite.allocationId}:${invite.seat}`;
+        await storage.put(ticketKey, { nonce: ticketNonce, expiresAt: now + CAPABILITY_TTL_MS } satisfies OwnerTicketRecord);
+
+        return {
+          ok: true,
+          allocationId: invite.allocationId,
+          roomId: invite.roomId,
+          seat: invite.seat,
+          ticket,
+          resumeCredential: resumeCred,
+          isRetry: true,
+        };
+      }
+
+      // Deny: same-name outsiders or unproven callers get NO credentials or ticket
+      return { ok: false, error: "invite_already_claimed" };
+    }
+
+    return { ok: false, error: "invite_already_claimed" };
+  }
+
+  // Guard against overwriting occupied seat credentials!
+  const credentialKey = `owner-credential:${invite.allocationId}:${invite.seat}`;
+  const existingCred = await storage.get<OwnerCredentialRecord>(credentialKey);
+  if (existingCred) {
+    return { ok: false, error: "seat_already_occupied" };
+  }
+
+  invite.claimed = true;
+  invite.claimedBy = input.playerName;
+  invite.claimStatus = "pending";
+
+  const owner = await createOwnerCredential();
+
+  if (typeof input.claimId === "string" && input.claimId.length >= 16) {
+    const salt = randomBase64url(16);
+    const hash = await claimProofHash(input.claimId, salt);
+    invite.claimProofSalt = salt;
+    invite.claimProofHash = hash;
+    invite.pendingCredential = owner.credential;
+  }
+
+  await storage.put(inviteKey, invite);
+
+  const ticketNonce = createCapabilityNonce();
+  const ticket = await issueCapability(secret, {
+    allocationId: invite.allocationId,
+    roomId: invite.roomId,
+    purpose: "attach",
+    seat: invite.seat,
+    now,
+    nonce: ticketNonce,
+  });
+
+  const ticketKey = `owner-ticket:${invite.allocationId}:${invite.seat}`;
+  await storage.put(credentialKey, { salt: owner.salt, hash: owner.hash });
+  await storage.put(ticketKey, { nonce: ticketNonce, expiresAt: now + CAPABILITY_TTL_MS } satisfies OwnerTicketRecord);
+
+  return {
+    ok: true,
+    allocationId: invite.allocationId,
+    roomId: invite.roomId,
+    seat: invite.seat,
+    ticket,
+    resumeCredential: owner.credential,
+  };
+}
+
+/** Confirm that an invite claim was successfully acknowledged by the game server and PURGE pending plaintext credentials. */
+export async function confirmSeatInvite(
+  storage: CapabilityTransaction,
+  inviteToken: string,
+): Promise<void> {
+  const inviteKey = `seat-invite:${inviteToken}`;
+  const invite = await storage.get<SeatInviteRecord>(inviteKey);
+  if (invite) {
+    invite.claimStatus = "confirmed";
+    delete invite.pendingCredential;
+    await storage.put(inviteKey, invite);
+  }
 }
 
 export function internalRequest(secret: string, path: string, body: unknown): Request {

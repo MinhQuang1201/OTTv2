@@ -158,6 +158,53 @@ test("DurableRoomAdapter attaches using Lobby-persisted names rather than a brow
   assert.equal(adapter.room.players.B.name, "Trusted Bob");
 });
 
+test("DurableRoomAdapter resumes a seat when its previous socket is already closed", async () => {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const values = new Map([ ["creatorName", "Trusted Alice"] ]);
+  const storage = {
+    get: async (key) => values.get(key),
+    put: async (key, value) => { values.set(key, value); },
+  };
+  const adapter = await DurableRoomAdapter.create("ott-room-reconnect", storage, () => 100, { reconnectGraceMs: 5_000 });
+  const first = { id: "connection-A-old", readyState: 3, open: false, send() {} };
+  const replacement = { id: "connection-A-new", readyState: 1, open: true, send() {} };
+
+  assert.equal((await adapter.attach(first, "A", undefined)).ok, true);
+  const resumed = await adapter.attach(replacement, "A", undefined);
+
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.seat, "A");
+  assert.equal(adapter.room.players.A.connection, replacement);
+  assert.equal(adapter.room.players.A.connected, true);
+});
+
+test("DurableRoomAdapter rejects an active seat but replaces closing and closed sockets", async () => {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const storage = {
+    get: async (key) => key === "creatorName" ? "Trusted Alice" : undefined,
+    put: async () => undefined,
+  };
+
+  const activeAdapter = await DurableRoomAdapter.create("ott-room-active-seat", storage, () => 100);
+  const active = { id: "connection-active", readyState: 1, open: true, send() {} };
+  assert.equal((await activeAdapter.attach(active, "A", undefined)).ok, true);
+  const activeReplacement = { id: "connection-active-replacement", readyState: 1, open: true, send() {} };
+  assert.equal((await activeAdapter.attach(activeReplacement, "A", undefined, storage, () => true)).error, "Ghế đã được sử dụng");
+
+  for (const [label, readyState] of [["closing", 2], ["closed", 3]]) {
+    const adapter = await DurableRoomAdapter.create(`ott-room-${label}-seat`, storage, () => 100, { reconnectGraceMs: 5_000 });
+    const oldConnection = { id: `connection-${label}-old`, readyState, open: readyState !== 3, send() {} };
+    const replacement = { id: `connection-${label}-new`, readyState: 1, open: true, send() {} };
+    assert.equal((await adapter.attach(oldConnection, "A", undefined)).ok, true);
+    assert.equal((await adapter.attach(replacement, "A", undefined, storage, (candidate) => candidate.readyState === 1)).ok, true);
+    assert.equal(adapter.room.players.A.connection, replacement);
+
+    await adapter.close(oldConnection);
+    assert.equal(adapter.room.players.A.connection, replacement, `${label} close must not clear replacement ownership`);
+    assert.equal(adapter.room.players.A.connected, true);
+  }
+});
+
 test("DurableRoomAdapter refuses to attach when the trusted seat name is missing", async () => {
   const { DurableRoomAdapter } = await roomStorageModule();
   const values = new Map();

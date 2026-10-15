@@ -8,7 +8,7 @@ const PUBLIC_ROOM_PATH = /^\/parties\/(main\/(ott-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
-    const controlPath = /^\/control\/(create|list|join|resume|active|spectate)\/?$/.test(pathname);
+    const controlPath = /^\/control\/[a-zA-Z0-9_:-]+\/?$/.test(pathname);
     const origin = request.headers.get("origin");
     const browserOriginAllowed = typeof env.OTT_BROWSER_ORIGIN === "string" && origin === env.OTT_BROWSER_ORIGIN;
     if (request.method === "OPTIONS" && controlPath && browserOriginAllowed) {

@@ -118,10 +118,19 @@ function parseClientMessage(raw) {
       if (!validString(message.resumeToken)) return error(ERROR_CODES.INVALID_TOKEN);
       return success({ type: message.type, roomId, resumeToken: message.resumeToken });
     }
-    case "ott:move":
-      return hasOnlyKeys(message, ["type", "from", "to"]) && validPoint(message.from) && validPoint(message.to)
-        ? success({ type: message.type, from: { x: message.from.x, y: message.from.y }, to: { x: message.to.x, y: message.to.y } })
+    case "ott:move": {
+      const isLegacy = hasOnlyKeys(message, ["type", "from", "to"]);
+      const isWithRevision = hasOnlyKeys(message, ["type", "from", "to", "expectedRevision"]) &&
+        Number.isSafeInteger(message.expectedRevision) && message.expectedRevision >= 0;
+      return (isLegacy || isWithRevision) && validPoint(message.from) && validPoint(message.to)
+        ? success({
+            type: message.type,
+            from: { x: message.from.x, y: message.from.y },
+            to: { x: message.to.x, y: message.to.y },
+            ...(message.expectedRevision !== undefined ? { expectedRevision: message.expectedRevision } : {})
+          })
         : error(ERROR_CODES.INVALID_MOVE);
+    }
     default:
       return error(ERROR_CODES.UNSUPPORTED_TYPE);
   }
