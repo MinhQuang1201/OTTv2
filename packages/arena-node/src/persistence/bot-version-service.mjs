@@ -494,9 +494,47 @@ export function createBotVersionService(options) {
     if (!buildService) {
       throw new Error("processBuildJob requires buildService in options");
     }
-    const { jobId, leaseOwner = "worker", leaseDurationMs = 30000 } = params;
+    const { jobId, leaseOwner = "worker", leaseDurationMs = 30000, claimedLease = null } = params;
 
-    const lease = claimBuildJob({ jobId, leaseOwner, leaseDurationMs });
+    let lease;
+    if (claimedLease) {
+      if (
+        claimedLease.jobId !== jobId ||
+        (claimedLease.kind && claimedLease.kind !== "build") ||
+        !claimedLease.leaseOwner ||
+        claimedLease.leaseOwner !== leaseOwner ||
+        typeof claimedLease.attemptNo !== "number" ||
+        !claimedLease.leaseToken
+      ) {
+        throw new StaleLeaseError(`Build job lease does not match the requested job or worker`, {
+          jobId,
+          attemptNo: claimedLease.attemptNo,
+          leaseToken: claimedLease.leaseToken
+        });
+      }
+
+      const current = stmts.selectJob.get(jobId);
+      const leaseActive = current && current.status === "claimed" && current.lease_owner === leaseOwner &&
+        current.attempt_no === claimedLease.attemptNo && current.lease_token === claimedLease.leaseToken &&
+        current.lease_until && db.prepare("SELECT datetime('now') <= ? AS is_active").get(current.lease_until)?.is_active === 1;
+      if (!leaseActive) {
+        throw new StaleLeaseError(`Build job lease is stale, expired, or overtaken`, {
+          jobId,
+          attemptNo: claimedLease.attemptNo,
+          leaseToken: claimedLease.leaseToken
+        });
+      }
+
+      lease = {
+        jobId,
+        attemptNo: current.attempt_no,
+        leaseToken: current.lease_token,
+        leaseUntil: current.lease_until,
+        targetId: current.target_id
+      };
+    } else {
+      lease = claimBuildJob({ jobId, leaseOwner, leaseDurationMs });
+    }
     const botVer = stmts.selectBotVersion.get(lease.targetId);
     if (!botVer) throw new NotFoundError("bot_version", lease.targetId);
 

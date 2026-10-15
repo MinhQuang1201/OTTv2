@@ -148,6 +148,21 @@ export function createMatchFinalizer(db, _options = {}) {
     WHERE job_id = ? AND attempt_no = ?
   `);
 
+  let deleteLiveFramesStmt = null;
+  function getDeleteLiveFramesStmt() {
+    if (deleteLiveFramesStmt === null) {
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'match_live_frames'")
+        .get();
+      if (hasTable) {
+        deleteLiveFramesStmt = db.prepare("DELETE FROM match_live_frames WHERE match_id = ?");
+      } else {
+        deleteLiveFramesStmt = false;
+      }
+    }
+    return deleteLiveFramesStmt || null;
+  }
+
   function finalizeMatch(envelope) {
     if (!envelope || !envelope.matchId) {
       throw new MatchValidationError("Invalid envelope: missing matchId", "INVALID_ENVELOPE");
@@ -546,6 +561,12 @@ export function createMatchFinalizer(db, _options = {}) {
 
       // 9. Complete match
       completeMatchStmt.run(settlementSeq, match.id);
+
+      // Prune incremental live frames projection upon match finalization
+      const pruneFrames = getDeleteLiveFramesStmt();
+      if (pruneFrames) {
+        pruneFrames.run(match.id);
+      }
 
       // Check if tournament all matches completed
       if (match.tournament_id) {

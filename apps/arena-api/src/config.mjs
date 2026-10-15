@@ -12,6 +12,7 @@
  * - maxSourceBytes: 1048576 (1 MiB)
  * - trustedMode: true (admin curated only, untrusted is disabled fail-closed)
  * - externalWorker: false (API runs embedded worker unless externalWorker is set)
+ * - localDemoContainers: false (explicit local Docker acceptance mode)
  */
 
 import path from "node:path";
@@ -25,7 +26,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   maxBodyBytes: 1048576, // 1 MiB
   maxSourceBytes: 1048576, // 1 MiB
   trustedMode: true,
-  externalWorker: false
+  externalWorker: false,
+  localDemoContainers: false
 });
 
 /**
@@ -80,17 +82,32 @@ export function loadConfig(overrides = {}) {
       DEFAULT_CONFIG.maxSourceBytes
   );
 
+  const externalWorker =
+    overrides.externalWorker !== undefined
+      ? Boolean(overrides.externalWorker)
+      : process.env.ARENA_EXTERNAL_WORKER === "true" || process.env.ARENA_EXTERNAL_WORKER === "1";
+
+  const localDemoContainers =
+    overrides.localDemoContainers !== undefined
+      ? Boolean(overrides.localDemoContainers)
+      : process.env.ARENA_LOCAL_DEMO_CONTAINERS === "true" || process.env.ARENA_LOCAL_DEMO_CONTAINERS === "1";
+
   const trustedMode =
     overrides.trustedMode !== undefined
       ? Boolean(overrides.trustedMode)
       : process.env.ARENA_TRUSTED_MODE !== undefined
       ? process.env.ARENA_TRUSTED_MODE === "true" || process.env.ARENA_TRUSTED_MODE === "1"
+      : localDemoContainers
+      ? false
       : DEFAULT_CONFIG.trustedMode;
 
-  const externalWorker =
-    overrides.externalWorker !== undefined
-      ? Boolean(overrides.externalWorker)
-      : process.env.ARENA_EXTERNAL_WORKER === "true" || process.env.ARENA_EXTERNAL_WORKER === "1";
+  if (localDemoContainers && trustedMode) {
+    throw new Error("localDemoContainers cannot be combined with trustedMode");
+  }
+
+  if (localDemoContainers && bind !== "127.0.0.1" && bind !== "localhost" && bind !== "::1") {
+    throw new Error("ARENA_LOCAL_DEMO_CONTAINERS requires a loopback API bind address");
+  }
 
   return {
     bind,
@@ -101,6 +118,7 @@ export function loadConfig(overrides = {}) {
     maxBodyBytes,
     maxSourceBytes,
     trustedMode,
-    externalWorker
+    externalWorker,
+    localDemoContainers
   };
 }

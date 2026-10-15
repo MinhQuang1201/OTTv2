@@ -41,6 +41,8 @@ let BotVersionNotReadyError;
 let IdempotencyConflictError;
 let OwnershipError;
 let NotFoundError;
+let createJobQueue;
+let createJobWorker;
 
 before(async () => {
   fs.mkdirSync(TEMP_BASE_DIR, { recursive: true });
@@ -70,6 +72,11 @@ before(async () => {
   IdempotencyConflictError = serviceMod.IdempotencyConflictError;
   OwnershipError = serviceMod.OwnershipError;
   NotFoundError = serviceMod.NotFoundError;
+
+  const queueMod = await import("../packages/arena-node/src/persistence/job-queue.mjs");
+  createJobQueue = queueMod.createJobQueue;
+  const workerMod = await import("../packages/arena-node/src/worker/job-worker.mjs");
+  createJobWorker = workerMod.createJobWorker;
 });
 
 after(() => {
@@ -724,6 +731,59 @@ describe("BotVersionService: fenced build completion", () => {
     assert.equal(result.buildResult.status, "READY");
     assert.equal(result.botVersion.build_status, "ready");
     assert.ok(result.botVersion.artifact_digest);
+  });
+
+  it("processes a build already claimed by JobWorker without claiming it twice", async () => {
+    const upload = await env.service.uploadBotVersion({
+      botId: "bot-alice",
+      sourceContent: "console.log('worker bot');",
+      profileId: "controlled-node"
+    }, {
+      actorId: "user-alice",
+      idempotencyKey: "key-worker-build-1"
+    });
+    const jobQueue = createJobQueue(env.db);
+    const worker = createJobWorker({
+      workerId: "build-worker-regression",
+      db: env.db,
+      jobQueue,
+      matchRepo: env.matchRepo,
+      botVersionService: env.service,
+      allowedKinds: ["build"],
+      heartbeatIntervalMs: 1000
+    });
+
+    const run = await worker.runOnce();
+    assert.equal(run.executed, true);
+    assert.equal(run.claim.jobId, upload.job.id);
+    assert.equal(run.error, null);
+    assert.equal(run.result.botVersion.build_status, "ready");
+    assert.equal(run.result.job.status, "completed");
+    assert.ok(run.result.botVersion.artifact_digest);
+    assert.ok(await env.artifactStore.resolveArtifact(run.result.botVersion.artifact_digest));
+  });
+
+  it("rejects an already-claimed build handoff with a mismatched lease token", async () => {
+    const upload = await env.service.uploadBotVersion({
+      botId: "bot-alice",
+      sourceContent: "console.log('fenced handoff');",
+      profileId: "controlled-node"
+    }, {
+      actorId: "user-alice",
+      idempotencyKey: "key-worker-build-fence-1"
+    });
+    const jobQueue = createJobQueue(env.db);
+    const claim = jobQueue.claimNextJob({ workerId: "fence-worker", allowedKinds: ["build"] });
+
+    await assert.rejects(
+      () => env.service.processBuildJob({
+        jobId: claim.jobId,
+        leaseOwner: claim.leaseOwner,
+        claimedLease: { ...claim, leaseToken: "wrong-token" }
+      }),
+      (err) => err instanceof StaleLeaseError && err.code === "STALE_LEASE"
+    );
+    assert.equal(env.db.prepare("SELECT status FROM jobs WHERE id = ?").get(claim.jobId).status, "claimed");
   });
 });
 

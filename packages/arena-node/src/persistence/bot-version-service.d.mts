@@ -8,6 +8,7 @@ import type { Database } from "better-sqlite3";
 import type { ArtifactStore } from "../artifacts/artifact-store.d.mts";
 import type { BuildService } from "../execution/build-service.d.mts";
 import type { ProfileRegistry } from "../execution/profile-registry.d.mts";
+import type { ClaimedJob } from "./job-queue.d.mts";
 import type { BotVersionRecord } from "./bot-repository.d.mts";
 
 export { IdempotencyConflictError, NotFoundError, OwnershipError } from "./bot-repository.d.mts";
@@ -115,6 +116,7 @@ export interface ProcessBuildJobParams {
   jobId: string;
   leaseOwner?: string;
   leaseDurationMs?: number;
+  claimedLease?: ClaimedJob;
 }
 
 export interface ProcessBuildJobResult {

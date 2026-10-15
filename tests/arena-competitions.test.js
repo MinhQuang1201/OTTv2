@@ -41,18 +41,6 @@ const os = require("node:os");
 const http = require("node:http");
 const { createHash } = require("node:crypto");
 
-// Per-test override for portable Node 18 test run (NOT in production code)
-const PORTABLE_NODE18_BINDING =
-  "C:/Users/ADMIN/AppData/Local/Temp/opencode/arena-sqlite-smoke-node18/node_modules/better-sqlite3/build/Release/better_sqlite3.node";
-
-if (
-  process.versions.node.startsWith("18.") &&
-  !process.env.ARENA_SQLITE_NATIVE_BINDING &&
-  fs.existsSync(PORTABLE_NODE18_BINDING)
-) {
-  process.env.ARENA_SQLITE_NATIVE_BINDING = PORTABLE_NODE18_BINDING;
-}
-
 const TEMP_BASE_DIR = path.resolve(os.tmpdir(), "arena-competitions-test-" + Date.now());
 
 let openDatabase;

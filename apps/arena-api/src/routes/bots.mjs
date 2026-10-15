@@ -50,7 +50,7 @@ function hasForbiddenShellPathFields(obj) {
 }
 
 export async function handleBotsRoute(req, res, ctx) {
-  const { db, botRepo, botVersionService, parsedUrl, maxBodyBytes, trustedMode = true } = ctx;
+  const { db, botRepo, botVersionService, draftService, parsedUrl, maxBodyBytes, trustedMode = true, localDemoContainers = false, executionCapabilities = null } = ctx;
   const pathname = parsedUrl.pathname;
 
   // 1. Authenticate user
@@ -201,6 +201,12 @@ export async function handleBotsRoute(req, res, ctx) {
         );
       }
 
+      if (localDemoContainers && !executionCapabilities?.available) {
+        return sendError(res, 503, "CONTAINER_RUNTIME_UNAVAILABLE", "Local demo container execution is unavailable", {
+          reason: executionCapabilities?.reason || "docker_daemon_unavailable"
+        }, req);
+      }
+
       const ownershipCheck = checkOwnershipOrAdmin(user, bot.owner_id);
       if (!ownershipCheck.ok) {
         return sendError(res, ownershipCheck.statusCode, ownershipCheck.error.code, ownershipCheck.error.message, {}, req);
@@ -230,6 +236,11 @@ export async function handleBotsRoute(req, res, ctx) {
       const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
       if (!profileId) {
         return sendError(res, 422, "VALIDATION_ERROR", "Field 'profileId' is required", {}, req);
+      }
+      if (localDemoContainers && profileId !== "python" && profileId !== "node") {
+        return sendError(res, 422, "PROFILE_UNAVAILABLE", "Local demo containers support only Python and Node.js", {
+          supportedProfiles: ["python", "node"]
+        }, req);
       }
 
       try {
@@ -338,6 +349,94 @@ export async function handleBotsRoute(req, res, ctx) {
         createdAt: v.created_at
       }))
     });
+  }
+
+  // ── Route matching: /api/arena/v1/bots/:id/draft/run ──────────────────────
+  const draftRunMatch = pathname.match(/^\/api\/arena\/v1\/bots\/([^/]+)\/draft\/run\/?$/);
+  if (draftRunMatch) {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return sendError(res, 405, "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed. Expected POST`, {}, req);
+    }
+
+    const botId = draftRunMatch[1];
+    const bot = botRepo.getBot(botId);
+    if (!bot) {
+      return sendError(res, 404, "NOT_FOUND", `Bot not found: ${botId}`, {}, req);
+    }
+
+    const ownershipCheck = checkOwnershipOrAdmin(user, bot.owner_id);
+    if (!ownershipCheck.ok) {
+      return sendError(
+        res,
+        403,
+        "OWNERSHIP_MISMATCH",
+        `Bot '${botId}' belongs to '${bot.owner_id}', not '${user.id}'`,
+        {},
+        req
+      );
+    }
+
+    let body;
+    try {
+      body = await parseJsonBody(req, maxBodyBytes);
+    } catch (err) {
+      return sendError(res, err.statusCode || 400, err.code || "BAD_REQUEST", err.message, {}, req);
+    }
+
+    if (hasForbiddenShellPathFields(body)) {
+      return sendError(res, 400, "INVALID_PAYLOAD", "Shell and filesystem path fields are forbidden", {}, req);
+    }
+
+    const source = typeof body.source === "string" ? body.source : null;
+    if (!source || source.trim().length === 0) {
+      return sendError(res, 422, "VALIDATION_ERROR", "Field 'source' must be a non-empty UTF-8 string", {}, req);
+    }
+
+    const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+    if (!profileId) {
+      return sendError(res, 422, "VALIDATION_ERROR", "Field 'profileId' is required", {}, req);
+    }
+
+    const mapId = typeof body.mapId === "string" && body.mapId.trim().length > 0 ? body.mapId.trim() : "classic";
+
+    if (!draftService) {
+      return sendError(res, 503, "SERVICE_UNAVAILABLE", "Draft execution service is not configured on this server", {}, req);
+    }
+
+    try {
+      const result = await draftService.runDraft({
+        db,
+        authorId: user.id,
+        authorRole: user.role,
+        isAdmin: user.role === "admin",
+        botId,
+        source,
+        profileId,
+        mapId
+      });
+
+      if (result.status === "unavailable") {
+        return sendError(
+          res,
+          503,
+          "ISOLATION_UNAVAILABLE",
+          result.error || "Container isolation runtime is unavailable; draft execution requires a verified OCI container environment.",
+          result.details || {},
+          req
+        );
+      }
+
+      return sendJson(res, 200, result);
+    } catch (err) {
+      if (err.code === "OWNERSHIP_MISMATCH") {
+        return sendError(res, 403, "OWNERSHIP_MISMATCH", err.message, {}, req);
+      }
+      if (err.code === "CONCURRENCY_LIMIT_EXCEEDED" || err.statusCode === 429) {
+        return sendError(res, 429, "CONCURRENCY_LIMIT_EXCEEDED", err.message, {}, req);
+      }
+      return sendError(res, 500, "DRAFT_EXECUTION_FAILED", err.message, {}, req);
+    }
   }
 
   return sendError(res, 404, "NOT_FOUND", `Endpoint not found: ${pathname}`, {}, req);

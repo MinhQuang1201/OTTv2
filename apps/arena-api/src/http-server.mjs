@@ -33,6 +33,11 @@ import { handleCompetitionsRoute } from "./routes/competitions.mjs";
 import { handleCompetitionCatalogRoute } from "./routes/competition-rounds.mjs";
 import { handleLeaderboardRoute } from "./routes/leaderboard.mjs";
 import { createCompetitionRepository } from "../../../packages/arena-node/src/persistence/competition-repository.mjs";
+import { createCompetitionRoundsRepository } from "../../../packages/arena-node/src/persistence/competition-rounds-repository.mjs";
+import { createBotRepository } from "../../../packages/arena-node/src/persistence/bot-repository.mjs";
+import { createMatchRepository } from "../../../packages/arena-node/src/persistence/match-repository.mjs";
+import { createLiveFrameStore } from "../../../packages/arena-node/src/persistence/live-frame-store.mjs";
+import { createDraftService } from "../../../packages/arena-node/src/execution/draft-service.mjs";
 
 /**
  * Sends a structured JSON success response.
@@ -169,18 +174,44 @@ export function createArenaServer(options) {
     jobQueue = null,
     botVersionService = null,
     profileRegistry = null,
+    draftService = null,
+    liveFrameStore = null,
     finalizer = null,
     competitionRepo = null,
-    competitionRoundsRepo = null
+    competitionRoundsRepo = null,
+    localDemoContainers = false,
+    executionCapabilities = null,
+    getExecutionCapabilities = null
   } = options;
 
   if (!db) {
     throw new TypeError("createArenaServer requires options.db");
   }
+  if (localDemoContainers && trustedMode) {
+    throw new Error("localDemoContainers cannot be combined with trustedMode");
+  }
+
+  const resolvedBotRepo = botRepo || createBotRepository(db);
+  const resolvedMatchRepo = matchRepo || createMatchRepository(db);
+  const hasLiveFramesTable = Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'match_live_frames'").get()
+  );
+  const resolvedLiveFrameStore =
+    liveFrameStore || (hasLiveFramesTable ? createLiveFrameStore(db) : null);
+  const resolvedDraftService =
+    draftService ||
+    (profileRegistry
+      ? createDraftService({
+          profileRegistry,
+          containerExecutor: options.containerExecutor || null,
+          trustedLocalMode: Boolean(options.trustedLocalMode ?? trustedMode)
+        })
+      : null);
 
   const resolvedCompetitionRepo =
     competitionRepo || createCompetitionRepository(db, { tournamentRepo });
-  let resolvedCompetitionRoundsRepo = competitionRoundsRepo || null;
+  const resolvedCompetitionRoundsRepo =
+    competitionRoundsRepo || createCompetitionRoundsRepository(db, { tournamentRepo });
 
   const server = http.createServer(async (req, res) => {
     // 1. Assign trace request ID
@@ -222,13 +253,20 @@ export function createArenaServer(options) {
 
       // ── GET /capabilities ──────────────────────────────────────────────────
       if (req.method === "GET" && pathname === "/api/arena/v1/capabilities") {
-        const availableProfiles = profileRegistry ? profileRegistry.listProfiles().map((p) => p.id) : ["controlled-node", "python-v1"];
+        const currentExecutionCapabilities = getExecutionCapabilities
+          ? getExecutionCapabilities()
+          : executionCapabilities;
+        const availableProfiles = profileRegistry
+          ? profileRegistry.listProfiles().map((p) => p.id)
+          : ["node", "python", "cpp", "java"];
         return sendJson(res, 200, {
-          executor: "trusted-local-v1",
-          trusted: true,
-          untrusted: false,
-          canSubmitSource: false, // In trusted mode, only admin-curated builds are permitted
-          profiles: availableProfiles
+          executor: localDemoContainers ? "oci-container-local-demo-v1" : "trusted-local-v1",
+          trusted: Boolean(trustedMode),
+          untrusted: Boolean(localDemoContainers && currentExecutionCapabilities?.available),
+          canSubmitSource: Boolean(localDemoContainers && currentExecutionCapabilities?.available),
+          profiles: localDemoContainers && currentExecutionCapabilities?.available ? ["python", "node"] : availableProfiles,
+          localDemoContainers: Boolean(localDemoContainers),
+          localDocker: localDemoContainers ? (currentExecutionCapabilities || { available: false, reason: "not_configured" }) : null
         });
       }
 
@@ -313,7 +351,10 @@ export function createArenaServer(options) {
           return sendError(res, auth.statusCode, auth.error.code, auth.error.message, {}, req);
         }
 
-        const canSubmitSource = req.user.role === "admin";
+        const canSubmitSource =
+          req.user.role === "admin" || (localDemoContainers && Boolean(
+            (getExecutionCapabilities ? getExecutionCapabilities() : executionCapabilities)?.available
+          ));
         return sendJson(res, 200, {
           user: {
             id: req.user.id,
@@ -328,12 +369,17 @@ export function createArenaServer(options) {
       if (pathname.startsWith("/api/arena/v1/bots")) {
         return handleBotsRoute(req, res, {
           db,
-          botRepo,
+          botRepo: resolvedBotRepo,
           botVersionService,
           profileRegistry,
+          draftService: resolvedDraftService,
           parsedUrl,
           maxBodyBytes,
-          trustedMode
+          trustedMode,
+          localDemoContainers,
+          executionCapabilities: req.method === "POST" && /^\/api\/arena\/v1\/bots\/[^/]+\/versions\/?$/.test(pathname) && getExecutionCapabilities
+            ? getExecutionCapabilities()
+            : executionCapabilities
         });
       }
 
@@ -341,8 +387,9 @@ export function createArenaServer(options) {
       if (pathname.startsWith("/api/arena/v1/matches")) {
         return handleMatchesRoute(req, res, {
           db,
-          matchRepo,
+          matchRepo: resolvedMatchRepo,
           jobQueue,
+          liveFrameStore: resolvedLiveFrameStore,
           parsedUrl,
           maxBodyBytes
         });
@@ -360,14 +407,6 @@ export function createArenaServer(options) {
 
       // ── Routes: /competition-catalog ───────────────────────────────────────
       if (pathname === "/api/arena/v1/competition-catalog" || pathname === "/api/arena/v1/competition-catalog/") {
-        if (!resolvedCompetitionRoundsRepo) {
-          try {
-            const { createCompetitionRoundsRepository } = await import(
-              "../../../packages/arena-node/src/persistence/competition-rounds-repository.mjs"
-            );
-            resolvedCompetitionRoundsRepo = createCompetitionRoundsRepository(db, { tournamentRepo });
-          } catch {}
-        }
         return handleCompetitionCatalogRoute(req, res, {
           db,
           competitionRoundsRepo: resolvedCompetitionRoundsRepo,
@@ -378,14 +417,6 @@ export function createArenaServer(options) {
 
       // ── Routes: /competitions ───────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/competitions")) {
-        if (!resolvedCompetitionRoundsRepo) {
-          try {
-            const { createCompetitionRoundsRepository } = await import(
-              "../../../packages/arena-node/src/persistence/competition-rounds-repository.mjs"
-            );
-            resolvedCompetitionRoundsRepo = createCompetitionRoundsRepository(db, { tournamentRepo });
-          } catch {}
-        }
         return handleCompetitionsRoute(req, res, {
           db,
           competitionRepo: resolvedCompetitionRepo,

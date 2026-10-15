@@ -86,6 +86,7 @@ export function createContainerBot(options: {
   clock?: { nowMs(): number };
   limits?: ContainerRunLimits;
   commandRunner?: any;
+  probe?: () => ContainerRuntimeProbe;
   attempt?: number;
   onStderr?: (chunk: string) => void;
 }): BotPort & { readonly botId: string; readonly containerName: string | null; readonly hasExited: boolean };
@@ -95,6 +96,7 @@ export function createContainerBuildService(options: {
   image?: string;
   limits?: ContainerBuildLimits;
   commandRunner?: any;
+  probe?: () => ContainerRuntimeProbe;
 }): {
   readonly artifactStore: ArtifactStore;
   build(request: any): Promise<any>;

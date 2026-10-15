@@ -22,17 +22,6 @@ const os = require("node:os");
 const http = require("node:http");
 const { createHash } = require("node:crypto");
 
-const PORTABLE_NODE18_BINDING =
-  "C:/Users/ADMIN/AppData/Local/Temp/opencode/arena-sqlite-smoke-node18/node_modules/better-sqlite3/build/Release/better_sqlite3.node";
-
-if (
-  process.versions.node.startsWith("18.") &&
-  !process.env.ARENA_SQLITE_NATIVE_BINDING &&
-  fs.existsSync(PORTABLE_NODE18_BINDING)
-) {
-  process.env.ARENA_SQLITE_NATIVE_BINDING = PORTABLE_NODE18_BINDING;
-}
-
 const TEMP_BASE_DIR = path.resolve(os.tmpdir(), "arena-rounds-test-" + Date.now());
 
 let openDatabase;
@@ -109,12 +98,18 @@ function makeRequest(server, options, body = null) {
 
 // Mock domain modules adhering to the contracts in the plan
 const mockMapsDomain = {
-  listMaps() {
+  listMaps(options = {}) {
     return [
       { id: "classic", revision: 1, name: "Classic", description: "Standard starting layout" },
       { id: "flanks", revision: 1, name: "Flanks", description: "Flank starting variation" },
       { id: "center", revision: 1, name: "Center", description: "Center starting variation" }
-    ];
+    ].map((m) => {
+      const copy = { ...m };
+      if (options && options.includeState) {
+        copy.initialState = this.createMapState(m.id, m.revision);
+      }
+      return copy;
+    });
   },
   getMap(id) {
     return this.listMaps().find((m) => m.id === id) || null;
@@ -581,6 +576,32 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
           roundCount: 254
         });
         assert.equal(compMax.roundCount, 254);
+
+        // 7. Idempotency repeat and conflict handling
+        seedUser(db, { id: "u-admin", username: "admin", role: "admin" });
+        const first = roundsRepo.createExtendedCompetition(
+          { name: "Idempotent Event", formatId: "double-round-robin", mapId: "classic" },
+          { actorId: "u-admin", idempotencyKey: "idem-key-1" }
+        );
+        assert.ok(first.id);
+
+        // Repeat with identical payload returns existing
+        const repeat = roundsRepo.createExtendedCompetition(
+          { name: "Idempotent Event", formatId: "double-round-robin", mapId: "classic" },
+          { actorId: "u-admin", idempotencyKey: "idem-key-1" }
+        );
+        assert.equal(repeat.id, first.id);
+
+        // Reusing idempotency key with conflicting payload throws IdempotencyConflictError
+        assert.throws(
+          () => {
+            roundsRepo.createExtendedCompetition(
+              { name: "Conflicting Idempotent Event", formatId: "double-round-robin", mapId: "classic" },
+              { actorId: "u-admin", idempotencyKey: "idem-key-1" }
+            );
+          },
+          (err) => err instanceof IdempotencyConflictError
+        );
       } finally {
         closeDatabase(db);
       }
@@ -822,6 +843,14 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
         const tournId = db.prepare("SELECT tournament_id FROM competitions WHERE id = ?").get(comp.id).tournament_id;
         db.prepare("UPDATE tournaments SET status = 'completed' WHERE id = ?").run(tournId);
 
+        // Detail reads must reflect the completed child tournament before the
+        // next-round mutation persists the round status, without writing on GET.
+        const beforeNextRoundDetail = roundsRepo.getExtendedCompetitionDetails(comp.id);
+        assert.equal(beforeNextRoundDetail.rounds[0].status, "completed");
+        const beforeNextRoundRow = db.prepare("SELECT status, completed_at FROM competition_rounds WHERE competition_id = ? AND round_number = 1").get(comp.id);
+        assert.equal(beforeNextRoundRow.status, "running");
+        assert.equal(beforeNextRoundRow.completed_at, null);
+
         // 5. Next round progression succeeds atomically!
         const r2Comp = roundsRepo.nextRound(comp.id, 1);
         assert.equal(r2Comp.currentRound, 2);
@@ -905,6 +934,14 @@ describe("Arena Extended Competitions (Rounds, Maps, Modes)", () => {
         for (const m of r2Matches) {
           db.prepare("UPDATE matches SET status = 'completed' WHERE id = ?").run(m.id);
         }
+
+        // The final round is also effectively complete before the explicit
+        // competition-completion action persists its lifecycle state.
+        const beforeCompletionDetail = roundsRepo.getExtendedCompetitionDetails(comp.id);
+        assert.equal(beforeCompletionDetail.rounds[1].status, "completed");
+        const beforeCompletionRow = db.prepare("SELECT status, completed_at FROM competition_rounds WHERE competition_id = ? AND round_number = 2").get(comp.id);
+        assert.equal(beforeCompletionRow.status, "running");
+        assert.equal(beforeCompletionRow.completed_at, null);
 
         // Now completion succeeds!
         const completedComp = roundsRepo.advanceExtendedPhase(comp.id, "running");

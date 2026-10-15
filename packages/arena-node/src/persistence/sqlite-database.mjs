@@ -37,7 +37,8 @@ const DEFAULT_MIGRATION_SQL_PATH = resolve(
 export const MIGRATIONS = [
   { version: "001-arena", path: resolve(__dirname, "migrations/001-arena.sql") },
   { version: "002-competitions", path: resolve(__dirname, "migrations/002-competitions.sql") },
-  { version: "003-competition-rounds", path: resolve(__dirname, "migrations/003-competition-rounds.sql") }
+  { version: "003-competition-rounds", path: resolve(__dirname, "migrations/003-competition-rounds.sql") },
+  { version: "004-arena-live-frames", path: resolve(__dirname, "migrations/004-arena-live-frames.sql") }
 ];
 
 /** Set of schema migration versions recognized by this codebase. */

@@ -32,6 +32,7 @@ import {
 import { createNodeEngine } from "../core/node-engine.mjs";
 import { createNodeClock } from "../clock/node-clock.mjs";
 import { canonicalSerialize } from "../../../arena/src/domain/ruleset.mjs";
+import { createContainerBot } from "../execution/container-executor.mjs";
 
 function defaultComputeDigest(data) {
   const str = typeof data === "string" ? data : canonicalSerialize(data);
@@ -81,7 +82,8 @@ export function createJobWorker(options) {
     heartbeatIntervalMs = 5000,
     leaseDurationMs = 30000,
     pollIntervalMs = 500,
-    allowedKinds = null
+    allowedKinds = null,
+    liveFrameStore = null
   } = options;
 
   const resolvedBotFactory =
@@ -179,8 +181,58 @@ export function createJobWorker(options) {
         }
       },
       initialState: initialCoreState,
-      supervisorSignal: supervisorAbort.signal
+      supervisorSignal: supervisorAbort.signal,
+      onAcceptedMove: liveFrameStore
+        ? (evt) => {
+            try {
+              const clock = evt.frame?.clock || evt.frame?.state?.clock || {
+                remainingMs: {
+                  A: evt.frame?.state?.clock?.remainingMs?.A,
+                  B: evt.frame?.state?.clock?.remainingMs?.B
+                }
+              };
+              const frameWithClock = {
+                ...evt.frame,
+                clock
+              };
+              liveFrameStore.recordFrame({
+                matchId: match.id,
+                attemptNo: claim.attemptNo,
+                leaseToken: claim.leaseToken,
+                ply: evt.ply,
+                seat: evt.seat,
+                move: evt.move,
+                frame: frameWithClock
+              });
+            } catch (_) {}
+          }
+        : undefined
     });
+
+    if (liveFrameStore) {
+      try {
+        liveFrameStore.recordFrame({
+          matchId: match.id,
+          attemptNo: claim.attemptNo,
+          leaseToken: claim.leaseToken,
+          ply: 0,
+          seat: null,
+          move: null,
+          frame: {
+            ply: 0,
+            seat: null,
+            move: null,
+            clock: initialCoreState?.clock || {
+              remainingMs: {
+                A: matchPolicy.initialTimeMs,
+                B: matchPolicy.initialTimeMs
+              }
+            },
+            state: initialCoreState
+          }
+        });
+      } catch (_) {}
+    }
 
     let matchResult;
     try {
@@ -246,7 +298,8 @@ export function createJobWorker(options) {
     return await botVersionService.processBuildJob({
       jobId: claim.jobId,
       leaseOwner: workerId,
-      leaseDurationMs
+      leaseDurationMs,
+      claimedLease: claim
     });
   }
 
@@ -409,7 +462,7 @@ export function createJobWorker(options) {
  * @param {import('../execution/profile-registry.d.mts').ProfileRegistry} options.profileRegistry
  * @returns {(seat: "A" | "B", participant: object, context?: object) => Promise<object>}
  */
-export function createProfileBotFactory({ artifactStore, profileRegistry }) {
+export function createProfileBotFactory({ artifactStore, profileRegistry, containerExecutor = null }) {
   if (!artifactStore) throw new TypeError("createProfileBotFactory requires artifactStore");
   if (!profileRegistry) throw new TypeError("createProfileBotFactory requires profileRegistry");
 
@@ -426,6 +479,34 @@ export function createProfileBotFactory({ artifactStore, profileRegistry }) {
     const profile = profileRegistry.getProfile(profileId);
     if (!profile) {
       throw new Error(`Execution profile not found: ${profileId}`);
+    }
+
+    if (containerExecutor) {
+      if (profileId !== "python" && profileId !== "node") {
+        const err = new Error(`ContainerBot does not support profile '${profileId}'. Scoped profiles: 'python', 'node'.`);
+        err.kind = "infrastructure_error";
+        err.code = "unsupported_isolated_profile";
+        err.retryable = false;
+        throw err;
+      }
+      const probe = containerExecutor.probe ? containerExecutor.probe() : null;
+      if (probe && !probe.available) {
+        const err = new Error(`Container runtime unavailable: ${probe.reason || "daemon or image missing"}`);
+        err.kind = "infrastructure_error";
+        err.code = "runtime_unavailable";
+        err.retryable = false;
+        throw err;
+      }
+      return createContainerBot({
+        botId,
+        profileId,
+        artifactStore,
+        artifactDigest: digest,
+        image: containerExecutor.image,
+        commandRunner: containerExecutor.commandRunner,
+        limits: containerExecutor.limits,
+        probe: containerExecutor.probe
+      });
     }
 
     // Sanitized bot environment — DO NOT leak secrets or auth tokens from host process.env
@@ -482,6 +563,7 @@ export async function runWorkerCli(args = []) {
   let leaseDurationMs = process.env.ARENA_LEASE_DURATION_MS ? parseInt(process.env.ARENA_LEASE_DURATION_MS, 10) : 30000;
   let heartbeatIntervalMs = process.env.ARENA_HEARTBEAT_INTERVAL_MS ? parseInt(process.env.ARENA_HEARTBEAT_INTERVAL_MS, 10) : 5000;
   let allowedKinds = process.env.ARENA_ALLOWED_KINDS ? process.env.ARENA_ALLOWED_KINDS.split(",") : ["build", "match"];
+  const localDemoContainers = process.env.ARENA_LOCAL_DEMO_CONTAINERS === "true" || process.env.ARENA_LOCAL_DEMO_CONTAINERS === "1";
   let once = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -509,16 +591,24 @@ export async function runWorkerCli(args = []) {
   const { createArtifactStore } = await import("../artifacts/artifact-store.mjs");
   const { createProfileRegistry } = await import("../execution/profile-registry.mjs");
   const { createBuildService } = await import("../execution/build-service.mjs");
+  const { probeContainerRuntime, createContainerBuildService } = await import("../execution/container-executor.mjs");
   const { createBotVersionService } = await import("../persistence/bot-version-service.mjs");
   const { createMatchRepository } = await import("../persistence/match-repository.mjs");
   const { createJobQueue } = await import("../persistence/job-queue.mjs");
   const { createMatchFinalizer } = await import("../persistence/finalizer.mjs");
+  const { createLiveFrameStore } = await import("../persistence/live-frame-store.mjs");
 
-  const opened = openDatabase(dbPath);
+  const opened = openDatabase(dbPath, { targetVersion: "latest" });
   const db = opened.db || opened;
   const artifactStore = createArtifactStore({ storageDir });
   const profileRegistry = createProfileRegistry();
-  const buildService = createBuildService({ artifactStore, profileRegistry });
+  const executionCapabilities = localDemoContainers ? probeContainerRuntime() : null;
+  const containerExecutor = localDemoContainers
+    ? { image: executionCapabilities?.image, probe: () => probeContainerRuntime() }
+    : null;
+  const buildService = localDemoContainers
+    ? createContainerBuildService({ artifactStore, image: executionCapabilities?.image, probe: () => probeContainerRuntime() })
+    : createBuildService({ artifactStore, profileRegistry });
   const botVersionService = createBotVersionService({
     db,
     artifactStore,
@@ -529,7 +619,12 @@ export async function runWorkerCli(args = []) {
   const matchRepo = createMatchRepository(db);
   const jobQueue = createJobQueue(db);
   const finalizer = createMatchFinalizer(db);
-  const botFactory = createProfileBotFactory({ artifactStore, profileRegistry });
+  const botFactory = createProfileBotFactory({ artifactStore, profileRegistry, containerExecutor });
+
+  const hasLiveFramesTable = Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'match_live_frames'").get()
+  );
+  const liveFrameStore = hasLiveFramesTable ? createLiveFrameStore(db) : null;
 
   const worker = createJobWorker({
     workerId,
@@ -539,6 +634,7 @@ export async function runWorkerCli(args = []) {
     finalizer,
     botVersionService,
     botFactory,
+    liveFrameStore,
     allowedKinds,
     pollIntervalMs,
     leaseDurationMs,

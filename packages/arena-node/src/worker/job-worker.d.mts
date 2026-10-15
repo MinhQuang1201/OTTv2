@@ -1,5 +1,9 @@
 import type { Database } from "better-sqlite3";
 import type { JobQueue, ClaimedJob } from "../persistence/job-queue.d.mts";
+import type { ArtifactStore } from "../artifacts/artifact-store.d.mts";
+import type { ContainerRunLimits, ContainerRuntimeProbe } from "../execution/container-executor.d.mts";
+import type { ProfileRegistry } from "../execution/profile-registry.d.mts";
+import type { LiveFrameStore } from "../persistence/live-frame-store.d.mts";
 
 export interface BotFactoryContext {
   match: unknown;
@@ -21,6 +25,9 @@ export interface JobWorkerOptions {
   finalizer?: unknown;
   botVersionService?: unknown;
   botFactory?: BotFactory;
+  artifactStore?: ArtifactStore | null;
+  profileRegistry?: ProfileRegistry | null;
+  liveFrameStore?: LiveFrameStore | null;
   getEngine?: () => unknown;
   getClock?: () => unknown;
   getJournal?: () => unknown;
@@ -53,3 +60,16 @@ export interface JobWorker {
 }
 
 export function createJobWorker(options: JobWorkerOptions): JobWorker;
+
+export interface ProfileBotContainerExecutor {
+  image?: string;
+  commandRunner?: unknown;
+  limits?: ContainerRunLimits;
+  probe?: () => ContainerRuntimeProbe;
+}
+
+export function createProfileBotFactory(options: {
+  artifactStore: ArtifactStore;
+  profileRegistry: ProfileRegistry;
+  containerExecutor?: ProfileBotContainerExecutor | null;
+}): BotFactory;

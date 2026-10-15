@@ -7,6 +7,8 @@ import type {
 
 import type {
   CoreState,
+  Position,
+  PieceType,
   MatchPolicy,
   RulesetSnapshot,
   ReplayParticipant,
@@ -14,6 +16,30 @@ import type {
   RunFailure,
   Seat
 } from "../contracts/index.d.mts";
+
+export interface AcceptedMoveCallbackEvent {
+  ply: number;
+  seat: Seat;
+  move: {
+    from: Position;
+    to: Position;
+  };
+  frame: {
+    ply: number;
+    seat: Seat;
+    move: {
+      from: Position;
+      to: Position;
+    };
+    capturedPieceId: string | null;
+    capturedPieceType: PieceType | null;
+    elapsedMs: number;
+    remainingMs: number;
+    clock: CoreState["clock"];
+    comment?: string;
+    state: CoreState;
+  };
+}
 
 export interface HeadlessMatchControllerOptions {
   matchId: string;
@@ -30,6 +56,7 @@ export interface HeadlessMatchControllerOptions {
   participants?: Record<Seat, ReplayParticipant>;
   initialState?: CoreState;
   supervisorSignal?: AbortSignal;
+  onAcceptedMove?: (event: AcceptedMoveCallbackEvent) => void;
 }
 
 export interface HeadlessMatchController {

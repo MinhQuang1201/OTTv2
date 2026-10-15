@@ -386,6 +386,7 @@ export function createContainerBot(options) {
     clock = { nowMs: () => performance.now() },
     limits = DEFAULT_CONTAINER_RUN_LIMITS,
     commandRunner = null,
+    probe: runtimeProbe = null,
     attempt = 0,
     onStderr
   } = options;
@@ -478,7 +479,7 @@ export function createContainerBot(options) {
       if (started) return;
 
       // 0. Fail-closed: verify container runtime and image availability
-      const probe = probeContainerRuntime({ image, commandRunner });
+      const probe = runtimeProbe ? runtimeProbe() : probeContainerRuntime({ image, commandRunner });
       if (!probe.available) {
         const err = new Error(`Container runtime unavailable: ${probe.reason || "daemon or image missing"}`);
         err.kind = "infrastructure_error";
@@ -863,7 +864,8 @@ export function createContainerBuildService(options) {
     artifactStore,
     image = PINNED_RUNNER_IMAGE,
     limits = DEFAULT_CONTAINER_BUILD_LIMITS,
-    commandRunner = null
+    commandRunner = null,
+    probe: runtimeProbe = null
   } = options;
 
   const cacheIndex = new Map();
@@ -933,7 +935,21 @@ export function createContainerBuildService(options) {
         };
       }
 
-      // 3. Cache lookup
+      // 3. Verify the runtime and immutable image before consulting the cache.
+      // Cached artifacts must not bypass current Docker/image validation.
+      const probe = runtimeProbe ? runtimeProbe() : probeContainerRuntime({ image, commandRunner });
+      if (!probe.available) {
+        return {
+          status: "FAILED",
+          artifactDigest: null,
+          manifest: null,
+          logs: `Container runtime unavailable for build: ${probe.reason || "daemon or image missing"}\n`,
+          error: "runtime_unavailable",
+          durationMs: Date.now() - startMs
+        };
+      }
+
+      // 3b. Cache lookup
       const cacheKey = computeSha256(
         JSON.stringify({
           sourceDigest,
@@ -955,19 +971,6 @@ export function createContainerBuildService(options) {
             durationMs: Date.now() - startMs
           };
         }
-      }
-
-      // 3b. Verify container runtime and resolve immutable image ID
-      const probe = probeContainerRuntime({ image, commandRunner });
-      if (!probe.available) {
-        return {
-          status: "FAILED",
-          artifactDigest: null,
-          manifest: null,
-          logs: `Container runtime unavailable for build: ${probe.reason || "daemon or image missing"}\n`,
-          error: "runtime_unavailable",
-          durationMs: Date.now() - startMs
-        };
       }
 
       // 4. Create ephemeral isolated directory on host for mounting

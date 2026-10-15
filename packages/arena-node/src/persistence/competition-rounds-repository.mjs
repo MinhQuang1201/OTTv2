@@ -53,6 +53,17 @@ import {
   pairRound
 } from "../../../arena/src/domain/formats/index.mjs";
 
+export const DEFAULT_COMPETITION_CONFIG = Object.freeze({
+  mapId: "classic",
+  formatId: "double-round-robin",
+  mode: "ranked"
+});
+
+export const CATALOG_MODES = Object.freeze([
+  Object.freeze({ id: "ranked", name: "Ranked" }),
+  Object.freeze({ id: "practice", name: "Practice" })
+]);
+
 export {
   IdempotencyConflictError,
   NotFoundError,
@@ -78,6 +89,14 @@ function canonicalDigest(value) {
 
 function mapExtendedCompetition(row) {
   if (!row) return null;
+  const configuration = {
+    formatId: row.format_id,
+    mapId: row.map_id,
+    mapRevision: row.map_revision,
+    mode: row.mode,
+    roundCount: row.round_count,
+    currentRound: row.current_round
+  };
   return {
     id: row.id,
     name: row.name,
@@ -93,7 +112,8 @@ function mapExtendedCompetition(row) {
     mode: row.mode,
     roundCount: row.round_count,
     currentRound: row.current_round,
-    isExtended: Boolean(row.is_extended)
+    isExtended: Boolean(row.is_extended),
+    configuration
   };
 }
 
@@ -201,8 +221,9 @@ export function createCompetitionRoundsRepository(db, options = {}) {
       WHERE actor_id = ? AND operation = ? AND idempotency_key = ?
     `),
     insertApiRequest: db.prepare(`
-      INSERT INTO api_requests (actor_id, idempotency_key, operation, payload_digest, target_id)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO api_requests (
+        actor_id, idempotency_key, operation, payload_digest, target_id, response_status
+      ) VALUES (?, ?, ?, ?, ?, 201)
     `),
     selectTournamentMatchCounts: db.prepare(`
       SELECT
@@ -262,48 +283,14 @@ export function createCompetitionRoundsRepository(db, options = {}) {
    * Returns catalog describing available maps, formats, modes, and default selections.
    */
   function getCompetitionCatalog() {
-    const rawMaps = typeof maps.listMaps === "function" ? maps.listMaps() : [];
-    const catalogMaps = rawMaps.map((m) => {
-      let initialState = null;
-      if (typeof maps.createMapState === "function") {
-        try {
-          initialState = maps.createMapState(m.id, m.revision);
-        } catch {
-          initialState = null;
-        }
-      }
-      return {
-        id: m.id,
-        revision: m.revision,
-        name: m.name,
-        description: m.description,
-        initialState
-      };
-    });
-
-    const rawFormats = typeof formats.listFormats === "function" ? formats.listFormats() : [];
-    const catalogFormats = rawFormats.map((f) => ({
-      id: f.id,
-      name: f.name,
-      description: f.description
-    }));
-
-    const catalogModes = [
-      { id: "ranked", name: "Ranked" },
-      { id: "practice", name: "Practice" }
-    ];
-
-    const defaults = {
-      mapId: "classic",
-      formatId: "double-round-robin",
-      mode: "ranked"
-    };
+    const catalogMaps = maps.listMaps({ includeState: true });
+    const catalogFormats = formats.listFormats();
 
     return {
       maps: catalogMaps,
       formats: catalogFormats,
-      modes: catalogModes,
-      defaults
+      modes: CATALOG_MODES.map((m) => ({ ...m })),
+      defaults: { ...DEFAULT_COMPETITION_CONFIG }
     };
   }
 
@@ -350,7 +337,7 @@ export function createCompetitionRoundsRepository(db, options = {}) {
     }
 
     // ── Mode and Ranked Validation ───────────────────────────────────────────
-    let mode = "ranked";
+    let mode = DEFAULT_COMPETITION_CONFIG.mode;
     let ranked = true;
 
     if (input.mode !== undefined && input.mode !== null) {
@@ -384,34 +371,24 @@ export function createCompetitionRoundsRepository(db, options = {}) {
     const rankedInt = ranked ? 1 : 0;
 
     // ── Format Validation ───────────────────────────────────────────────────
-    const formatId = input.formatId ? String(input.formatId).trim() : "double-round-robin";
-    const availableFormats = typeof formats.listFormats === "function" ? formats.listFormats() : [];
+    const formatId = input.formatId ? String(input.formatId).trim() : DEFAULT_COMPETITION_CONFIG.formatId;
+    const availableFormats = formats.listFormats();
     const matchedFormat = availableFormats.find((f) => f.id === formatId);
-    if (!matchedFormat && availableFormats.length > 0) {
+    if (!matchedFormat) {
       throw new CompetitionValidationError(`Unknown format: '${formatId}'`);
     }
 
     // ── Map Validation & Snapshot ────────────────────────────────────────────
-    const mapId = input.mapId ? String(input.mapId).trim() : "classic";
-    let mapDescriptor = null;
-    if (typeof maps.getMap === "function") {
-      mapDescriptor = maps.getMap(mapId);
-    } else if (typeof maps.listMaps === "function") {
-      mapDescriptor = maps.listMaps().find((m) => m.id === mapId);
-    }
-
+    const mapId = input.mapId ? String(input.mapId).trim() : DEFAULT_COMPETITION_CONFIG.mapId;
+    const mapDescriptor = maps.getMap(mapId);
     if (!mapDescriptor) {
       throw new CompetitionValidationError(`Unknown map: '${mapId}'`);
     }
 
     const mapRevision = Number(mapDescriptor.revision) || 1;
-    let initialCoreState = null;
-    if (typeof maps.createMapState === "function") {
-      initialCoreState = maps.createMapState(mapId, mapRevision);
-    }
+    const initialCoreState = maps.createMapState(mapId, mapRevision);
     if (!initialCoreState) {
-      const engine = createNodeEngine();
-      initialCoreState = engine.createInitialState();
+      throw new CompetitionValidationError(`Failed to initialize map state for '${mapId}'`);
     }
 
     const mapSnapshotJson = JSON.stringify({
@@ -472,7 +449,7 @@ export function createCompetitionRoundsRepository(db, options = {}) {
       );
 
       if (actorId && idempotencyKey) {
-        stmts.insertApiRequest.run(actorId, idempotencyKey, payloadDigest, competitionId);
+        stmts.insertApiRequest.run(actorId, idempotencyKey, "createExtendedCompetition", payloadDigest, competitionId);
       }
 
       return getExtendedCompetition(competitionId);
@@ -507,10 +484,21 @@ export function createCompetitionRoundsRepository(db, options = {}) {
       try { byes = JSON.parse(r.byes_json); } catch {}
       try { warnings = JSON.parse(r.warnings_json); } catch {}
 
+      // The child tournament is authoritative while its round status write is
+      // deferred until the next lifecycle action. Keep GET side-effect free.
+      const matchCounts = stmts.selectTournamentMatchCounts.get(r.tournament_id);
+      const hasCompletedChildTournament = Boolean(
+        matchCounts &&
+        Number(matchCounts.total || 0) > 0 &&
+        Number(matchCounts.completed || 0) === Number(matchCounts.total || 0) &&
+        Number(matchCounts.errored || 0) === 0
+      );
+      const effectiveStatus = r.status === "completed" || hasCompletedChildTournament ? "completed" : r.status;
+
       return {
         roundNumber: r.round_number,
         tournamentId: r.tournament_id,
-        status: r.status,
+        status: effectiveStatus,
         pairings: Array.isArray(pairings) ? pairings : [],
         byes: Array.isArray(byes) ? byes : [],
         warnings: Array.isArray(warnings) ? warnings : [],
@@ -622,12 +610,10 @@ export function createCompetitionRoundsRepository(db, options = {}) {
 
           // Derive and validate round count using format rules
           let derivedRounds = comp.round_count;
-          if (typeof formats.getRoundCount === "function") {
-            try {
-              derivedRounds = formats.getRoundCount(comp.format_id, rows.length, comp.round_count);
-            } catch (err) {
-              throw new CompetitionValidationError(err.message);
-            }
+          try {
+            derivedRounds = formats.getRoundCount(comp.format_id, rows.length, comp.round_count);
+          } catch (err) {
+            throw new CompetitionValidationError(err.message);
           }
 
           if (!derivedRounds || derivedRounds < 1 || derivedRounds > 254) {

@@ -24,7 +24,19 @@ export interface ExtendedCompetitionRecord {
   roundCount: number;
   currentRound: number;
   isExtended: boolean;
+  configuration: ExtendedCompetitionConfiguration;
 }
+
+export const DEFAULT_COMPETITION_CONFIG: {
+  readonly mapId: string;
+  readonly formatId: string;
+  readonly mode: CompetitionMode;
+};
+
+export const CATALOG_MODES: readonly {
+  readonly id: CompetitionMode;
+  readonly name: string;
+}[];
 
 export interface CompetitionRoundPairing {
   scheduleIndex: number;

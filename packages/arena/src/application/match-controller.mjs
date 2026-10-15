@@ -150,7 +150,8 @@ export function createHeadlessMatchController(options) {
     engineGitRevision = null,
     participants,
     initialState,
-    supervisorSignal
+    supervisorSignal,
+    onAcceptedMove
   } = options;
 
   let executed = false;
@@ -617,6 +618,28 @@ export function createHeadlessMatchController(options) {
           };
 
           journal.acceptedMove(acceptedInput);
+
+          if (typeof onAcceptedMove === "function") {
+            try {
+              onAcceptedMove({
+                ply: acceptedPlies,
+                seat,
+                move: { from: acceptedInput.from, to: acceptedInput.to },
+                frame: {
+                  ply: acceptedPlies,
+                  seat,
+                  move: { from: acceptedInput.from, to: acceptedInput.to },
+                  capturedPieceId: capturedId,
+                  capturedPieceType: capturedType,
+                  elapsedMs,
+                  remainingMs: remainingMs[seat],
+                  clock: cloneDeep(currentCoreState.clock),
+                  comment: action.comment,
+                  state: cloneDeep(currentCoreState)
+                }
+              });
+            } catch (_) {}
+          }
 
           // Terminal precedence after accepted move: goal -> elimination -> no_moves -> cap
           if (currentCoreState.winner) {

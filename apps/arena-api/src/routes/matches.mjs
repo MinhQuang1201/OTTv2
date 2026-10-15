@@ -52,7 +52,7 @@ function hasForbiddenShellPathFields(obj) {
 }
 
 export async function handleMatchesRoute(req, res, ctx) {
-  const { db, matchRepo, jobQueue, parsedUrl, maxBodyBytes } = ctx;
+  const { db, matchRepo, jobQueue, liveFrameStore, parsedUrl, maxBodyBytes } = ctx;
   const pathname = parsedUrl.pathname;
 
   // 1. Authenticate user
@@ -376,6 +376,44 @@ export async function handleMatchesRoute(req, res, ctx) {
         ETag: `"${matchResult.replay_digest}"`
       }
     );
+  }
+
+  // ── GET /api/arena/v1/matches/:id/live ────────────────────────────────────
+  const liveMatch = pathname.match(/^\/api\/arena\/v1\/matches\/([^/]+)\/live\/?$/);
+  if (liveMatch) {
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      return sendError(res, 405, "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed. Expected GET`, {}, req);
+    }
+
+    const matchId = liveMatch[1];
+    if (!liveFrameStore) {
+      return sendError(res, 503, "SERVICE_UNAVAILABLE", "Live frame store is not configured on this server", {}, req);
+    }
+
+    const afterPlyParam = parseInt(parsedUrl.searchParams.get("afterPly") || "-1", 10);
+    const afterPly = isNaN(afterPlyParam) ? -1 : afterPlyParam;
+    const attemptNoParam = parsedUrl.searchParams.has("attemptNo")
+      ? parseInt(parsedUrl.searchParams.get("attemptNo"), 10)
+      : null;
+    const attemptNo = attemptNoParam !== null && !isNaN(attemptNoParam) ? attemptNoParam : null;
+    const limitParam = parsedUrl.searchParams.has("limit")
+      ? parseInt(parsedUrl.searchParams.get("limit"), 10)
+      : null;
+    const limit = limitParam !== null && !isNaN(limitParam) ? limitParam : null;
+
+    const result = liveFrameStore.getLiveFrames({
+      matchId,
+      afterPly,
+      attemptNo,
+      limit
+    });
+
+    if (!result) {
+      return sendError(res, 404, "NOT_FOUND", `Match not found: ${matchId}`, {}, req);
+    }
+
+    return sendJson(res, 200, result);
   }
 
   // ── GET /api/arena/v1/matches/:id ─────────────────────────────────────────
