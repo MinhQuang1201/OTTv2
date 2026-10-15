@@ -340,6 +340,16 @@
   z-index: 3;
 }
 
+.cellSelectedSeatA {
+  box-shadow: inset 0 0 0 3px var(--ui-seat-a) !important;
+  z-index: 3;
+}
+
+.cellSelectedSeatB {
+  box-shadow: inset 0 0 0 3px var(--ui-seat-b) !important;
+  z-index: 3;
+}
+
 .cellLegal {
   box-shadow: inset 0 0 0 2px var(--ui-seat-b);
   cursor: pointer;
@@ -348,6 +358,44 @@
 .cellHighlighted {
   box-shadow: inset 0 0 0 3px var(--ui-focus) !important;
   z-index: 2;
+}
+
+.cellMoveFrom {
+  box-shadow: inset 0 0 0 2px var(--ui-focus) !important;
+  opacity: 0.9;
+  z-index: 2;
+}
+
+.cellMoveTo {
+  box-shadow: inset 0 0 0 3px var(--ui-focus) !important;
+  animation: moveHighlight 350ms ease-out;
+  z-index: 2;
+}
+
+.cellCapture {
+  box-shadow: inset 0 0 0 3px #ef4444 !important;
+  animation: capturePulse 400ms ease-out;
+  z-index: 3;
+}
+
+@keyframes moveHighlight {
+  0% {
+    filter: brightness(1.25);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes capturePulse {
+  0% {
+    filter: brightness(1.35);
+    box-shadow: inset 0 0 0 4px #dc2626 !important;
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow: inset 0 0 0 3px #ef4444 !important;
+  }
 }
 
 .legalDot {
@@ -570,8 +618,10 @@
   .effects,
   .boardCell,
   .clockWarning,
-  .piece {
-    animation: none;
-    transition: none;
+  .piece,
+  .cellMoveTo,
+  .cellCapture {
+    animation: none !important;
+    transition: none !important;
   }
 }

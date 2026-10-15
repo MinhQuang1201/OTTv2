@@ -296,4 +296,108 @@ describe("ReplayScreen", () => {
     );
     expect(docAfter?.result.winner).toBe(deterministicFixture.result.winner);
   });
+
+  it("renders interactive cumulative move notation and updates cursor when clicked", async () => {
+    const user = userEvent.setup();
+    const session = await createStartedSession(deterministicFixture);
+    render(<ReplayScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />);
+
+    expect(screen.getByText("Biên bản nước đi")).toBeInTheDocument();
+    const ply3Btn = screen.getByTestId("replay-ply-item-3");
+    expect(ply3Btn).toBeInTheDocument();
+
+    await user.click(ply3Btn);
+    expect(session.getPlayback().cursor).toBe(3);
+    expect(ply3Btn).toHaveAttribute("aria-current", "step");
+
+    const startBtn = screen.getByTestId("replay-ply-item-0");
+    await user.click(startBtn);
+    expect(session.getPlayback().cursor).toBe(0);
+    expect(startBtn).toHaveAttribute("aria-current", "step");
+  });
+
+  it("handles keyboard navigation shortcuts while ignoring inputs and modifier keys", async () => {
+    const session = await createStartedSession(deterministicFixture);
+    render(<ReplayScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />);
+
+    expect(session.getPlayback().cursor).toBe(0);
+
+    // ArrowRight steps forward
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(session.getPlayback().cursor).toBe(1);
+
+    // ArrowLeft steps backward
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(session.getPlayback().cursor).toBe(0);
+
+    // End jumps to total plies
+    fireEvent.keyDown(window, { key: "End" });
+    expect(session.getPlayback().cursor).toBe(19);
+
+    // Home jumps to start
+    fireEvent.keyDown(window, { key: "Home" });
+    expect(session.getPlayback().cursor).toBe(0);
+
+    // Modifier keys are ignored
+    fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
+    expect(session.getPlayback().cursor).toBe(0);
+
+    // Input element typing is ignored
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: " ", bubbles: true });
+    expect(session.getPlayback().isPlaying).toBe(false);
+    document.body.removeChild(input);
+
+    // Space on window toggles playback
+    fireEvent.keyDown(window, { key: " " });
+    expect(session.getPlayback().isPlaying).toBe(true);
+    fireEvent.keyDown(window, { key: " " });
+    expect(session.getPlayback().isPlaying).toBe(false);
+  });
+
+  it("toggles board perspective on flip button click and keyboard shortcut F", async () => {
+    const user = userEvent.setup();
+    const session = await createStartedSession(deterministicFixture);
+    render(<ReplayScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />);
+
+    const flipBtn = screen.getByTestId("replay-flip-btn");
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+
+    const cellsInitial = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsInitial[0]).toHaveAttribute("data-testid", "board-cell-A1");
+
+    // Click flip button
+    await user.click(flipBtn);
+    expect(flipBtn).toHaveAttribute("aria-pressed", "true");
+
+    const cellsFlipped = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsFlipped[0]).toHaveAttribute("data-testid", "board-cell-I9");
+
+    // Press F shortcut to flip back
+    fireEvent.keyDown(window, { key: "f" });
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+
+    const cellsRestored = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsRestored[0]).toHaveAttribute("data-testid", "board-cell-A1");
+  });
+
+  it("toggles audio preference on sound toggle button click and keyboard shortcut M", async () => {
+    const user = userEvent.setup();
+    const session = await createStartedSession(deterministicFixture);
+    render(<ReplayScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />);
+
+    const soundBtn = screen.getByTestId("replay-sound-toggle-btn");
+    expect(soundBtn).toHaveAttribute("aria-pressed", "false");
+
+    // Click to enable sound
+    await user.click(soundBtn);
+    expect(soundBtn).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("ott:audio-enabled")).toBe("true");
+
+    // Press M shortcut to toggle sound off
+    fireEvent.keyDown(window, { key: "m" });
+    expect(soundBtn).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("ott:audio-enabled")).toBe("false");
+  });
 });

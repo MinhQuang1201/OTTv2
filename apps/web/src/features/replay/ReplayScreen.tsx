@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GameSession, ReplayPlaybackFacade, ReplayPlaybackView } from "../../sessions/contract";
 import type { GameSnapshot } from "../../shared/model/game";
-import type { ReplayDocument } from "../../../../../packages/arena/src/contracts/index.d.mts";
+import type { ReplayDocument } from "../../sessions/contract";
 import { useSessionSnapshot } from "../../sessions/useSessionSnapshot";
 import { INITIAL_PLAYBACK_VIEW } from "../../sessions/replay/ReplaySession";
 import { Board } from "../game/Board";
@@ -9,6 +9,10 @@ import { PlayerPanel } from "../game/PlayerPanel";
 import { Button } from "../../shared/ui/Button";
 import { Panel } from "../../shared/ui/Panel";
 import { ReplayControls } from "./ReplayControls";
+import { ReplayNotation } from "./ReplayNotation";
+import { useReplayShortcuts } from "./useReplayShortcuts";
+import { getSoundEnabled, setSoundEnabled } from "../../shared/audio/soundPreferences";
+import { playSynthesizedSound } from "../../shared/audio/soundSynthesis";
 import { ArenaResultSummary } from "./ArenaResultSummary";
 import { downloadReplayDocument } from "./replayImport";
 import { hydratePracticeCoreState } from "../../sessions/replay/replayHydration";
@@ -39,6 +43,56 @@ export function ReplayScreen({
   });
 
   const [summaryDismissed, setSummaryDismissed] = useState(false);
+  const [perspective, setPerspective] = useState<"A" | "B">("A");
+  const [soundEnabled, setSoundState] = useState<boolean>(() => getSoundEnabled());
+
+  const handleFlipPerspective = () => {
+    setPerspective((prev) => (prev === "A" ? "B" : "A"));
+  };
+
+  const handleToggleSound = () => {
+    setSoundState((prev) => {
+      const next = !prev;
+      setSoundEnabled(next);
+      return next;
+    });
+  };
+
+  useReplayShortcuts({
+    onStepPrev: () => session.step?.("prev"),
+    onStepNext: () => session.step?.("next"),
+    onTogglePlay: () => {
+      const isPlaying = session.getPlayback ? session.getPlayback().isPlaying : playback.isPlaying;
+      if (isPlaying) {
+        session.pause?.();
+      } else {
+        session.play?.();
+      }
+    },
+    onSeekStart: () => session.seek?.(0),
+    onSeekEnd: () => session.seek?.(playback.totalPlies),
+    onFlipPerspective: handleFlipPerspective,
+    onToggleSound: handleToggleSound,
+  });
+
+  const prevCursorRef = useRef(playback.cursor);
+  useEffect(() => {
+    const prevCursor = prevCursorRef.current;
+    prevCursorRef.current = playback.cursor;
+
+    if (!soundEnabled) return;
+    if (playback.cursor > prevCursor) {
+      if (playback.isAtEnd && playback.result?.outcome === "win") {
+        playSynthesizedSound("win");
+      } else if (playback.lastMove?.capturedPieceType || playback.lastMove?.capturedPieceId) {
+        playSynthesizedSound("capture");
+      } else {
+        playSynthesizedSound("move");
+      }
+    } else if (playback.cursor < prevCursor) {
+      playSynthesizedSound("step");
+    }
+  }, [playback.cursor, playback.isAtEnd, playback.result, playback.lastMove, soundEnabled]);
 
   useEffect(() => {
     if (session.getPlayback) {
@@ -85,6 +139,10 @@ export function ReplayScreen({
 
   const highlightMove = playback.lastMove
     ? { from: playback.lastMove.from, to: playback.lastMove.to }
+    : null;
+
+  const lastCapture = playback.lastMove?.capturedPieceType || playback.lastMove?.capturedPieceId
+    ? playback.lastMove.to
     : null;
 
   const showResultOverlay = playback.isAtEnd && Boolean(playback.result) && !summaryDismissed;
@@ -168,6 +226,8 @@ export function ReplayScreen({
             session={session}
             snapshot={activeSnapshot}
             highlightMove={highlightMove}
+            perspective={perspective}
+            lastCapture={lastCapture}
           />
           <ReplayControls
             playback={playback}
@@ -179,10 +239,21 @@ export function ReplayScreen({
             onForkPractice={onForkPractice ? handleForkPractice : undefined}
             canFork={canFork}
             forkDisabledReason={forkDisabledReason}
+            perspective={perspective}
+            onFlipPerspective={handleFlipPerspective}
+            soundEnabled={soundEnabled}
+            onToggleSound={handleToggleSound}
           />
         </div>
 
         <aside className={styles.sideRail}>
+          {doc && (
+            <ReplayNotation
+              document={doc}
+              activePly={playback.cursor}
+              onSeek={handleSeek}
+            />
+          )}
           <Panel heading="Thông tin trận đấu">
             <dl className={styles.resultMeta} data-testid="replay-metadata">
               <dt>Trạng thái</dt>

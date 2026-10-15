@@ -12,6 +12,10 @@ export interface ReplayControlsProps {
   readonly onForkPractice?: (mode: "local" | "ai") => void;
   readonly canFork?: boolean;
   readonly forkDisabledReason?: string | null;
+  readonly perspective?: "A" | "B";
+  readonly onFlipPerspective?: () => void;
+  readonly soundEnabled?: boolean;
+  readonly onToggleSound?: () => void;
 }
 
 const SPEEDS: readonly ReplaySpeed[] = [0.5, 1, 2, 4];
@@ -26,6 +30,10 @@ export function ReplayControls({
   onForkPractice,
   canFork = true,
   forkDisabledReason,
+  perspective = "A",
+  onFlipPerspective,
+  soundEnabled = false,
+  onToggleSound,
 }: ReplayControlsProps) {
   const { cursor, totalPlies, isPlaying, speed, isAtStart, isAtEnd } = playback;
 
@@ -88,6 +96,32 @@ export function ReplayControls({
           >
             Tiến ›
           </Button>
+        </div>
+
+        <div className={styles.extraControls} role="group" aria-label="Tùy chọn hiển thị và âm thanh">
+          {onFlipPerspective && (
+            <Button
+              variant={perspective === "B" ? "primary" : "secondary"}
+              onClick={onFlipPerspective}
+              aria-label={`Đổi góc nhìn bàn cờ (hiện tại bên ${perspective || "A"}) (phím F)`}
+              aria-pressed={perspective === "B"}
+              data-testid="replay-flip-btn"
+            >
+              Xoay bàn cờ
+            </Button>
+          )}
+
+          {onToggleSound && (
+            <Button
+              variant={soundEnabled ? "primary" : "quiet"}
+              onClick={onToggleSound}
+              aria-label={soundEnabled ? "Tắt âm thanh (phím M)" : "Bật âm thanh (phím M)"}
+              aria-pressed={soundEnabled}
+              data-testid="replay-sound-toggle-btn"
+            >
+              {soundEnabled ? "🔊 Âm thanh" : "🔇 Âm thanh"}
+            </Button>
+          )}
         </div>
 
         <div className={styles.speedSelector} role="group" aria-label="Tốc độ phát">

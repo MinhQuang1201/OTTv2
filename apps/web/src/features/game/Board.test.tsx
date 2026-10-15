@@ -130,4 +130,66 @@ describe("Board", () => {
     }} />);
     expect(screen.getByTestId("board-cell-A3")).toHaveAttribute("aria-pressed", "false");
   });
+
+  it("flips visual perspective to seat B while preserving all 81 canonical coordinate names", () => {
+    const session = new DemoSession("spectator-active");
+    const snapshot = session.getSnapshot();
+    render(<Board session={session} snapshot={snapshot} perspective="B" />);
+
+    const cells = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cells).toHaveLength(81);
+
+    // In perspective B, the first rendered cell is canonical I9 (x=8, y=8)
+    expect(cells[0]).toHaveAttribute("data-x", "8");
+    expect(cells[0]).toHaveAttribute("data-y", "8");
+    expect(cells[0]).toHaveAttribute("data-testid", "board-cell-I9");
+    expect(cells[0]).toHaveAccessibleName(/^Ô I9/i);
+
+    // The last rendered cell is canonical A1 (x=0, y=0)
+    expect(cells[80]).toHaveAttribute("data-x", "0");
+    expect(cells[80]).toHaveAttribute("data-y", "0");
+    expect(cells[80]).toHaveAttribute("data-testid", "board-cell-A1");
+    expect(cells[80]).toHaveAccessibleName(/^Ô A1/i);
+  });
+
+  it("applies move and capture decoration attributes without altering cell interaction", () => {
+    const session = new DemoSession("spectator-active");
+    const snapshot = session.getSnapshot();
+    render(
+      <Board
+        session={session}
+        snapshot={snapshot}
+        highlightMove={{ from: { x: 0, y: 2 }, to: { x: 0, y: 1 } }}
+        lastCapture={{ x: 0, y: 1 }}
+      />
+    );
+
+    const fromCell = screen.getByTestId("board-cell-A3");
+    const toCell = screen.getByTestId("board-cell-A2");
+
+    expect(fromCell).toHaveAttribute("data-last-move-from", "true");
+    expect(toCell).toHaveAttribute("data-last-move-to", "true");
+    expect(toCell).toHaveAttribute("data-last-capture", "true");
+    expect(toCell.getAttribute("aria-label")).toContain("vừa ăn quân");
+  });
+
+  it("applies per-seat selection styling when piece is selected by seat B", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const snapshot = {
+      ...session.getSnapshot(),
+      turn: "B" as const,
+      viewer: { role: "player" as const, seat: "B" as const },
+      viewerSeat: "B" as const,
+    };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(<Board session={session} snapshot={snapshot} />);
+
+    // In game-active-a, B has piece at I7 (x=8, y=6)
+    const cellI7 = screen.getByTestId("board-cell-I7");
+    await user.click(cellI7);
+
+    expect(cellI7).toHaveAttribute("aria-pressed", "true");
+    expect(cellI7).toHaveAttribute("data-selected-seat", "B");
+  });
 });
