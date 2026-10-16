@@ -6,6 +6,7 @@ import {
 } from "../../../../../packages/protocol/src/index";
 import type { OnlineConnection } from "./globals";
 import { createRuntimeBridge, type RuntimeBridge } from "./runtimeBridge";
+import { isSpectatorEnabled } from "../../runtime-config";
 
 export type OnlineLobbyStreamStatus = "loading" | "ready" | "unavailable" | "error" | "reconnecting";
 
@@ -22,6 +23,7 @@ export interface OnlineLobbyStreamOptions {
   readonly maxReconnectAttempts?: number;
   readonly reconnectDelayMs?: number;
   readonly disposeRuntime?: boolean;
+  readonly enabled?: boolean;
 }
 
 const LOBBY_CONFIG = {
@@ -116,6 +118,8 @@ export class OnlineLobbyStream {
   private disposal: Promise<void> | null = null;
   private lifecycleGeneration = 0;
 
+  private readonly enabled: boolean;
+
   constructor(options: OnlineLobbyStreamOptions = {}) {
     this.runtime = options.runtime ?? createRuntimeBridge();
     this.host = options.host ?? globalThis.OTT_PLAYHTML_HOST ?? globalThis.OTT_PLAYHTML_CONTROL_ENDPOINT ?? "";
@@ -126,6 +130,15 @@ export class OnlineLobbyStream {
       ? options.reconnectDelayMs as number
       : DEFAULT_RECONNECT_DELAY_MS;
     this.disposeRuntime = options.disposeRuntime !== false;
+    this.enabled = options.enabled ?? isSpectatorEnabled();
+    if (!this.enabled) {
+      this.snapshot = Object.freeze({
+        status: "unavailable",
+        matches: EMPTY_MATCHES,
+        catalogRevision: -1,
+        message: "Lobby stream hiện không khả dụng.",
+      });
+    }
   }
 
   getSnapshot = (): OnlineLobbyStreamSnapshot => this.snapshot;
@@ -142,6 +155,10 @@ export class OnlineLobbyStream {
       return;
     }
     this.started = true;
+    if (!this.enabled) {
+      this.setSnapshot({ status: "unavailable", matches: EMPTY_MATCHES, catalogRevision: -1, message: "Lobby stream hiện không khả dụng." });
+      return;
+    }
     const lifecycleGeneration = ++this.lifecycleGeneration;
     this.setSnapshot({ status: "loading", matches: EMPTY_MATCHES, catalogRevision: -1, message: undefined });
 
