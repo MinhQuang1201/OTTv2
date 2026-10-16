@@ -309,6 +309,9 @@ export function createJobWorker(options) {
   async function runOnce() {
     if (isStopping) return { executed: false, claim: null };
 
+    // Reclaim expired leases before selecting queued work after a process restart.
+    jobQueue.recoverExpiredJobs();
+
     const claim = jobQueue.claimNextJob({
       workerId,
       leaseDurationMs,

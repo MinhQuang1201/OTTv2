@@ -139,6 +139,22 @@ function setupEnv(testName) {
 }
 
 describe("Arena Job Worker", () => {
+  it("recovers expired leases before claiming the next job", async () => {
+    const calls = [];
+    const queue = {
+      recoverExpiredJobs() { calls.push("recover"); return [{ action: "requeued" }]; },
+      claimNextJob() { calls.push("claim"); return null; }
+    };
+    const worker = createJobWorker({
+      workerId: "recovery-order-worker",
+      db: {},
+      jobQueue: queue,
+      matchRepo: {}
+    });
+    const outcome = await worker.runOnce();
+    assert.equal(outcome.executed, false);
+    assert.deepEqual(calls, ["recover", "claim"]);
+  });
   it("executes queued match to completion and settles results atomically", async () => {
     const env = setupEnv("worker-exec-match");
     try {
