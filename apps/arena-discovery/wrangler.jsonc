@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ottv2-arena-discovery-20261016",
+  "main": "src/index.mjs",
+  "account_id": "d25fa165507629692ff5b4bc0844c956",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      { "name": "ARENA_DISCOVERY", "class_name": "ArenaDiscoveryConfig" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ArenaDiscoveryConfig"] }
+  ]
+}
