@@ -20,6 +20,7 @@ import {
 
 import { withTransaction } from "./sqlite-database.mjs";
 import { IdempotencyConflictError, NotFoundError } from "./bot-repository.mjs";
+import { createNodeEngine, coreConfig } from "../core/node-engine.mjs";
 
 export { IdempotencyConflictError, NotFoundError };
 
@@ -298,6 +299,11 @@ export function createTournamentRepository(db, options = {}) {
         stmts.insertTournamentStanding.run(tournamentId, botId);
       }
 
+      if (input.startImmediately === false) {
+        if (actorId && idempotencyKey) stmts.insertApiRequest.run(actorId, idempotencyKey, payloadDigest, tournamentId);
+        return getTournament(tournamentId);
+      }
+
       // 5. Create all matches, participants, tournament_matches, and jobs
       for (const matchSlot of schedule) {
         const matchId = `${tournamentId}-m${matchSlot.scheduleIndex}`;
@@ -430,6 +436,39 @@ export function createTournamentRepository(db, options = {}) {
     return rows;
   }
 
+  function startTournament(tournamentId) {
+    return withTransaction(db, () => {
+      const tournament = getTournament(tournamentId);
+      if (!tournament) throw new NotFoundError("tournament", tournamentId);
+      const existing = stmts.selectTournamentMatches.all(tournamentId);
+      if (existing.length > 0) return tournament;
+      const entries = stmts.selectTournamentEntries.all(tournamentId).map((entry) => ({
+        botId: entry.bot_id,
+        botVersionId: entry.bot_version_id
+      }));
+      const schedule = scheduleGenerator(entries);
+      const engine = createNodeEngine();
+      const initialStateJson = JSON.stringify(engine.createInitialState());
+      const matchKind = tournament.ranked ? "ranked" : "practice";
+      const pinned = new Map(entries.map((entry) => {
+        const row = db.prepare("SELECT * FROM bot_versions WHERE id = ?").get(entry.botVersionId);
+        return [entry.botId, { botId: entry.botId, botVersionId: row.id, profileId: row.profile_id, profileRevision: row.profile_revision, artifactDigest: row.artifact_digest }];
+      }));
+      for (const slot of schedule) {
+        const matchId = `${tournamentId}-m${slot.scheduleIndex}`;
+        const a = pinned.get(slot.botAId);
+        const b = pinned.get(slot.botBId);
+        db.prepare("INSERT INTO matches (id, kind, ladder_id, ruleset_json, policy_json, profile_json, initial_state_json, status, tournament_id, schedule_index) VALUES (?, ?, 'ladder-main', ?, ?, '{}', ?, 'pending', ?, ?)").run(matchId, matchKind, tournament.ruleset_json, tournament.policy_json, initialStateJson, tournamentId, slot.scheduleIndex);
+        stmts.insertMatchParticipant.run(matchId, "A", a.botId, a.botVersionId, a.artifactDigest, a.profileId, a.profileRevision);
+        stmts.insertMatchParticipant.run(matchId, "B", b.botId, b.botVersionId, b.artifactDigest, b.profileId, b.profileRevision);
+        stmts.insertTournamentMatch.run(tournamentId, slot.scheduleIndex, matchId);
+        stmts.insertJob.run(`job-${matchId}`, matchId);
+      }
+      db.prepare("UPDATE tournaments SET status = 'active' WHERE id = ? AND status = 'pending'").run(tournamentId);
+      return getTournament(tournamentId);
+    });
+  }
+
   /**
    * Retries a tournament match by resetting match status to 'pending' and re-queueing its job.
    */
@@ -457,6 +496,7 @@ export function createTournamentRepository(db, options = {}) {
     getTournamentEntries,
     getTournamentMatches,
     getTournamentStandings,
+    startTournament,
     retryMatch
   };
 }

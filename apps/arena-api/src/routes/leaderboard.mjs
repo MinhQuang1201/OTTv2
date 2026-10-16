@@ -9,7 +9,7 @@
  * - Standard competition ranking for ties.
  */
 
-import { authenticate } from "../auth/authorization.mjs";
+import { authenticateOptional } from "../auth/authorization.mjs";
 import { sendJson, sendError } from "../http-server.mjs";
 
 export async function handleLeaderboardRoute(req, res, ctx) {
@@ -17,8 +17,12 @@ export async function handleLeaderboardRoute(req, res, ctx) {
   const pathname = parsedUrl.pathname;
 
   // 1. Authenticate user
-  const auth = authenticate(req, db);
-  if (!auth.ok) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return sendError(res, 405, "METHOD_NOT_ALLOWED", "Only GET is allowed", {}, req);
+  }
+  const auth = authenticateOptional(req, db);
+  if (!auth.ok && !auth.anonymous) {
     return sendError(res, auth.statusCode, auth.error.code, auth.error.message, {}, req);
   }
 

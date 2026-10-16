@@ -9,7 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { authenticate, checkRole } from "../auth/authorization.mjs";
+import { authenticateOptional, checkRole } from "../auth/authorization.mjs";
 import { sendJson, sendError, parseJsonBody } from "../http-server.mjs";
 import {
   IdempotencyConflictError,
@@ -48,12 +48,42 @@ export async function handleTournamentsRoute(req, res, ctx) {
   const { db, tournamentRepo, parsedUrl, maxBodyBytes } = ctx;
   const pathname = parsedUrl.pathname;
 
-  // 1. Authenticate user
-  const auth = authenticate(req, db);
-  if (!auth.ok) {
+  const isPublicRead = req.method === "GET";
+  const auth = authenticateOptional(req, db);
+  if (!isPublicRead && !auth.ok) {
+    return sendError(res, auth.statusCode || 401, auth.error?.code || "UNAUTHORIZED", auth.error?.message || "Authentication required", {}, req);
+  }
+  if (isPublicRead && !auth.ok && !auth.anonymous) {
     return sendError(res, auth.statusCode, auth.error.code, auth.error.message, {}, req);
   }
   const user = req.user;
+
+  if (req.method === "GET" && (pathname === "/api/arena/v1/tournaments" || pathname === "/api/arena/v1/tournaments/")) {
+    const limit = Math.max(1, Math.min(100, Number.parseInt(parsedUrl.searchParams.get("limit") || "20", 10) || 20));
+    const offset = Math.max(0, Number.parseInt(parsedUrl.searchParams.get("offset") || "0", 10) || 0);
+    const rows = db.prepare("SELECT id, name, status, point_scheme, ranked, created_at FROM tournaments ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?").all(limit, offset);
+    const total = db.prepare("SELECT COUNT(*) AS total FROM tournaments").get().total;
+    return sendJson(res, 200, {
+      tournaments: rows.map((row) => ({ id: row.id, name: row.name, status: row.status, pointScheme: row.point_scheme, ranked: Boolean(row.ranked), createdAt: row.created_at })),
+      total,
+      limit,
+      offset
+    });
+  }
+
+  const startMatch = pathname.match(/^\/api\/arena\/v1\/tournaments\/([^/]+)\/start\/?$/);
+  if (startMatch && req.method === "POST") {
+    const roleCheck = checkRole(user, ["admin"]);
+    if (!roleCheck.ok) return sendError(res, 403, "FORBIDDEN", "Only administrators can start tournaments", {}, req);
+    const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"];
+    if (!idempotencyKey || typeof idempotencyKey !== "string" || !idempotencyKey.trim()) return sendError(res, 400, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required", {}, req);
+    try {
+      const tournament = tournamentRepo.startTournament(startMatch[1]);
+      return sendJson(res, 200, { tournament: { id: tournament.id, name: tournament.name, status: tournament.status, totalMatches: tournament.totalMatches } });
+    } catch (err) {
+      return sendError(res, err.code === "NOT_FOUND" ? 404 : 500, err.code || "INTERNAL_ERROR", err.message, {}, req);
+    }
+  }
 
   // ── POST /api/arena/v1/tournaments ────────────────────────────────────────
   if (req.method === "POST" && pathname === "/api/arena/v1/tournaments") {
@@ -149,8 +179,9 @@ export async function handleTournamentsRoute(req, res, ctx) {
           ranked: body.ranked !== undefined ? Boolean(body.ranked) : true,
           rulesetJson: body.rulesetJson || body.ruleset || defaultRuleset,
           policyJson: body.policyJson || body.policy || DEFAULT_MATCH_POLICY,
-          initialStateJson: body.initialStateJson || body.initialState || defaultInitialState,
-          entries: resolvedEntries
+           initialStateJson: body.initialStateJson || body.initialState || defaultInitialState,
+           entries: resolvedEntries,
+           startImmediately: body.startImmediately !== false
         },
         {
           actorId: user.id,
@@ -185,6 +216,10 @@ export async function handleTournamentsRoute(req, res, ctx) {
   // ── GET /api/arena/v1/tournaments/:id ─────────────────────────────────────
   const tournamentMatch = pathname.match(/^\/api\/arena\/v1\/tournaments\/([^/]+)\/?$/);
   if (tournamentMatch) {
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      return sendError(res, 405, "METHOD_NOT_ALLOWED", "Only GET is allowed for tournament details", {}, req);
+    }
     const tournamentId = tournamentMatch[1];
     const tournament = tournamentRepo.getTournament(tournamentId);
     if (!tournament) {

@@ -11,7 +11,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { authenticate } from "../auth/authorization.mjs";
+import { authenticateOptional } from "../auth/authorization.mjs";
 import { sendJson, sendError, parseJsonBody } from "../http-server.mjs";
 import {
   IdempotencyConflictError,
@@ -55,9 +55,12 @@ export async function handleMatchesRoute(req, res, ctx) {
   const { db, matchRepo, jobQueue, liveFrameStore, parsedUrl, maxBodyBytes } = ctx;
   const pathname = parsedUrl.pathname;
 
-  // 1. Authenticate user
-  const auth = authenticate(req, db);
-  if (!auth.ok) {
+  const isPublicRead = req.method === "GET";
+  const auth = authenticateOptional(req, db);
+  if (!isPublicRead && !auth.ok) {
+    return sendError(res, auth.statusCode || 401, auth.error?.code || "UNAUTHORIZED", auth.error?.message || "Authentication required", {}, req);
+  }
+  if (isPublicRead && !auth.ok && !auth.anonymous) {
     return sendError(res, auth.statusCode, auth.error.code, auth.error.message, {}, req);
   }
   const user = req.user;

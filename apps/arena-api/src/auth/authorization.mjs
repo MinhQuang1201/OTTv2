@@ -108,6 +108,16 @@ export function authenticate(req, db) {
   return { ok: true, user: res.user, token };
 }
 
+/** Optional authentication: absent credentials are anonymous; supplied invalid credentials still fail. */
+export function authenticateOptional(req, db) {
+  if (req.url && (req.url.includes("token=") || req.url.includes("bearer="))) {
+    return authenticate(req, db);
+  }
+  const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+  if (!authHeader) return { ok: false, anonymous: true };
+  return authenticate(req, db);
+}
+
 /**
  * Checks if the authenticated user has one of the allowed roles.
  *

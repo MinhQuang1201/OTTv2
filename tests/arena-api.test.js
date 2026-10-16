@@ -975,6 +975,31 @@ describe("Arena HTTP API — Task 14 Route Matrix & Integration", () => {
     assert.equal(entry.rank, 1);
   });
 
+  it("allows unauthenticated public reads but keeps private and write routes authenticated", async () => {
+    const publicPaths = [
+      "/api/arena/v1/leaderboard?ladderId=ladder-main",
+      "/api/arena/v1/matches",
+      "/api/arena/v1/tournaments"
+    ];
+    for (const path of publicPaths) {
+      const response = await makeRequest(server, { path, method: "GET" });
+      assert.notEqual(response.statusCode, 401, `${path} should be a public read`);
+    }
+
+    const privateVersions = await makeRequest(server, {
+      path: "/api/arena/v1/bots/usr-admin-seeded-bot/versions",
+      method: "GET"
+    });
+    assert.equal(privateVersions.statusCode, 401);
+
+    const write = await makeRequest(server, {
+      path: "/api/arena/v1/matches",
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "public-write-must-fail" }
+    }, { kind: "practice", participants: { A: {}, B: {} } });
+    assert.equal(write.statusCode, 401);
+  });
+
   // ── 8. Worker Ownership & Main Entry ──────────────────────────────────────
   it("loadConfig parses external worker flag and config options", () => {
     const config = loadConfig({
