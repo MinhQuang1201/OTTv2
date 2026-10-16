@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { ArenaScreen } from "./ArenaScreen";
-import { ArenaApiGateway } from "./ArenaApiGateway";
+import { ArenaApiGateway, ArenaApiError, type ArenaCapabilities } from "./ArenaApiGateway";
 import { CompetitionApiClient, CompetitionApiError } from "./competitions";
 import { createMockCatalog } from "./competitions/competitionTestFixtures";
 import deterministicFixture from "../../../../../tests/fixtures/arena/replays/deterministic-match.json";
@@ -44,6 +44,278 @@ describe("ArenaScreen", () => {
     render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
     await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
     expect(onLobbyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads capabilities once before authentication and offers a manual retry after offline", async () => {
+    const user = userEvent.setup();
+    const getCapabilitiesSpy = vi.spyOn(gateway, "getCapabilities")
+      .mockRejectedValueOnce(new ArenaApiError("offline", { code: "network_error", statusCode: 0 }))
+      .mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["node", "python"],
+        publicRegistration: true
+      });
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(screen.getByText(/Arena hiện ngoại tuyến/i)).toBeInTheDocument());
+    expect(getCapabilitiesSpy).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /Thử lại/i }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+    expect(getCapabilitiesSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a stale capabilities response when leaving the screen", async () => {
+    let resolveCapabilities!: (value: ArenaCapabilities) => void;
+    const capabilities = new Promise<ArenaCapabilities>((resolve) => { resolveCapabilities = resolve; });
+    const getCapabilitiesSpy = vi.spyOn(gateway, "getCapabilities").mockReturnValue(capabilities);
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(getCapabilitiesSpy).toHaveBeenCalledTimes(1));
+    await userEvent.setup().click(screen.getByRole("button", { name: /Về sảnh/i }));
+    resolveCapabilities({ executor: "late", trusted: false, untrusted: true, canSubmitSource: false, profiles: [], publicRegistration: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("tab", { name: /Đăng ký/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Đăng ký/i })).not.toBeInTheDocument();
+  });
+
+  it("allows user to register with public registration enabled and switches to login", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+      executor: "trusted-local-v1",
+      trusted: true,
+      untrusted: false,
+      canSubmitSource: true,
+      profiles: ["node", "python"],
+      publicRegistration: true
+    });
+
+    const registerSpy = vi.spyOn(gateway, "register").mockResolvedValueOnce({
+      user: { id: "u-new", username: "new_bot_author", role: "author" }
+    });
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+    await user.type(screen.getByLabelText(/Tên đăng nhập/i), " New_Bot_Author ");
+    await user.type(screen.getByLabelText(/^Mật khẩu$/i), "securepass123");
+    await user.type(screen.getByLabelText(/Xác nhận mật khẩu/i), "securepass123");
+    await user.click(screen.getByRole("button", { name: /Tạo tài khoản/i }));
+
+    expect(registerSpy).toHaveBeenCalledWith(
+      { username: "New_Bot_Author", password: "securepass123" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tài khoản đã tạo/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tên đăng nhập/i)).toHaveValue("new_bot_author");
+      expect(screen.getByRole("button", { name: /Đăng nhập/i })).toBeInTheDocument();
+    });
+  });
+
+  it("allows login even when Docker container runtime is down", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+      executor: "unavailable",
+      trusted: false,
+      untrusted: false,
+      canSubmitSource: false,
+      profiles: []
+    });
+    vi.spyOn(gateway, "login").mockResolvedValueOnce({
+      token: "tok-alice",
+      user: { id: "u-alice", username: "alice", role: "author" }
+    });
+    vi.spyOn(gateway, "getMe").mockResolvedValueOnce({
+      user: { id: "u-alice", username: "alice", role: "author" },
+      canSubmitSource: false
+    });
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await user.type(screen.getByLabelText(/Tên đăng nhập/i), "alice");
+    await user.type(screen.getByLabelText(/Mật khẩu/i), "password123");
+    await user.click(screen.getByRole("button", { name: /Đăng nhập/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("alice")).toBeInTheDocument();
+      expect(screen.getByText("author")).toBeInTheDocument();
+    });
+  });
+
+  it("allows registration even when Docker container runtime is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+      executor: "unavailable",
+      trusted: false,
+      untrusted: false,
+      canSubmitSource: false,
+      profiles: [],
+      publicRegistration: true
+    });
+
+    const registerSpy = vi.spyOn(gateway, "register").mockResolvedValueOnce({
+      user: { id: "u-new", username: "docker_down_author", role: "author" }
+    });
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+    await user.type(screen.getByLabelText(/Tên đăng nhập/i), "docker_down_author");
+    await user.type(screen.getByLabelText(/^Mật khẩu$/i), "password123");
+    await user.type(screen.getByLabelText(/Xác nhận mật khẩu/i), "password123");
+    await user.click(screen.getByRole("button", { name: /Tạo tài khoản/i }));
+
+    expect(registerSpy).toHaveBeenCalledWith(
+      { username: "docker_down_author", password: "password123" },
+      expect.anything()
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tài khoản đã tạo/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tên đăng nhập/i)).toHaveValue("docker_down_author");
+      expect(screen.getByRole("button", { name: /Đăng nhập/i })).toBeInTheDocument();
+    });
+  });
+
+  it("settles to offline when capability deadline expires even if gateway ignores abort signal", async () => {
+    vi.useFakeTimers();
+    try {
+      let signalReceived: AbortSignal | undefined;
+      // Gateway that ignores abort signal and never settles
+      vi.spyOn(gateway, "getCapabilities").mockImplementation((options) => {
+        signalReceived = options?.signal;
+        return new Promise(() => {});
+      });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      expect(screen.getByRole("status")).toHaveTextContent(/Đang kiểm tra Arena\.\.\./i);
+      expect(signalReceived?.aborted).toBe(false);
+
+      // Fast forward past 5000ms deadline
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // Signal must be aborted by our timeout controller
+      expect(signalReceived?.aborted).toBe(true);
+
+      // Offline banner must settle immediately via Promise.race
+      expect(screen.getByRole("alert")).toHaveTextContent(/Arena hiện ngoại tuyến, chỉ mở trong phiên demo/i);
+      expect(screen.getByRole("button", { name: /Thử lại/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Quay lại sảnh/i })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not classify caller cancellation as offline error", async () => {
+    vi.spyOn(gateway, "getCapabilities").mockRejectedValueOnce(
+      new ArenaApiError("Yêu cầu đã bị hủy.", { code: "abort_error", statusCode: 0 })
+    );
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Arena hiện ngoại tuyến/i)).not.toBeInTheDocument();
+      expect(screen.getByText("Yêu cầu đã bị hủy.")).toBeInTheDocument();
+    });
+  });
+
+  it("disables auth controls during deferred registration and prevents double-submission", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+      executor: "trusted-local-v1",
+      trusted: true,
+      untrusted: false,
+      canSubmitSource: true,
+      profiles: ["node", "python"],
+      publicRegistration: true
+    });
+
+    let resolveRegister!: (val: any) => void;
+    const registerPromise = new Promise((resolve) => { resolveRegister = resolve; });
+    const registerSpy = vi.spyOn(gateway, "register").mockImplementation(async () => registerPromise as any);
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+    const userInput = screen.getByLabelText(/Tên đăng nhập/i);
+    const passInput = screen.getByLabelText(/^Mật khẩu$/i);
+    const confirmInput = screen.getByLabelText(/Xác nhận mật khẩu/i);
+    await user.type(userInput, "deferred_user");
+    await user.type(passInput, "pwd12345");
+    await user.type(confirmInput, "pwd12345");
+
+    const submitBtn = screen.getByRole("button", { name: /Tạo tài khoản/i });
+    await user.click(submitBtn);
+
+    // Controls must be disabled while request is pending
+    expect(userInput).toBeDisabled();
+    expect(passInput).toBeDisabled();
+    expect(confirmInput).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Đang xử lý\.\.\./i })).toBeDisabled();
+
+    // Attempt second click while pending
+    await user.click(submitBtn);
+
+    // Must only have been called ONCE
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+
+    // Resolve deferred register
+    resolveRegister({
+      user: { id: "u-def", username: "deferred_user", role: "author" }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tài khoản đã tạo/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Đăng nhập/i })).toBeInTheDocument();
+    });
+  });
+
+  it("handles cancelled registration without displaying error or changing mode", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+      executor: "trusted-local-v1",
+      trusted: true,
+      untrusted: false,
+      canSubmitSource: true,
+      profiles: ["node", "python"],
+      publicRegistration: true
+    });
+    vi.spyOn(gateway, "getLeaderboard").mockResolvedValueOnce({ ladderId: "ladder-main", total: 0, ratings: [] });
+
+    vi.spyOn(gateway, "register").mockRejectedValueOnce(
+      new ArenaApiError("Yêu cầu đã bị hủy.", { code: "abort_error", statusCode: 0 })
+    );
+
+    render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+    await user.type(screen.getByLabelText(/Tên đăng nhập/i), "cancel_user");
+    await user.type(screen.getByLabelText(/^Mật khẩu$/i), "pwd12345");
+    await user.type(screen.getByLabelText(/Xác nhận mật khẩu/i), "pwd12345");
+    await user.click(screen.getByRole("button", { name: /Tạo tài khoản/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Tạo tài khoản/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tên đăng nhập/i)).toBeEnabled();
+      expect(screen.getByLabelText(/Tên đăng nhập/i)).toHaveValue("cancel_user");
+    });
   });
 
   it("allows user to log in and displays profile information", async () => {
@@ -406,7 +678,8 @@ describe("ArenaScreen", () => {
       expect(screen.getByText(/v-ready-2/i)).toBeInTheDocument();
       expect(screen.queryByText(/v-building/i)).not.toBeInTheDocument();
 
-      const checkboxes = screen.getAllByRole("checkbox");
+      const readyVersionsContainer = screen.getByTestId("tournament-ready-versions");
+      const checkboxes = within(readyVersionsContainer).getAllByRole("checkbox");
       expect(checkboxes).toHaveLength(2);
 
       const nameInput = screen.getByLabelText(/Tên giải đấu/i);
@@ -459,6 +732,90 @@ describe("ArenaScreen", () => {
 
       // Gateway token must NOT be set and profile not displayed
       expect(gateway.getToken()).toBeNull();
+    });
+
+    it("aborts in-flight register and ignores late response if user returns to lobby", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["node", "python"],
+        publicRegistration: true
+      });
+
+      let resolveRegister!: (val: any) => void;
+      const pendingRegister = new Promise((resolve) => { resolveRegister = resolve; });
+      let receivedSignal: AbortSignal | undefined;
+
+      vi.spyOn(gateway, "register").mockImplementation(async (_creds, options) => {
+        receivedSignal = options?.signal;
+        return pendingRegister as any;
+      });
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+      await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+      await user.type(screen.getByLabelText(/Tên đăng nhập/i), "stale_author");
+      await user.type(screen.getByLabelText(/^Mật khẩu$/i), "pwd123");
+      await user.type(screen.getByLabelText(/Xác nhận mật khẩu/i), "pwd123");
+      await user.click(screen.getByRole("button", { name: /Tạo tài khoản/i }));
+
+      expect(receivedSignal).toBeDefined();
+      expect(receivedSignal?.aborted).toBe(false);
+
+      // User navigates back to lobby while registration is in-flight
+      await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
+      expect(onLobbyMock).toHaveBeenCalled();
+      expect(receivedSignal?.aborted).toBe(true);
+
+      // Now resolve late registration
+      resolveRegister({
+        user: { id: "u-late", username: "stale_author", role: "author" }
+      });
+      await Promise.resolve();
+
+      // Late response notice must NOT be rendered because session generation changed
+      expect(screen.queryByText(/Tài khoản đã tạo/i)).not.toBeInTheDocument();
+    });
+
+    it("aborts in-flight register and cleans up pending controllers on unmount", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValueOnce({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: true,
+        profiles: ["node", "python"],
+        publicRegistration: true
+      });
+
+      let resolveRegister!: (val: any) => void;
+      const pendingRegister = new Promise((resolve) => { resolveRegister = resolve; });
+      let receivedSignal: AbortSignal | undefined;
+
+      vi.spyOn(gateway, "register").mockImplementation(async (_creds, options) => {
+        receivedSignal = options?.signal;
+        return pendingRegister as any;
+      });
+
+      const { unmount } = render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await waitFor(() => expect(screen.getByRole("tab", { name: /Đăng ký/i })).toBeInTheDocument());
+      await user.click(screen.getByRole("tab", { name: /Đăng ký/i }));
+
+      await user.type(screen.getByLabelText(/Tên đăng nhập/i), "unmount_user");
+      await user.type(screen.getByLabelText(/^Mật khẩu$/i), "pwd123");
+      await user.type(screen.getByLabelText(/Xác nhận mật khẩu/i), "pwd123");
+      await user.click(screen.getByRole("button", { name: /Tạo tài khoản/i }));
+
+      expect(receivedSignal?.aborted).toBe(false);
+
+      unmount();
+      expect(receivedSignal?.aborted).toBe(true);
     });
 
     it("aborts in-flight replay fetch and does not call onStartReplay after navigation", async () => {
@@ -987,6 +1344,279 @@ describe("ArenaScreen", () => {
       expect(gateway.getToken()).toBe("fresh-token-456");
       expect(screen.getByRole("button", { name: /Đăng xuất/i })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Đăng nhập/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Guest Public Browsing & Capability/Auth Gating", () => {
+    it("allows guest public browsing across leaderboard, matches, and tournaments without auth headers", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(gateway, "getLeaderboard").mockResolvedValueOnce({
+        ladderId: "ladder-main",
+        total: 1,
+        ratings: [
+          { rank: 1, botId: "bot-1", botName: "PublicBot", ownerId: "u-1", rating: 1500, ratedGames: 10, wins: 5, draws: 2, losses: 3 },
+        ],
+      });
+      vi.spyOn(gateway, "listMatches").mockResolvedValueOnce({
+        matches: [
+          { id: "m-1", kind: "ranked", status: "completed", createdAt: "2026-10-16T00:00:00Z" },
+        ],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listTournaments").mockResolvedValueOnce({
+        tournaments: [
+          { id: "tourn-public", name: "Public Open", status: "pending", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        ],
+        total: 1,
+      });
+      vi.spyOn(gateway, "getTournament").mockResolvedValueOnce({
+        tournament: { id: "tourn-main", name: "Main Tourney", status: "active", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        standings: [],
+        matches: [],
+      });
+      const listBotsSpy = vi.spyOn(gateway, "listBots");
+
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      // Leaderboard loads publicly
+      await waitFor(() => {
+        expect(screen.getByText("PublicBot")).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Missing Authorization header/i)).not.toBeInTheDocument();
+
+      // Switch to Matches
+      await user.click(screen.getByRole("tab", { name: /Trận đấu/i }));
+      await waitFor(() => {
+        expect(screen.getByText("m-1")).toBeInTheDocument();
+      });
+
+      // Switch to Tournaments
+      await user.click(screen.getByRole("tab", { name: /Giải đấu/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Public Open")).toBeInTheDocument();
+      });
+      // Guest should NOT have triggered listBots
+      expect(listBotsSpy).not.toHaveBeenCalled();
+
+      // Switch to Bots as guest -> shows login CTA, does NOT call listBots
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId("bots-guest-cta")).toHaveTextContent(/Vui lòng đăng nhập để tạo và quản lý bot/i);
+        expect(screen.getByTestId("upload-login-banner")).toHaveTextContent(/Vui lòng đăng nhập để nộp phiên bản mã nguồn/i);
+      });
+      expect(screen.queryByText(/Task 19/i)).not.toBeInTheDocument();
+    });
+
+    it("allows author to submit container version when capability allows", async () => {
+      gateway.setToken("tok-author");
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-author", username: "author", role: "author" },
+        canSubmitSource: true,
+      });
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-author-1", ownerId: "u-author", name: "AuthorBot", status: "active", createdAt: "2026-10-15T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      const user = userEvent.setup();
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      await waitFor(() => {
+        expect(screen.getByText("AuthorBot")).toBeInTheDocument();
+      });
+
+      // Crucial: No restriction banner should be present for author with container capability
+      expect(screen.queryByTestId("upload-trusted_admin-banner")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("upload-container_unavailable-banner")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Task 19/i)).not.toBeInTheDocument();
+
+      // Select and submit button enabled once code is present
+      const profileSelect = screen.getByLabelText(/Môi trường thực thi/i);
+      expect(profileSelect).not.toBeDisabled();
+    });
+
+    it("displays true trusted admin restriction message when container execution is not configured", async () => {
+      gateway.setToken("tok-author");
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValue({
+        executor: "trusted-local-v1",
+        trusted: true,
+        untrusted: false,
+        canSubmitSource: false,
+        profiles: ["node", "python"],
+        localDemoContainers: false,
+      });
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-author", username: "author", role: "author" },
+        canSubmitSource: false,
+      });
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-author-1", ownerId: "u-author", name: "AuthorBot", status: "active", createdAt: "2026-10-15T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      const user = userEvent.setup();
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId("upload-trusted_admin-banner")).toHaveTextContent(
+          /Hệ thống đang ở chế độ Trusted\. Chỉ quản trị viên mới có quyền nộp mã nguồn bot\./i
+        );
+      });
+      expect(screen.queryByText(/Task 19/i)).not.toBeInTheDocument();
+    });
+
+    it("displays distinct container unavailable message when Docker runtime is unavailable", async () => {
+      gateway.setToken("tok-author");
+      vi.spyOn(gateway, "getCapabilities").mockResolvedValue({
+        executor: "container-executor",
+        trusted: false,
+        untrusted: true,
+        canSubmitSource: false,
+        profiles: ["node", "python"],
+        localDemoContainers: true,
+        localDocker: { available: false, reason: "docker_daemon_unavailable" },
+      });
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-author", username: "author", role: "author" },
+        canSubmitSource: false,
+      });
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [{ id: "b-author-1", ownerId: "u-author", name: "AuthorBot", status: "active", createdAt: "2026-10-15T00:00:00Z" }],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions").mockResolvedValue({ versions: [] });
+
+      const user = userEvent.setup();
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await user.click(screen.getByRole("tab", { name: /Quản lý Bot/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId("upload-container_unavailable-banner")).toHaveTextContent(
+          /Môi trường thực thi container hiện không khả dụng/i
+        );
+      });
+      expect(screen.queryByText(/Task 19/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Tournament Pending & Start Contract", () => {
+    it("renders Bắt đầu ngay checkbox (default true) and supports creating pending tournament", async () => {
+      gateway.setToken("tok-admin");
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true,
+      });
+      vi.spyOn(gateway, "listTournaments").mockResolvedValue({ tournaments: [], total: 0 });
+      vi.spyOn(gateway, "getTournament").mockResolvedValue({
+        tournament: { id: "tourn-main", name: "Main", status: "active", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        standings: [],
+        matches: [],
+      });
+      vi.spyOn(gateway, "listBots").mockResolvedValue({
+        bots: [
+          { id: "b-1", ownerId: "u-admin", name: "Bot1", status: "active", createdAt: "2026-10-16T00:00:00Z" },
+          { id: "b-2", ownerId: "u-admin", name: "Bot2", status: "active", createdAt: "2026-10-16T00:00:00Z" },
+        ],
+        total: 2,
+        limit: 20,
+        offset: 0,
+      });
+      vi.spyOn(gateway, "listBotVersions")
+        .mockResolvedValueOnce({ versions: [{ id: "v-1", botId: "b-1", versionNo: 1, buildStatus: "ready", sourceDigest: "d1", profileId: "node", profileRevision: "rev1", createdAt: "2026-10-16T00:00:00Z" }] })
+        .mockResolvedValueOnce({ versions: [{ id: "v-2", botId: "b-2", versionNo: 1, buildStatus: "ready", sourceDigest: "d2", profileId: "node", profileRevision: "rev1", createdAt: "2026-10-16T00:00:00Z" }] });
+
+      const createSpy = vi.spyOn(gateway, "createTournament").mockResolvedValue({
+        tournament: { id: "tourn-pending-1", name: "Autumn Cup", status: "pending", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        matchesCount: 0,
+      });
+
+      const user = userEvent.setup();
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await user.click(screen.getByRole("tab", { name: /Giải đấu/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Tạo giải đấu mới (Admin)")).toBeInTheDocument();
+      });
+
+      const startImmediatelyCheckbox = screen.getByTestId("tournament-start-immediately-checkbox") as HTMLInputElement;
+      expect(startImmediatelyCheckbox.checked).toBe(true);
+
+      // Uncheck "Bắt đầu ngay" to test pending creation
+      await user.click(startImmediatelyCheckbox);
+      expect(startImmediatelyCheckbox.checked).toBe(false);
+
+      // Fill tournament name and select 2 bots
+      await user.type(screen.getByLabelText(/Tên giải đấu/i), "Autumn Cup");
+      await user.click(screen.getByLabelText(/Bot1/i));
+      await user.click(screen.getByLabelText(/Bot2/i));
+
+      await user.click(screen.getByRole("button", { name: /Tạo giải đấu/i }));
+
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: "Autumn Cup",
+            startImmediately: false,
+            entries: expect.arrayContaining([
+              { botVersionId: "v-1" },
+              { botVersionId: "v-2" },
+            ]),
+          }),
+          expect.anything()
+        );
+      });
+    });
+
+    it("renders Bắt đầu giải action for admin on pending tournament with matches.length===0 and starts it", async () => {
+      gateway.setToken("tok-admin");
+      vi.spyOn(gateway, "getMe").mockResolvedValue({
+        user: { id: "u-admin", username: "admin", role: "admin" },
+        canSubmitSource: true,
+      });
+      vi.spyOn(gateway, "listTournaments").mockResolvedValue({
+        tournaments: [
+          { id: "tourn-pending-1", name: "Pending Cup", status: "pending", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        ],
+        total: 1,
+      });
+      vi.spyOn(gateway, "getTournament").mockResolvedValue({
+        tournament: { id: "tourn-pending-1", name: "Pending Cup", status: "pending", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" },
+        standings: [],
+        matches: [],
+      });
+      vi.spyOn(gateway, "listBots").mockResolvedValue({ bots: [], total: 0, limit: 20, offset: 0 });
+
+      const startSpy = vi.spyOn(gateway, "startTournament").mockResolvedValue({
+        tournament: { id: "tourn-pending-1", name: "Pending Cup", status: "active", totalMatches: 2 },
+      });
+
+      const user = userEvent.setup();
+      render(<ArenaScreen gateway={gateway} onLobby={onLobbyMock} onStartReplay={onStartReplayMock} />);
+
+      await user.click(screen.getByRole("tab", { name: /Giải đấu/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("start-tournament-btn")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId("start-tournament-btn"));
+
+      await waitFor(() => {
+        expect(startSpy).toHaveBeenCalledWith("tourn-pending-1", expect.anything());
+      });
     });
   });
 });

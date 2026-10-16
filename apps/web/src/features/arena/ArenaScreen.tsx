@@ -19,9 +19,12 @@ import {
   type ArenaMatchParticipant,
   type ArenaMatchStatus,
   type ArenaMatchSummary,
+  type ArenaRegistrationResult,
   type ArenaTournamentDetailsResponse,
+  type ArenaTournamentSummary,
   type ArenaUserProfile,
 } from "./ArenaApiGateway";
+import { ArenaAuthPanel } from "./auth/ArenaAuthPanel";
 import { CompetitionPortal } from "./competitions/CompetitionPortal";
 import styles from "./arena.module.css";
 import {
@@ -39,6 +42,33 @@ function computeSourceBytes(code: string): number {
     return new TextEncoder().encode(code).length;
   }
   return new Blob([code]).size;
+}
+
+function isOfflineError(err: unknown): boolean {
+  const anyErr = err as any;
+  if (!anyErr) return false;
+  if (anyErr.code === "ISOLATION_UNAVAILABLE") return false;
+  if (anyErr.name === "AbortError" || anyErr.code === "abort_error") return false;
+  if (anyErr.code === "timeout") return true;
+  if (anyErr.code === "network_error") return true;
+  if (anyErr.statusCode === 502 || anyErr.statusCode === 503 || anyErr.statusCode === 504) return true;
+  return false;
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+  const anyErr = err as any;
+  if (!anyErr || typeof anyErr !== "object") return false;
+  if (anyErr.statusCode === 401 || anyErr.status === 401) return true;
+  const code = anyErr.code;
+  if (typeof code === "string") {
+    const upper = code.toUpperCase();
+    if (upper === "UNAUTHORIZED" || upper === "AUTH_FAILED" || upper === "SESSION_EXPIRED") return true;
+  }
+  const message = anyErr.message;
+  if (typeof message === "string" && message.includes("Missing Authorization header")) {
+    return true;
+  }
+  return false;
 }
 
 export type ArenaTab = "leaderboard" | "bots" | "matches" | "tournaments" | "competitions";
@@ -60,10 +90,10 @@ interface ReadyBotVersionOption {
 export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProps) {
   const [activeTab, setActiveTab] = useState<ArenaTab>("leaderboard");
   const [userProfile, setUserProfile] = useState<ArenaUserProfile | null>(null);
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isAuthPending, setIsAuthPending] = useState(false);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [authUsername, setAuthUsername] = useState("");
 
   // Data states
   const [leaderboard, setLeaderboard] = useState<readonly ArenaLeaderboardRating[]>([]);
@@ -79,6 +109,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const [tournamentDetails, setTournamentDetails] = useState<ArenaTournamentDetailsResponse | null>(null);
   const [readyVersionsForTourney, setReadyVersionsForTourney] = useState<readonly ReadyBotVersionOption[]>([]);
   const [selectedTournamentVersions, setSelectedTournamentVersions] = useState<readonly string[]>([]);
+  const [tournamentsList, setTournamentsList] = useState<readonly ArenaTournamentSummary[]>([]);
 
   // Forms
   const [newBotName, setNewBotName] = useState("");
@@ -86,12 +117,16 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const [availableProfiles, setAvailableProfiles] = useState<readonly string[]>(["node", "python"]);
   const [newProfileId, setNewProfileId] = useState("node");
   const [newTournName, setNewTournName] = useState("");
+  const [newTournStartImmediately, setNewTournStartImmediately] = useState(true);
+  const [isStartingTournament, setIsStartingTournament] = useState(false);
   const [capabilities, setCapabilities] = useState<ArenaCapabilities | null>(null);
 
   // Loading & error
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
+  const [capabilitiesChecking, setCapabilitiesChecking] = useState(true);
+  const [capabilitiesRetryIndex, setCapabilitiesRetryIndex] = useState(0);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   // Lifecycle & cancellation guards
@@ -132,7 +167,7 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
     };
   }, [abortAllPending]);
 
-  // Load user profile on mount if token is already present
+  // Load user profile on mount if token is already present, or on refresh
   useEffect(() => {
     if (gateway.isAuthenticated()) {
       const controller = new AbortController();
@@ -143,42 +178,86 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         .then((profile) => {
           if (isMountedRef.current && generation === screenGenerationRef.current) {
             setUserProfile(profile);
+            setError(null);
           }
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           if (isMountedRef.current && generation === screenGenerationRef.current) {
-            gateway.setToken(null);
-            setUserProfile(null);
+            const apiErr = err as ArenaApiError;
+            if (apiErr?.statusCode === 401 || apiErr?.code === "auth_failed") {
+              gateway.setToken(null);
+              setUserProfile(null);
+            } else {
+              setError((err as Error)?.message || "Không thể tải thông tin người dùng.");
+            }
           }
         })
         .finally(() => {
           pendingControllersRef.current.delete(controller);
         });
+      return () => {
+        controller.abort();
+        pendingControllersRef.current.delete(controller);
+      };
     }
-  }, [gateway]);
+  }, [gateway, refreshIndex]);
 
-  // Fetch capabilities once authenticated to determine available backend execution profiles
+  // Fetch capabilities unauthenticated once on mount, gateway change, or manual retry
   useEffect(() => {
-    if (!userProfile) return;
     let active = true;
     const controller = new AbortController();
     pendingControllersRef.current.add(controller);
     const generation = screenGenerationRef.current;
+    setCapabilitiesChecking(true);
+    setCapabilitiesError(null);
+
+    let didTimeout = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        didTimeout = true;
+        controller.abort();
+        reject(
+          new ArenaApiError("Hết thời gian chờ phản hồi từ máy chủ Arena.", {
+            code: "timeout",
+            statusCode: 0,
+          })
+        );
+      }, 5000);
+    });
 
     const fetchCaps = async () => {
       // Legacy mock fallback: when gateway mock lacks getCapabilities method
       if (typeof gateway.getCapabilities !== "function") {
+        clearTimeout(timeoutId);
+        pendingControllersRef.current.delete(controller);
         if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) return;
         setAvailableProfiles(["node", "python"]);
         setNewProfileId("node");
         setCapabilitiesError(null);
+        setCapabilitiesChecking(false);
         return;
       }
 
       try {
-        const caps = await gateway.getCapabilities({ signal: controller.signal });
-        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) return;
+        const caps = await Promise.race([
+          gateway.getCapabilities({ signal: controller.signal }),
+          timeoutPromise,
+        ]);
+        clearTimeout(timeoutId);
+        if (
+          didTimeout ||
+          !active ||
+          !isMountedRef.current ||
+          generation !== screenGenerationRef.current ||
+          controller.signal.aborted
+        ) {
+          return;
+        }
         setCapabilities(caps);
+        setCapabilitiesChecking(false);
+        setCapabilitiesError(null);
         if (caps?.profiles && Array.isArray(caps.profiles) && caps.profiles.length > 0) {
           setAvailableProfiles(caps.profiles);
           setCapabilitiesError(null);
@@ -193,12 +272,20 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
           setCapabilitiesError("Máy chủ không cung cấp môi trường thực thi nào.");
         }
       } catch (err: unknown) {
-        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current || controller.signal.aborted) {
+        clearTimeout(timeoutId);
+        if (!active || !isMountedRef.current || generation !== screenGenerationRef.current) {
           return;
         }
-        // Runtime failure: show error and disable source submission
+        if (controller.signal.aborted && !didTimeout) {
+          return;
+        }
+        setCapabilitiesChecking(false);
         setAvailableProfiles([]);
-        setCapabilitiesError((err as Error)?.message || "Không thể tải danh sách môi trường thực thi của máy chủ.");
+        if (didTimeout || isOfflineError(err)) {
+          setCapabilitiesError("Arena hiện ngoại tuyến, chỉ mở trong phiên demo");
+        } else {
+          setCapabilitiesError((err as Error)?.message || "Không thể tải danh sách môi trường thực thi của máy chủ.");
+        }
       } finally {
         pendingControllersRef.current.delete(controller);
       }
@@ -208,187 +295,16 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
 
     return () => {
       active = false;
+      clearTimeout(timeoutId);
       controller.abort();
       pendingControllersRef.current.delete(controller);
     };
-  }, [userProfile, gateway]);
+  }, [gateway, capabilitiesRetryIndex]);
 
-  const loadTabData = useCallback(
-    async (signal: AbortSignal, currentGeneration: number) => {
-      setLoading(true);
-      setError(null);
-      try {
-        if (activeTab === "leaderboard") {
-          const res = await gateway.getLeaderboard("ladder-main", { signal });
-          if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-            setLeaderboard(res.ratings);
-          }
-        } else if (activeTab === "bots") {
-          const res = await gateway.listBots({ signal });
-          if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-            setBots(res.bots);
-            if (res.bots.length > 0 && !selectedBotId) {
-              setSelectedBotId(res.bots[0].id);
-            }
-          }
-        } else if (activeTab === "matches") {
-          const res = await gateway.listMatches({
-            kind: matchKindFilter || undefined,
-            status: matchStatusFilter || undefined,
-            signal,
-          });
-          if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-            setMatches(res.matches);
-          }
-        } else if (activeTab === "tournaments") {
-          // 1. Load tournament details if ID supplied
-          if (tournamentId) {
-            try {
-              const res = await gateway.getTournament(tournamentId, { signal });
-              if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-                setTournamentDetails(res);
-              }
-            } catch (err: unknown) {
-              if ((err as ArenaApiError)?.code === "NOT_FOUND") {
-                if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-                  setTournamentDetails(null);
-                }
-              } else {
-                throw err;
-              }
-            }
-          }
-          // 2. Load ready bot versions for tournament entry selection
-          try {
-            const botsRes = await gateway.listBots({ signal });
-            const readyOptions: ReadyBotVersionOption[] = [];
-            for (const bot of botsRes.bots) {
-              if (signal.aborted) break;
-              try {
-                const verRes = await gateway.listBotVersions(bot.id, { signal });
-                for (const v of verRes.versions) {
-                  if (v.buildStatus === "ready") {
-                    readyOptions.push({
-                      versionId: v.id,
-                      botId: bot.id,
-                      botName: bot.name,
-                      versionNo: v.versionNo,
-                      profileId: v.profileId,
-                    });
-                  }
-                }
-              } catch {
-                // Ignore per-bot version load error
-              }
-            }
-            if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-              setReadyVersionsForTourney(readyOptions);
-            }
-          } catch {
-            // Ignore bots listing failure for tourney
-          }
-        }
-      } catch (err: unknown) {
-        if (signal.aborted || !isMountedRef.current || currentGeneration !== screenGenerationRef.current) return;
-        const msg = (err as Error)?.message || "Không thể tải dữ liệu.";
-        setError(msg);
-      } finally {
-        if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
-          setLoading(false);
-        }
-      }
-    },
-    [activeTab, gateway, selectedBotId, matchKindFilter, matchStatusFilter, tournamentId]
-  );
-
-  // Load versions when selectedBotId changes
-  useEffect(() => {
-    if (activeTab === "bots" && selectedBotId) {
-      const controller = new AbortController();
-      pendingControllersRef.current.add(controller);
-      const generation = screenGenerationRef.current;
-      gateway
-        .listBotVersions(selectedBotId, { signal: controller.signal })
-        .then((res) => {
-          if (isMountedRef.current && generation === screenGenerationRef.current && !controller.signal.aborted) {
-            setBotVersions(res.versions);
-          }
-        })
-        .catch((err) => {
-          if (isMountedRef.current && generation === screenGenerationRef.current && !controller.signal.aborted && err?.code !== "abort_error") {
-            setBotVersions([]);
-          }
-        })
-        .finally(() => {
-          pendingControllersRef.current.delete(controller);
-        });
-      return () => {
-        controller.abort();
-        pendingControllersRef.current.delete(controller);
-      };
-    }
-  }, [activeTab, selectedBotId, gateway]);
-
-  // Main tab data loading effect with cancellation
-  useEffect(() => {
-    const controller = new AbortController();
-    pendingControllersRef.current.add(controller);
-    const generation = screenGenerationRef.current;
-
-    void loadTabData(controller.signal, generation).finally(() => {
-      pendingControllersRef.current.delete(controller);
-    });
-
-    return () => {
-      controller.abort();
-      pendingControllersRef.current.delete(controller);
-    };
-  }, [loadTabData, refreshIndex]);
-
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setCapabilitiesError(null);
     setRefreshIndex((prev) => prev + 1);
-  };
-
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!loginUsername.trim() || !loginPassword) return;
-    setIsLoggingIn(true);
-    setLoginError(null);
-    const controller = new AbortController();
-    pendingControllersRef.current.add(controller);
-    const generation = screenGenerationRef.current;
-    try {
-      await gateway.login(
-        {
-          username: loginUsername.trim(),
-          password: loginPassword,
-        },
-        { signal: controller.signal }
-      );
-      if (!isMountedRef.current || generation !== screenGenerationRef.current) {
-        gateway.setToken(null);
-        return;
-      }
-      const me = await gateway.getMe({ signal: controller.signal });
-      if (!isMountedRef.current || generation !== screenGenerationRef.current) {
-        gateway.setToken(null);
-        return;
-      }
-      setUserProfile(me);
-      setLoginPassword("");
-      handleRefresh();
-    } catch (err: unknown) {
-      if (!isMountedRef.current || generation !== screenGenerationRef.current) return;
-      const msg = (err as Error)?.message || "Đăng nhập thất bại.";
-      setLoginError(msg);
-    } finally {
-      pendingControllersRef.current.delete(controller);
-      if (isMountedRef.current && generation === screenGenerationRef.current) {
-        setIsLoggingIn(false);
-      }
-    }
-  };
+  }, []);
 
   const handleSessionExpired = useCallback(
     (failedSessionOrToken?: number | string | null) => {
@@ -415,8 +331,288 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
       setUserProfile(null);
       handleRefresh();
     },
-    [gateway, abortAllPending]
+    [gateway, abortAllPending, handleRefresh]
   );
+
+  const getUploadAccessNotice = useCallback((): {
+    type: "login" | "container_unavailable" | "trusted_admin";
+    message: string;
+  } | null => {
+    if (!userProfile) {
+      return {
+        type: "login",
+        message: "Vui lòng đăng nhập để nộp phiên bản mã nguồn cho bot.",
+      };
+    }
+    if (userProfile.canSubmitSource) {
+      return null;
+    }
+    if (
+      (capabilities?.localDemoContainers && capabilities?.localDocker && !capabilities.localDocker.available) ||
+      (capabilities?.localDemoContainers && capabilities?.canSubmitSource === false && userProfile.user.role !== "admin")
+    ) {
+      return {
+        type: "container_unavailable",
+        message: "Môi trường thực thi container hiện không khả dụng. Vui lòng kiểm tra Docker daemon hoặc liên hệ quản trị viên.",
+      };
+    }
+    return {
+      type: "trusted_admin",
+      message: "Hệ thống đang ở chế độ Trusted. Chỉ quản trị viên mới có quyền nộp mã nguồn bot.",
+    };
+  }, [userProfile, capabilities]);
+
+  const loadTabData = useCallback(
+    async (signal: AbortSignal, currentGeneration: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        if (activeTab === "leaderboard") {
+          const res = await gateway.getLeaderboard("ladder-main", { signal });
+          if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+            setLeaderboard(res.ratings);
+          }
+        } else if (activeTab === "bots") {
+          try {
+            const res = await gateway.listBots({ signal });
+            if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+              setBots(res.bots);
+              if (res.bots.length > 0 && !selectedBotId) {
+                setSelectedBotId(res.bots[0].id);
+              }
+            }
+          } catch (err: unknown) {
+            if (signal.aborted || !isMountedRef.current || currentGeneration !== screenGenerationRef.current) return;
+            if (isUnauthorizedError(err)) {
+              if (isMountedRef.current && currentGeneration === screenGenerationRef.current) {
+                setBots([]);
+                setSelectedBotId(null);
+              }
+              return;
+            }
+            throw err;
+          }
+        } else if (activeTab === "matches") {
+          const res = await gateway.listMatches({
+            kind: matchKindFilter || undefined,
+            status: matchStatusFilter || undefined,
+            signal,
+          });
+          if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+            setMatches(res.matches);
+          }
+        } else if (activeTab === "tournaments") {
+          // 1. Load public tournament list
+          try {
+            const listRes = await gateway.listTournaments({ signal });
+            if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+              setTournamentsList(listRes.tournaments || []);
+            }
+          } catch {
+            // Ignore listTournaments failure
+          }
+          // 2. Load tournament details if ID supplied
+          if (tournamentId) {
+            try {
+              const res = await gateway.getTournament(tournamentId, { signal });
+              if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+                setTournamentDetails(res);
+              }
+            } catch (err: unknown) {
+              if ((err as ArenaApiError)?.code === "NOT_FOUND") {
+                if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+                  setTournamentDetails(null);
+                }
+              } else {
+                throw err;
+              }
+            }
+          }
+          // 3. Load ready bot versions for tournament entry selection (only when authenticated)
+          if (gateway.isAuthenticated()) {
+            try {
+              const botsRes = await gateway.listBots({ signal });
+              const readyOptions: ReadyBotVersionOption[] = [];
+              for (const bot of botsRes.bots) {
+                if (signal.aborted) break;
+                try {
+                  const verRes = await gateway.listBotVersions(bot.id, { signal });
+                  for (const v of verRes.versions) {
+                    if (v.buildStatus === "ready") {
+                      readyOptions.push({
+                        versionId: v.id,
+                        botId: bot.id,
+                        botName: bot.name,
+                        versionNo: v.versionNo,
+                        profileId: v.profileId,
+                      });
+                    }
+                  }
+                } catch {
+                  // Ignore per-bot version load error
+                }
+              }
+              if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+                setReadyVersionsForTourney(readyOptions);
+              }
+            } catch {
+              // Ignore bots listing failure for tourney
+            }
+          } else {
+            if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+              setReadyVersionsForTourney([]);
+            }
+          }
+        }
+      } catch (err: unknown) {
+        if (signal.aborted || !isMountedRef.current || currentGeneration !== screenGenerationRef.current) return;
+        if (isUnauthorizedError(err)) {
+          handleSessionExpired();
+          return;
+        }
+        const msg = (err as Error)?.message || "Không thể tải dữ liệu.";
+        setError(msg);
+      } finally {
+        if (isMountedRef.current && currentGeneration === screenGenerationRef.current && !signal.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [activeTab, gateway, selectedBotId, matchKindFilter, matchStatusFilter, tournamentId, handleSessionExpired]
+  );
+
+  // Load versions when selectedBotId changes
+  useEffect(() => {
+    if (activeTab === "bots" && selectedBotId) {
+      const controller = new AbortController();
+      pendingControllersRef.current.add(controller);
+      const generation = screenGenerationRef.current;
+      gateway
+        .listBotVersions(selectedBotId, { signal: controller.signal })
+        .then((res) => {
+          if (isMountedRef.current && generation === screenGenerationRef.current && !controller.signal.aborted) {
+            setBotVersions(res.versions);
+          }
+        })
+        .catch((err) => {
+          if (isMountedRef.current && generation === screenGenerationRef.current && !controller.signal.aborted && err?.code !== "abort_error") {
+            if (isUnauthorizedError(err)) {
+              handleSessionExpired();
+            }
+            setBotVersions([]);
+          }
+        })
+        .finally(() => {
+          pendingControllersRef.current.delete(controller);
+        });
+      return () => {
+        controller.abort();
+        pendingControllersRef.current.delete(controller);
+      };
+    }
+  }, [activeTab, selectedBotId, gateway, handleSessionExpired]);
+
+  // Main tab data loading effect with cancellation
+  useEffect(() => {
+    if (capabilitiesError || capabilitiesChecking) return;
+    const controller = new AbortController();
+    pendingControllersRef.current.add(controller);
+    const generation = screenGenerationRef.current;
+
+    void loadTabData(controller.signal, generation).finally(() => {
+      pendingControllersRef.current.delete(controller);
+    });
+
+    return () => {
+      controller.abort();
+      pendingControllersRef.current.delete(controller);
+    };
+  }, [loadTabData, refreshIndex, capabilitiesError, capabilitiesChecking]);
+
+
+
+  const handleLogin = async ({ username, password }: { username: string; password: string }) => {
+    if (!username.trim() || !password || isAuthPending) return;
+    setIsAuthPending(true);
+    setLoginError(null);
+    const controller = new AbortController();
+    pendingControllersRef.current.add(controller);
+    const generation = screenGenerationRef.current;
+    try {
+      await gateway.login(
+        {
+          username: username.trim(),
+          password,
+        },
+        { signal: controller.signal }
+      );
+      if (!isMountedRef.current || generation !== screenGenerationRef.current) {
+        gateway.setToken(null);
+        return;
+      }
+      const me = await gateway.getMe({ signal: controller.signal });
+      if (!isMountedRef.current || generation !== screenGenerationRef.current) {
+        gateway.setToken(null);
+        return;
+      }
+      setUserProfile(me);
+      setAuthUsername(username.trim());
+      handleRefresh();
+    } catch (err: unknown) {
+      if (!isMountedRef.current || generation !== screenGenerationRef.current) return;
+      const anyErr = err as any;
+      if (anyErr?.name !== "AbortError" && anyErr?.code !== "abort_error") {
+        const msg = (err as Error)?.message || "Đăng nhập thất bại.";
+        setLoginError(msg);
+      }
+    } finally {
+      pendingControllersRef.current.delete(controller);
+      if (isMountedRef.current && generation === screenGenerationRef.current) {
+        setIsAuthPending(false);
+      }
+    }
+  };
+
+  const handleRegister = async ({
+    username,
+    password,
+  }: {
+    username: string;
+    password: string;
+  }): Promise<ArenaRegistrationResult> => {
+    if (isAuthPending) {
+      throw new Error("Yêu cầu xác thực đang được xử lý.");
+    }
+    setIsAuthPending(true);
+    const controller = new AbortController();
+    pendingControllersRef.current.add(controller);
+    const generation = screenGenerationRef.current;
+    setLoginError(null);
+    setAuthNotice(null);
+    try {
+      const result = await gateway.register({ username, password }, { signal: controller.signal });
+      if (isMountedRef.current && generation === screenGenerationRef.current) {
+        setAuthUsername(result.user.username);
+        setAuthNotice("Tài khoản đã tạo. Hãy đăng nhập để tiếp tục.");
+      }
+      return result;
+    } catch (err: unknown) {
+      if (isMountedRef.current && generation === screenGenerationRef.current) {
+        const anyErr = err as any;
+        if (anyErr?.name !== "AbortError" && anyErr?.code !== "abort_error") {
+          setLoginError((err as Error)?.message || "Đăng ký thất bại.");
+        }
+      }
+      throw err;
+    } finally {
+      pendingControllersRef.current.delete(controller);
+      if (isMountedRef.current && generation === screenGenerationRef.current) {
+        setIsAuthPending(false);
+      }
+    }
+  };
+
+
 
   const handleLogout = async () => {
     abortAllPending();
@@ -460,8 +656,13 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
   const handleUploadVersion = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedBotId) return;
-    if (!userProfile?.canSubmitSource) {
-      setError("Bạn không có quyền nộp mã nguồn bot.");
+    if (!userProfile) {
+      setError("Vui lòng đăng nhập để nộp mã nguồn bot.");
+      return;
+    }
+    if (!userProfile.canSubmitSource) {
+      const notice = getUploadAccessNotice();
+      setError(notice ? notice.message : "Bạn không có quyền nộp mã nguồn bot.");
       return;
     }
     if (availableProfiles.length === 0) {
@@ -509,15 +710,17 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
     pendingControllersRef.current.add(controller);
     const generation = screenGenerationRef.current;
     try {
-      const res = await gateway.createTournament(
-        {
-          name: newTournName.trim(),
-          entries,
-        },
-        { signal: controller.signal }
-      );
+      const payload: { name: string; entries: { botVersionId: string }[]; startImmediately?: boolean } = {
+        name: newTournName.trim(),
+        entries,
+      };
+      if (!newTournStartImmediately) {
+        payload.startImmediately = false;
+      }
+      const res = await gateway.createTournament(payload, { signal: controller.signal });
       if (!isMountedRef.current || generation !== screenGenerationRef.current) return;
       setNewTournName("");
+      setNewTournStartImmediately(true);
       setSelectedTournamentVersions([]);
       setTournamentId(res.tournament.id);
       handleRefresh();
@@ -526,6 +729,28 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
       setError((err as Error)?.message || "Không thể tạo giải đấu.");
     } finally {
       pendingControllersRef.current.delete(controller);
+    }
+  };
+
+  const handleStartTournament = async () => {
+    const targetId = tournamentDetails?.tournament.id || tournamentId;
+    if (!targetId || !userProfile || userProfile.user.role !== "admin" || isStartingTournament) return;
+    setIsStartingTournament(true);
+    const controller = new AbortController();
+    pendingControllersRef.current.add(controller);
+    const generation = screenGenerationRef.current;
+    try {
+      await gateway.startTournament(targetId, { signal: controller.signal });
+      if (!isMountedRef.current || generation !== screenGenerationRef.current) return;
+      handleRefresh();
+    } catch (err: unknown) {
+      if (!isMountedRef.current || generation !== screenGenerationRef.current) return;
+      setError((err as Error)?.message || "Không thể bắt đầu giải đấu.");
+    } finally {
+      pendingControllersRef.current.delete(controller);
+      if (isMountedRef.current && generation === screenGenerationRef.current) {
+        setIsStartingTournament(false);
+      }
     }
   };
 
@@ -695,31 +920,15 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
               </Button>
             </div>
           ) : (
-            <form className={styles.inlineLoginForm} onSubmit={handleLogin}>
-              <TextField
-                label="Tên đăng nhập"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.currentTarget.value)}
-                placeholder="username"
-                disabled={isLoggingIn}
-              />
-              <TextField
-                label="Mật khẩu"
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.currentTarget.value)}
-                placeholder="password"
-                disabled={isLoggingIn}
-              />
-              <Button type="submit" variant="primary" disabled={isLoggingIn}>
-                {isLoggingIn ? "Đang xử lý..." : "Đăng nhập"}
-              </Button>
-              {loginError && (
-                <span className={styles.errorBanner} role="alert" data-testid="login-error-alert">
-                  {loginError}
-                </span>
-              )}
-            </form>
+            <ArenaAuthPanel
+              registrationEnabled={capabilities?.publicRegistration === true}
+              pending={isAuthPending}
+              error={loginError}
+              notice={authNotice}
+              initialUsername={authUsername}
+              onLogin={handleLogin}
+              onRegister={handleRegister}
+            />
           )}
         </div>
       </header>
@@ -772,16 +981,32 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
         </button>
       </nav>
 
+      {capabilitiesChecking && !capabilitiesError && (
+        <div className={styles.infoBanner} role="status">Đang kiểm tra Arena...</div>
+      )}
+
       {capabilitiesError && (
         <div className={styles.errorBanner} role="alert">
           <span>{capabilitiesError}</span>
-          <Button variant="secondary" onClick={handleRefresh}>
-            Thử lại
-          </Button>
+          <div style={{ display: "flex", gap: "var(--ui-space-2)" }}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCapabilitiesError(null);
+                setCapabilitiesChecking(true);
+                setCapabilitiesRetryIndex((prev) => prev + 1);
+              }}
+            >
+              Thử lại
+            </Button>
+            <Button variant="quiet" onClick={handleLobby}>
+              Quay lại sảnh
+            </Button>
+          </div>
         </div>
       )}
 
-      {error && (
+      {!capabilitiesError && error && (
         <div className={styles.errorBanner} role="alert">
           <span>{error}</span>
           <Button variant="secondary" onClick={handleRefresh}>
@@ -854,7 +1079,13 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                   </form>
                 )}
                 {bots.length === 0 ? (
-                  <div className={styles.emptyState}>Chưa có bot nào được đăng ký.</div>
+                  !userProfile ? (
+                    <div className={styles.infoBanner} data-testid="bots-guest-cta">
+                      Vui lòng đăng nhập để tạo và quản lý bot của bạn.
+                    </div>
+                  ) : (
+                    <div className={styles.emptyState}>Chưa có bot nào được đăng ký.</div>
+                  )
                 ) : (
                   <div className={styles.tableWrap}>
                     <table className={styles.dataTable}>
@@ -895,11 +1126,18 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
               <Panel heading={`Phiên bản của Bot: ${selectedBotId || "Chưa chọn"}`}>
                 <div className={styles.formBox}>
                   <h3>Nộp phiên bản mới</h3>
-                  {!userProfile?.canSubmitSource ? (
-                    <div className={styles.infoBanner}>
-                      Chế độ Trusted chỉ cho phép quản trị viên nộp mã nguồn bot (cho đến Task 19).
-                    </div>
-                  ) : null}
+                  {(() => {
+                    const notice = getUploadAccessNotice();
+                    if (!notice) return null;
+                    return (
+                      <div
+                        className={notice.type === "container_unavailable" ? styles.errorBanner : styles.infoBanner}
+                        data-testid={`upload-${notice.type}-banner`}
+                      >
+                        {notice.message}
+                      </div>
+                    );
+                  })()}
                   <form onSubmit={handleUploadVersion}>
                     <div style={{ marginBottom: "0.5rem" }}>
                       <label htmlFor="profile-select" style={{ display: "block", marginBottom: "0.25rem" }}>
@@ -1149,6 +1387,46 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                   </div>
                 </div>
 
+                {tournamentsList.length > 0 && (
+                  <div style={{ marginBottom: "1rem" }}>
+                    <h4>Danh sách giải đấu</h4>
+                    <div className={styles.tableWrap}>
+                      <table className={styles.dataTable} data-testid="public-tournaments-table">
+                        <thead>
+                          <tr>
+                            <th>Tên giải</th>
+                            <th>Trạng thái</th>
+                            <th>Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tournamentsList.map((t) => (
+                            <tr key={t.id}>
+                              <td>
+                                <strong>{t.name}</strong>
+                                <div><small><code>{t.id}</code></small></div>
+                              </td>
+                              <td>{renderStatusBadge(t.status)}</td>
+                              <td>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setTournamentId(t.id);
+                                    handleRefresh();
+                                  }}
+                                  aria-label={`Xem giải đấu ${t.name}`}
+                                >
+                                  Xem
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {tournamentDetails ? (
                   <div>
                     <h3>{tournamentDetails.tournament.name}</h3>
@@ -1156,6 +1434,20 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                       Trạng thái: {renderStatusBadge(tournamentDetails.tournament.status)} | Điểm:{" "}
                       {tournamentDetails.tournament.pointScheme}
                     </p>
+                    {userProfile?.user.role === "admin" &&
+                      tournamentDetails.tournament.status === "pending" &&
+                      (!tournamentDetails.matches || tournamentDetails.matches.length === 0) && (
+                        <div style={{ marginBottom: "1rem" }}>
+                          <Button
+                            variant="primary"
+                            onClick={handleStartTournament}
+                            disabled={isStartingTournament}
+                            data-testid="start-tournament-btn"
+                          >
+                            {isStartingTournament ? "Đang bắt đầu..." : "Bắt đầu giải"}
+                          </Button>
+                        </div>
+                      )}
                     <h4>Bảng điểm</h4>
                     {tournamentDetails.standings.length === 0 ? (
                       <div className={styles.emptyState}>Chưa có trận đấu nào được tính điểm.</div>
@@ -1235,6 +1527,18 @@ export function ArenaScreen({ gateway, onLobby, onStartReplay }: ArenaScreenProp
                           ))
                         )}
                       </div>
+                    </div>
+
+                    <div style={{ margin: "0.5rem 0" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={newTournStartImmediately}
+                          onChange={(e) => setNewTournStartImmediately(e.target.checked)}
+                          data-testid="tournament-start-immediately-checkbox"
+                        />
+                        <span>Bắt đầu ngay</span>
+                      </label>
                     </div>
 
                     <Button

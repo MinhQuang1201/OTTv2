@@ -21,7 +21,7 @@ import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/o
 import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runtimeBridge";
 import { ArenaApiGateway } from "../features/arena/ArenaApiGateway";
 import { ArenaScreen } from "../features/arena/ArenaScreen";
-import { isArenaAvailable, resolveArenaEndpoint } from "../runtime-config";
+import { isArenaAvailable, isSpectatorEnabled, resolveArenaDiscoveryEndpoint, resolveArenaEndpoint } from "../runtime-config";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import { AppLifecycleCoordinator, type AppLifecycleOptions } from "./AppLifecycleCoordinator";
@@ -118,12 +118,16 @@ export interface AppProps {
   readonly arenaAvailable?: boolean;
   readonly runtime?: RuntimeBridge;
   readonly onlineLobbyStreamFactory?: OnlineLobbyStreamFactory;
+  readonly spectatorEnabled?: boolean;
+  readonly demoEnabled?: boolean;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, spectatorEnabled, demoEnabled, onStateChange, onWatchMatch = () => undefined }: AppProps) {
   const demo = useDemoScenario(initialScenario);
+  const isDemo = demoEnabled ?? demo.enabled;
+  const effectiveSpectatorEnabled = spectatorEnabled ?? isSpectatorEnabled();
   const [restartToken, setRestartToken] = useState(0);
   const [appState, dispatch] = useReducer(appStateReducer, { status: "boot", generation: 0 });
   const sessionFactoryRef = useRef<SessionFactory>(sessionFactory);
@@ -136,7 +140,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const runtimeDependencyRef = useRef(runtimeDependency);
   const runtimeOwnerRef = useRef<RuntimeBridge>(initialRuntimeOwner);
   const coordinatorRef = useRef<AppLifecycleCoordinator | null>(null);
-  const createLobbyStream = (runtime: RuntimeBridge) => (onlineLobbyStreamFactory ?? ((owner) => new OnlineLobbyStream({ runtime: owner, disposeRuntime: false })))(runtime);
+  const createLobbyStream = (runtime: RuntimeBridge) => (onlineLobbyStreamFactory ?? ((owner) => new OnlineLobbyStream({ runtime: owner, disposeRuntime: false, enabled: effectiveSpectatorEnabled })))(runtime);
   if (!coordinatorRef.current) {
     coordinatorRef.current = new AppLifecycleCoordinator({
       runtime: initialRuntimeOwner,
@@ -166,7 +170,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       gateway: onlineGateway,
       createLobbyStream,
     });
-  }, [runtimeDependency, onlineGateway, onlineLobbyStreamFactory]);
+  }, [runtimeDependency, onlineGateway, onlineLobbyStreamFactory, effectiveSpectatorEnabled]);
 
   // The coordinator is the only owner allowed to release the shared runtime.
   useEffect(() => {
@@ -186,7 +190,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   }, []);
 
   useEffect(() => {
-    if (demo.enabled) {
+    if (isDemo) {
       setWaitingRooms({ status: "ready", rooms: [] });
       return;
     }
@@ -202,7 +206,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       if (active) setWaitingRooms({ status: "error", message: "Không thể tải danh sách phòng." });
     });
     return () => { active = false; };
-  }, [demo.enabled, demo.scenario, onlineGateway]);
+  }, [isDemo, demo.scenario, onlineGateway]);
 
   useEffect(() => {
     onStateChange?.(appState);
@@ -268,7 +272,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     void coordinator.transition({
       factory,
       options,
-      openLobbyStream: openLobbyStream && !demo.enabled,
+      openLobbyStream: openLobbyStream && !isDemo && effectiveSpectatorEnabled,
       lobby: options.mode === "spectator" ? lobbyTransition : undefined,
       onSession: (session) => {
         if (!isMountedRef.current || generationRef.current !== generation) return;
@@ -283,7 +287,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
         dispatch({ type: "error", generation, session, snapshot, scenario, error: safeSessionError(cause) });
       },
     }).catch(() => undefined);
-  }, []);
+  }, [effectiveSpectatorEnabled, isDemo]);
 
   useEffect(() => {
     transitionTo(
@@ -310,7 +314,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   };
   const startSpectator = (identity: PublicMatchIdentity) => {
     onWatchMatch(identity);
-    if (demo.enabled) return;
+    if (isDemo || !effectiveSpectatorEnabled) return;
     transitionTo(createSpectatorSession, { mode: "spectator", allocationId: identity.allocationId, roomId: identity.roomId }, "spectator-active");
   };
   const onStartReplay = (document: ReplayDocument) => {
@@ -325,7 +329,14 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   };
 
   const effectiveArenaAvailable = arenaAvailable ?? isArenaAvailable();
-  const [arenaGatewayInstance] = useState(() => arenaGateway ?? new ArenaApiGateway({ baseUrl: resolveArenaEndpoint() }));
+  const [arenaGatewayInstance] = useState(
+    () =>
+      arenaGateway ??
+      new ArenaApiGateway({
+        baseUrl: resolveArenaEndpoint(),
+        discoveryEndpoint: resolveArenaDiscoveryEndpoint(),
+      }),
+  );
   const effectiveArenaGateway = arenaGateway ?? arenaGatewayInstance;
 
   const onOpenArena = () => {
@@ -370,7 +381,8 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 waitingRooms={waitingRooms}
                 lobbyStream={lobbyStreamSnapshot}
                 onlineAvailable={onlineGateway.available}
-                demoEnabled={demo.enabled}
+                demoEnabled={isDemo}
+                spectatorEnabled={effectiveSpectatorEnabled}
                 onWatchMatch={startSpectator}
                 arenaGateway={effectiveArenaGateway}
                 arenaAvailable={effectiveArenaAvailable}
@@ -385,7 +397,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -398,6 +410,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly lobbyStream: OnlineLobbyStreamSnapshot | null;
   readonly onlineAvailable: boolean;
   readonly demoEnabled: boolean;
+  readonly spectatorEnabled?: boolean;
   readonly onWatchMatch: (identity: PublicMatchIdentity) => void;
   readonly arenaGateway: ArenaApiGateway;
   readonly arenaAvailable: boolean;
@@ -426,7 +439,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   if (state.status === "preparing") return <LobbyScreen
     onlineAvailability={onlineAvailable ? "connecting" : "unavailable"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream, spectatorEnabled)}
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
@@ -441,7 +454,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
     waitingRooms={waitingRooms.status === "ready" ? { status: "ready", rooms: waitingRooms.rooms ?? state.snapshot.waitingRooms ?? [] } : waitingRooms.status === "error" ? { status: "error", message: waitingRooms.message ?? "Không thể tải danh sách phòng." } : waitingRooms.status === "unavailable" ? { status: "unavailable", message: waitingRooms.message ?? "Online hiện không khả dụng." } : { status: "loading" }}
-    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream)}
+    publicMatches={publicMatchState(state.snapshot, demoEnabled, state.scenario, lobbyStream, spectatorEnabled)}
     allowDemoWatch={demoEnabled && state.scenario === "spectator-list"}
     onStartLocal={onStartLocal}
     onStartAi={onStartAi}
@@ -464,8 +477,11 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
  * In production (outside deterministic demos), active matches come only from the
  * coordinator-owned single-provider lobby stream. No control endpoint polling is used.
  */
-function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario, lobbyStream: OnlineLobbyStreamSnapshot | null): PublicMatchListState {
+function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario: DemoScenario, lobbyStream: OnlineLobbyStreamSnapshot | null, spectatorEnabled = false): PublicMatchListState {
   if (demoEnabled && scenario === "spectator-list") return { status: "ready", matches: snapshot.publicMatches ?? [] };
+  if (!spectatorEnabled) {
+    return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
+  }
   if (!demoEnabled && lobbyStream) {
     if (lobbyStream.status === "ready") return { status: "ready", matches: lobbyStream.matches };
     if (lobbyStream.status === "loading" || lobbyStream.status === "reconnecting") return { status: "loading" };

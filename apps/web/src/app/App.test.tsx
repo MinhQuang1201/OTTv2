@@ -1413,6 +1413,99 @@ describe("App shell lifecycle", () => {
     });
   });
 
+  describe("Spectator and lobby stream capability gating", () => {
+    it("does not open a lobby stream socket and keeps spectator controls unavailable when spectator capability is off", async () => {
+      const user = userEvent.setup();
+      const bootstrap = vi.fn(async () => undefined);
+      const runtime = {
+        bootstrap,
+        connectionFactory: vi.fn(),
+        dispose: vi.fn(async () => undefined),
+      };
+      const createdSession = fakeSession();
+      createdSession.session.start = vi.fn(async () => undefined);
+      const onlineSessionFactory = vi.fn(() => createdSession.session);
+      const gateway = {
+        available: true,
+        listRooms: vi.fn(async () => ({
+          available: true,
+          rooms: [{ roomId: "room-abc", hostName: "HostPlayer", createdAt: Date.now() }],
+        })),
+        createRoom: vi.fn(async () => ({ roomId: "room-new" })),
+      } as unknown as OnlineLobbyGateway;
+
+      render(
+        <App
+          demoEnabled={false}
+          spectatorEnabled={false}
+          runtime={runtime}
+          onlineGateway={gateway}
+          onlineSessionFactory={onlineSessionFactory}
+        />
+      );
+
+      // Verify lobby rendered
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+      });
+
+      // Spectator stream must NOT have been opened
+      expect(bootstrap).not.toHaveBeenCalledWith(expect.objectContaining({ room: "ott-lobby-public" }));
+      expect(bootstrap).not.toHaveBeenCalled();
+
+      // Spectator list displays unavailable state, not live matches or watch buttons
+      expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Xem trận/i })).not.toBeInTheDocument();
+
+      // Normal lobby room listing still works
+      await waitFor(() => {
+        expect(screen.getByText(/room-abc/i)).toBeInTheDocument();
+      });
+
+      // Normal room creation works
+      const nameInput = screen.getByRole("textbox", { name: "Tên của bạn" });
+      await user.clear(nameInput);
+      await user.type(nameInput, "Alice");
+      await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+
+      await waitFor(() => {
+        expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
+      });
+      expect(createdSession.session.start).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "online", intent: "create", playerName: "Alice" }),
+      );
+    });
+
+    it("opens lobby stream and binds stream when spectator capability is enabled", async () => {
+      const startSpy = vi.fn(async () => undefined);
+      const fakeStream = {
+        start: startSpy,
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+        getSnapshot: vi.fn(() => ({ status: "ready" as const, matches: [], catalogRevision: 1 })),
+      };
+      const onlineLobbyStreamFactory = vi.fn(() => fakeStream as any);
+      const gateway = {
+        available: true,
+        listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+      } as unknown as OnlineLobbyGateway;
+
+      render(
+        <App
+          demoEnabled={false}
+          spectatorEnabled={true}
+          onlineGateway={gateway}
+          onlineLobbyStreamFactory={onlineLobbyStreamFactory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(onlineLobbyStreamFactory).toHaveBeenCalledTimes(1);
+        expect(startSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
   describe("Arena route integration", () => {
     it("enters arena route, disposes active session, and returns to lobby", async () => {
       const user = userEvent.setup();

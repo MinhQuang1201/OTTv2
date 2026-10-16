@@ -20,6 +20,10 @@ export interface ArenaLoginResult {
   readonly expiresAt?: string;
 }
 
+export interface ArenaRegistrationResult {
+  readonly user: ArenaUser;
+}
+
 export interface ArenaUserProfile {
   readonly user: ArenaUser;
   readonly canSubmitSource: boolean;
@@ -31,6 +35,9 @@ export interface ArenaCapabilities {
   readonly untrusted: boolean;
   readonly canSubmitSource: boolean;
   readonly profiles: readonly string[];
+  readonly publicRegistration?: boolean;
+  readonly localDemoContainers?: boolean;
+  readonly localDocker?: { readonly available: boolean; readonly reason?: string } | null;
 }
 
 export interface ArenaBot {
@@ -253,6 +260,22 @@ export interface ArenaCreateTournamentResponse {
   readonly matchesCount: number;
 }
 
+export interface ArenaStartTournamentResponse {
+  readonly tournament: {
+    readonly id: string;
+    readonly name: string;
+    readonly status: string;
+    readonly totalMatches?: number;
+  };
+}
+
+export interface ArenaListTournamentsResponse {
+  readonly tournaments: readonly ArenaTournamentSummary[];
+  readonly total: number;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
 export interface ArenaLeaderboardRating {
   readonly rank: number;
   readonly botId: string;
@@ -295,6 +318,104 @@ export class ArenaApiError extends Error {
 
 export interface ArenaApiGatewayOptions {
   readonly baseUrl?: string;
+  readonly discoveryEndpoint?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly discoveryTimeoutMs?: number;
+}
+
+export const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
+
+export interface ArenaDiscoveryResult {
+  readonly arenaApiEndpoint: string | null;
+  readonly updatedAt?: string | null;
+}
+
+const DISCOVERED_ENDPOINT_RAW_REGEX =
+  /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.trycloudflare\.com\/api\/arena\/v1$/i;
+
+export function validateDiscoveredArenaEndpoint(endpoint: unknown): string {
+  if (typeof endpoint !== "string") {
+    throw new ArenaApiError("Discovered Arena endpoint must be a string", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    throw new ArenaApiError("Discovered Arena endpoint is empty", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+  if (!DISCOVERED_ENDPOINT_RAW_REGEX.test(trimmed)) {
+    throw new ArenaApiError("Discovered Arena endpoint format is invalid", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new ArenaApiError("Discovered Arena endpoint is not a valid URL", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new ArenaApiError("Discovered Arena endpoint must use https:", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new ArenaApiError("Discovered Arena endpoint must not contain credentials", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.port !== "") {
+    throw new ArenaApiError("Discovered Arena endpoint must not contain an explicit port", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.search !== "") {
+    throw new ArenaApiError("Discovered Arena endpoint must not contain query parameters", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.hash !== "") {
+    throw new ArenaApiError("Discovered Arena endpoint must not contain a fragment", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const match = hostname.match(/^([a-z0-9-]+)\.trycloudflare\.com$/);
+  if (!match || !match[1] || match[1].startsWith("-") || match[1].endsWith("-")) {
+    throw new ArenaApiError("Discovered Arena endpoint must be a single-label *.trycloudflare.com hostname", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  if (parsed.pathname !== "/api/arena/v1") {
+    throw new ArenaApiError("Discovered Arena endpoint must have exact path /api/arena/v1", {
+      code: "invalid_discovery_endpoint",
+      statusCode: 502,
+    });
+  }
+
+  return `https://${hostname}/api/arena/v1`;
 }
 
 function normalizeBaseUrl(url?: string): string {
@@ -314,19 +435,49 @@ function generateIdempotencyKey(): string {
 
 export class ArenaApiGateway {
   private baseUrl: string;
+  private discoveryEndpoint: string | null = null;
+  private fetchImpl?: typeof fetch;
+  private discoveryTimeoutMs: number;
+
   private token: string | null = null;
 
   constructor(options: ArenaApiGatewayOptions = {}) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
+    this.discoveryEndpoint =
+      options.discoveryEndpoint &&
+      typeof options.discoveryEndpoint === "string" &&
+      options.discoveryEndpoint.trim().length > 0
+        ? options.discoveryEndpoint.trim()
+        : null;
+    this.fetchImpl = options.fetchImpl;
+    this.discoveryTimeoutMs =
+      options.discoveryTimeoutMs && options.discoveryTimeoutMs > 0
+        ? options.discoveryTimeoutMs
+        : DEFAULT_DISCOVERY_TIMEOUT_MS;
   }
 
   setBaseUrl(url: string): void {
     this.baseUrl = normalizeBaseUrl(url);
+
   }
 
   getBaseUrl(): string {
     return this.baseUrl;
   }
+
+  setDiscoveryEndpoint(url?: string | null): void {
+    this.discoveryEndpoint =
+      url && typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
+
+  }
+
+  getDiscoveryEndpoint(): string | null {
+    return this.discoveryEndpoint;
+  }
+
+
+
+
 
   setToken(token: string | null): void {
     this.token = token && typeof token === "string" && token.trim().length > 0 ? token.trim() : null;
@@ -340,13 +491,177 @@ export class ArenaApiGateway {
     return this.token !== null;
   }
 
+  private getFetch(): typeof fetch {
+    return this.fetchImpl ?? globalThis.fetch;
+  }
+
+  async resolveEndpoint(options: RequestOptions = {}): Promise<string> {
+    return this.resolveBaseUrl(options.signal);
+  }
+
+  private async discoverEndpoint(signal?: AbortSignal): Promise<string> {
+    if (!this.discoveryEndpoint) {
+      throw new ArenaApiError("Arena discovery endpoint is not configured", {
+        code: "discovery_not_configured",
+        statusCode: 0,
+      });
+    }
+
+    const fetchFn = this.getFetch();
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, this.discoveryTimeoutMs);
+
+    const onAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timeoutId);
+        controller.abort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
+    let response: Response;
+    try {
+      response = await fetchFn(this.discoveryEndpoint, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        cache: "no-store",
+        redirect: "error",
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      if (signal?.aborted) {
+        throw new ArenaApiError(error?.message || "Yêu cầu đã bị hủy.", {
+          code: "abort_error",
+          statusCode: 0,
+        });
+      }
+      if (didTimeout) {
+        throw new ArenaApiError("Quá thời gian kết nối đến dịch vụ discovery Arena.", {
+          code: "discovery_timeout",
+          statusCode: 504,
+        });
+      }
+      throw new ArenaApiError(error?.message || "Không thể kết nối đến dịch vụ discovery Arena.", {
+        code: "discovery_network_error",
+        statusCode: 503,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+    }
+
+    if (!response.ok) {
+      throw new ArenaApiError(`Dịch vụ discovery Arena trả về mã lỗi HTTP ${response.status}`, {
+        code: "discovery_failed",
+        statusCode: response.status >= 500 ? 503 : response.status,
+      });
+    }
+
+    let payload: any;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ArenaApiError("Không thể phân giải phản hồi từ dịch vụ discovery Arena.", {
+        code: "invalid_discovery_response",
+        statusCode: 502,
+      });
+    }
+
+    if (!payload || typeof payload !== "object") {
+      throw new ArenaApiError("Phản hồi discovery không hợp lệ.", {
+        code: "invalid_discovery_response",
+        statusCode: 502,
+      });
+    }
+
+    const candidate = payload.arenaApiEndpoint;
+    if (!candidate) {
+      throw new ArenaApiError("Arena hiện ngoại tuyến, không có endpoint khả dụng từ discovery.", {
+        code: "arena_endpoint_unavailable",
+        statusCode: 503,
+      });
+    }
+
+    const validated = validateDiscoveredArenaEndpoint(candidate);
+    return validated;
+  }
+
+  private async resolveBaseUrl(signal?: AbortSignal): Promise<string> {
+    if (this.discoveryEndpoint) {
+      const endpoint = await this.discoverEndpoint(signal);
+
+      return endpoint;
+    }
+
+    if (!this.baseUrl) {
+      throw new ArenaApiError("Arena API endpoint is not configured", {
+        code: "not_configured",
+        statusCode: 0,
+      });
+    }
+
+
+    return this.baseUrl;
+  }
+
+  private assertAllowedOrigin(targetUrl: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      throw new ArenaApiError("Target URL is not a valid URL", {
+        code: "invalid_origin",
+        statusCode: 0,
+      });
+    }
+
+    if (this.discoveryEndpoint) {
+      const hostname = parsed.hostname.toLowerCase();
+      const match = hostname.match(/^([a-z0-9-]+)\.trycloudflare\.com$/);
+      if (parsed.protocol !== "https:" || !match || !match[1] || match[1].startsWith("-") || match[1].endsWith("-")) {
+        throw new ArenaApiError("Cannot send request to unvalidated origin in discovery mode", {
+          code: "unvalidated_origin",
+          statusCode: 0,
+        });
+      }
+    } else {
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        throw new ArenaApiError("Target origin protocol must be http or https", {
+          code: "unvalidated_origin",
+          statusCode: 0,
+        });
+      }
+      if (parsed.username || parsed.password) {
+        throw new ArenaApiError("Target origin must not contain credentials", {
+          code: "unvalidated_origin",
+          statusCode: 0,
+        });
+      }
+    }
+  }
+
   private async request<T>(
     endpoint: string,
     method: "GET" | "POST",
     body?: unknown,
     options: RequestOptions = {}
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    const resolvedBase = await this.resolveBaseUrl(options.signal);
+    this.assertAllowedOrigin(resolvedBase);
+
+    const url = `${resolvedBase}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    this.assertAllowedOrigin(url);
     const headers: Record<string, string> = {};
 
     if (body !== undefined) {
@@ -363,10 +678,12 @@ export class ArenaApiGateway {
 
     let response: Response;
     try {
-      response = await fetch(url, {
+      const fetchFn = this.getFetch();
+      response = await fetchFn(url, {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        redirect: "error",
         signal: options.signal,
       });
     } catch (err: unknown) {
@@ -427,6 +744,13 @@ export class ArenaApiGateway {
     const result = await this.request<ArenaLoginResult>("/auth/login", "POST", credentials, options);
     this.setToken(result.token);
     return result;
+  }
+
+  async register(
+    credentials: { username: string; password: string },
+    options?: RequestOptions
+  ): Promise<ArenaRegistrationResult> {
+    return this.request<ArenaRegistrationResult>("/auth/register", "POST", credentials, options);
   }
 
   async logout(options?: RequestOptions): Promise<void> {
@@ -600,9 +924,9 @@ export class ArenaApiGateway {
     );
   }
 
-  async listTournaments(options?: RequestOptions): Promise<readonly ArenaTournamentSummary[]> {
+  async listTournaments(options?: RequestOptions): Promise<ArenaListTournamentsResponse> {
     // Note: Tournaments endpoint list or single
-    return [];
+    return this.request<ArenaListTournamentsResponse>("/tournaments", "GET", undefined, options);
   }
 
   async createTournament(
@@ -611,6 +935,7 @@ export class ArenaApiGateway {
       entries: ReadonlyArray<{ botVersionId: string; botId?: string }>;
       ladderId?: string;
       ranked?: boolean;
+      startImmediately?: boolean;
     },
     options: RequestOptions = {}
   ): Promise<ArenaCreateTournamentResponse> {
@@ -619,6 +944,22 @@ export class ArenaApiGateway {
       ...options,
       idempotencyKey,
     });
+  }
+
+  async startTournament(
+    tournamentId: string,
+    options: RequestOptions = {}
+  ): Promise<ArenaStartTournamentResponse> {
+    const idempotencyKey = options.idempotencyKey || generateIdempotencyKey();
+    return this.request<ArenaStartTournamentResponse>(
+      `/tournaments/${encodeURIComponent(tournamentId)}/start`,
+      "POST",
+      {},
+      {
+        ...options,
+        idempotencyKey,
+      }
+    );
   }
 
   async getTournament(tournamentId: string, options?: RequestOptions): Promise<ArenaTournamentDetailsResponse> {

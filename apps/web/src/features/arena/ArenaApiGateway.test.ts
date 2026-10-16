@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { ArenaApiGateway, ArenaApiError } from "./ArenaApiGateway";
+import { ArenaApiGateway, ArenaApiError, validateDiscoveredArenaEndpoint } from "./ArenaApiGateway";
 import deterministicFixture from "../../../../../tests/fixtures/arena/replays/deterministic-match.json";
 
 describe("ArenaApiGateway", () => {
@@ -37,6 +37,69 @@ describe("ArenaApiGateway", () => {
   });
 
   describe("Authentication API", () => {
+    it("registers without setting or sending a bearer token", async () => {
+      gateway.setToken("existing-token");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ user: { id: "u-new", username: "demo_user", role: "author" } })
+      });
+
+      const result = await gateway.register(
+        { username: "demo_user", password: "password123" },
+        { signal: new AbortController().signal }
+      );
+
+      expect(result.user).toEqual({ id: "u-new", username: "demo_user", role: "author" });
+      expect(gateway.getToken()).toBe("existing-token");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/auth/register",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer existing-token" },
+          body: JSON.stringify({ username: "demo_user", password: "password123" })
+        })
+      );
+    });
+
+    it("preserves backend registration error codes", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ error: { code: "USERNAME_TAKEN", message: "Username already exists" } })
+      });
+
+      await expect(gateway.register({ username: "demo_user", password: "password123" })).rejects.toMatchObject({
+        code: "USERNAME_TAKEN",
+        statusCode: 409
+      });
+    });
+
+    it("maps disabled registration error code", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ error: { code: "REGISTRATION_DISABLED", message: "Public registration is disabled" } })
+      });
+
+      await expect(gateway.register({ username: "demo_user", password: "password123" })).rejects.toMatchObject({
+        code: "REGISTRATION_DISABLED",
+        statusCode: 404
+      });
+    });
+
+    it("maps registration network error when fetch fails", async () => {
+      fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      await expect(gateway.register({ username: "demo_user", password: "password123" })).rejects.toMatchObject({
+        code: "network_error",
+        statusCode: 0
+      });
+    });
+
     it("logs in successfully and captures token in memory", async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -612,6 +675,368 @@ describe("ArenaApiGateway", () => {
         expect(err.code).toBe("network_error");
         expect(err.statusCode).toBe(0);
       }
+    });
+
+    it("lists public tournaments without authorization when unauthenticated", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          tournaments: [
+            { id: "tourn-1", name: "Spring 2026", status: "pending", pointScheme: "standard", ranked: true, createdAt: "2026-10-16T00:00:00Z" }
+          ],
+          total: 1
+        })
+      });
+
+      const res = await gateway.listTournaments();
+      expect(res.tournaments).toHaveLength(1);
+      expect(res.tournaments[0].id).toBe("tourn-1");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/tournaments",
+        expect.objectContaining({
+          method: "GET"
+        })
+      );
+    });
+
+    it("starts a tournament via admin start endpoint with idempotency key", async () => {
+      gateway.setToken("admin-tok");
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          tournament: { id: "tourn-1", name: "Spring 2026", status: "running", totalMatches: 6 }
+        })
+      });
+
+      const res = await gateway.startTournament("tourn-1");
+      expect(res.tournament.status).toBe("running");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/arena/v1/tournaments/tourn-1/start",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer admin-tok",
+            "Idempotency-Key": expect.any(String)
+          })
+        })
+      );
+    });
+  });
+
+  describe("Discovery Runtime Contract & Feature Verification", () => {
+    describe("validateDiscoveredArenaEndpoint", () => {
+      it("accepts valid single-label https *.trycloudflare.com exact /api/arena/v1", () => {
+        const valid = "https://proposition-lot-love-volunteers.trycloudflare.com/api/arena/v1";
+        expect(validateDiscoveredArenaEndpoint(valid)).toBe(valid);
+        expect(validateDiscoveredArenaEndpoint("https://my-tunnel-123.trycloudflare.com/api/arena/v1")).toBe(
+          "https://my-tunnel-123.trycloudflare.com/api/arena/v1"
+        );
+      });
+
+      it("rejects non-https protocols", () => {
+        expect(() => validateDiscoveredArenaEndpoint("http://my-tunnel.trycloudflare.com/api/arena/v1")).toThrow(
+          ArenaApiError
+        );
+      });
+
+      it("rejects URLs containing credentials", () => {
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://user:pass@my-tunnel.trycloudflare.com/api/arena/v1")
+        ).toThrow(ArenaApiError);
+      });
+
+      it("rejects explicit ports including default 443", () => {
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com:8443/api/arena/v1")
+        ).toThrow(ArenaApiError);
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com:443/api/arena/v1")
+        ).toThrow(ArenaApiError);
+      });
+
+      it("rejects normalized dot segments in pathname", () => {
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/../arena/v1")
+        ).toThrow(ArenaApiError);
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/./v1")
+        ).toThrow(ArenaApiError);
+      });
+
+      it("rejects query parameters and fragments", () => {
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/v1?token=123")
+        ).toThrow(ArenaApiError);
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/v1#section")
+        ).toThrow(ArenaApiError);
+      });
+
+      it("rejects multi-label subdomains", () => {
+        expect(() =>
+          validateDiscoveredArenaEndpoint("https://nested.tunnel.trycloudflare.com/api/arena/v1")
+        ).toThrow(ArenaApiError);
+      });
+
+      it("rejects base domain without subdomain", () => {
+        expect(() => validateDiscoveredArenaEndpoint("https://trycloudflare.com/api/arena/v1")).toThrow(
+          ArenaApiError
+        );
+      });
+
+      it("rejects non-trycloudflare domains", () => {
+        expect(() => validateDiscoveredArenaEndpoint("https://evil.example.com/api/arena/v1")).toThrow(
+          ArenaApiError
+        );
+      });
+
+      it("rejects inexact pathnames", () => {
+        expect(() => validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/v2")).toThrow(
+          ArenaApiError
+        );
+        expect(() => validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/")).toThrow(
+          ArenaApiError
+        );
+        expect(() => validateDiscoveredArenaEndpoint("https://my-tunnel.trycloudflare.com/api/arena/v1/extra")).toThrow(
+          ArenaApiError
+        );
+      });
+
+      it("rejects non-string or empty inputs", () => {
+        expect(() => validateDiscoveredArenaEndpoint(null)).toThrow(ArenaApiError);
+        expect(() => validateDiscoveredArenaEndpoint("")).toThrow(ArenaApiError);
+        expect(() => validateDiscoveredArenaEndpoint(12345)).toThrow(ArenaApiError);
+      });
+    });
+
+    describe("Gateway Discovery Resolution", () => {
+      const discoveryEndpoint = "https://discovery.worker.example/api/arena/endpoint";
+      const validTunnelUrl = "https://my-tunnel-123.trycloudflare.com/api/arena/v1";
+
+      it("successfully discovers endpoint and executes request with cache no-store", async () => {
+        const discoveryGateway = new ArenaApiGateway({ discoveryEndpoint, baseUrl: "http://127.0.0.1:3001/api/arena/v1" });
+
+        // First fetch: discovery call
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ arenaApiEndpoint: validTunnelUrl, updatedAt: "2026-10-16T00:00:00Z" }),
+        });
+
+        // Second fetch: actual capabilities API call against discovered URL
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({
+            executor: "trusted-local-v1",
+            trusted: true,
+            untrusted: false,
+            canSubmitSource: false,
+            profiles: ["node", "python"],
+          }),
+        });
+
+        const caps = await discoveryGateway.getCapabilities();
+        expect(caps.executor).toBe("trusted-local-v1");
+
+        // Verify discovery call contract: GET, cache no-store, bounded signal
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          1,
+          discoveryEndpoint,
+          expect.objectContaining({
+            method: "GET",
+            cache: "no-store",
+            redirect: "error",
+            headers: expect.objectContaining({
+              "Accept": "application/json",
+
+            }),
+          })
+        );
+
+        // Verify API request was routed to discovered endpoint, NOT baseUrl
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          2,
+          `${validTunnelUrl}/capabilities`,
+          expect.objectContaining({
+            method: "GET",
+            redirect: "error",
+          })
+        );
+      });
+
+      it("fails clearly when discovery returns null and does NOT silently fall back to baked baseUrl", async () => {
+        const discoveryGateway = new ArenaApiGateway({
+          discoveryEndpoint,
+          baseUrl: "http://127.0.0.1:3001/api/arena/v1", // Baked API
+        });
+
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ arenaApiEndpoint: null, updatedAt: null }),
+        });
+
+        try {
+          await discoveryGateway.getCapabilities();
+          expect.unreachable("Should have thrown");
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(ArenaApiError);
+          expect(err.code).toBe("arena_endpoint_unavailable");
+          expect(err.statusCode).toBe(503);
+        }
+
+        // Must NOT call baked baseUrl
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith(discoveryEndpoint, expect.anything());
+      });
+
+      it("fails clearly when discovery endpoint returns HTTP error", async () => {
+        const discoveryGateway = new ArenaApiGateway({ discoveryEndpoint });
+
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ error: "Service unavailable" }),
+        });
+
+        await expect(discoveryGateway.getCapabilities()).rejects.toMatchObject({
+          code: "discovery_failed",
+          statusCode: 503,
+        });
+      });
+
+      it("fails clearly on discovery network error", async () => {
+        const discoveryGateway = new ArenaApiGateway({ discoveryEndpoint });
+
+        fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch discovery"));
+
+        await expect(discoveryGateway.getCapabilities()).rejects.toMatchObject({
+          code: "discovery_network_error",
+          statusCode: 503,
+        });
+      });
+
+      it("fails clearly when discovery returns invalid endpoint shape", async () => {
+        const discoveryGateway = new ArenaApiGateway({ discoveryEndpoint });
+
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ arenaApiEndpoint: "http://insecure-tunnel.trycloudflare.com/api/arena/v1" }),
+        });
+
+        await expect(discoveryGateway.getCapabilities()).rejects.toMatchObject({
+          code: "invalid_discovery_endpoint",
+          statusCode: 502,
+        });
+      });
+
+      it("re-resolves on subsequent requests without stale cache and adapts to endpoint change", async () => {
+        const discoveryGateway = new ArenaApiGateway({ discoveryEndpoint });
+        discoveryGateway.setToken("session-bearer-secret-token");
+
+        const tunnelUrl1 = "https://tunnel-instance-1.trycloudflare.com/api/arena/v1";
+        const tunnelUrl2 = "https://tunnel-instance-2.trycloudflare.com/api/arena/v1";
+
+        // Request 1: resolves tunnel 1
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ arenaApiEndpoint: tunnelUrl1 }),
+        });
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ bots: [], total: 0 }),
+        });
+
+        await discoveryGateway.listBots();
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          2,
+          `${tunnelUrl1}/bots`,
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              Authorization: "Bearer session-bearer-secret-token",
+            }),
+          })
+        );
+
+        // Endpoint change: tunnel restarted, discovery now returns tunnel 2
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ arenaApiEndpoint: tunnelUrl2 }),
+        });
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ bots: [], total: 0 }),
+        });
+
+        await discoveryGateway.listBots();
+
+        // Must preserve session bearer token across URL change without clearing it
+        expect(discoveryGateway.getToken()).toBe("session-bearer-secret-token");
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          4,
+          `${tunnelUrl2}/bots`,
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              Authorization: "Bearer session-bearer-secret-token",
+            }),
+          })
+        );
+      });
+
+      it("maintains normal static compatibility when discoveryEndpoint is not set", async () => {
+        const staticGateway = new ArenaApiGateway({ baseUrl: "http://127.0.0.1:3001/api/arena/v1" });
+
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({
+            executor: "trusted-local-v1",
+            trusted: true,
+            untrusted: false,
+            canSubmitSource: false,
+            profiles: ["node"],
+          }),
+        });
+
+        const caps = await staticGateway.getCapabilities();
+        expect(caps.executor).toBe("trusted-local-v1");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith(
+          "http://127.0.0.1:3001/api/arena/v1/capabilities",
+          expect.anything()
+        );
+      });
+
+      it("allows updating discovery endpoint dynamically", () => {
+        const dynamicGateway = new ArenaApiGateway();
+        expect(dynamicGateway.getDiscoveryEndpoint()).toBeNull();
+
+        dynamicGateway.setDiscoveryEndpoint("https://new-discovery.example/endpoint");
+        expect(dynamicGateway.getDiscoveryEndpoint()).toBe("https://new-discovery.example/endpoint");
+
+        dynamicGateway.setDiscoveryEndpoint(null);
+        expect(dynamicGateway.getDiscoveryEndpoint()).toBeNull();
+      });
     });
   });
 });
