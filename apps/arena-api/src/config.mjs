@@ -27,7 +27,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   maxSourceBytes: 1048576, // 1 MiB
   trustedMode: true,
   externalWorker: false,
-  localDemoContainers: false
+  localDemoContainers: false,
+  publicRegistration: false
 });
 
 /**
@@ -87,6 +88,10 @@ export function loadConfig(overrides = {}) {
       ? Boolean(overrides.externalWorker)
       : process.env.ARENA_EXTERNAL_WORKER === "true" || process.env.ARENA_EXTERNAL_WORKER === "1";
 
+  const publicRegistration = overrides.publicRegistration !== undefined
+    ? Boolean(overrides.publicRegistration)
+    : process.env.ARENA_PUBLIC_REGISTRATION === "true" || process.env.ARENA_PUBLIC_REGISTRATION === "1";
+
   const localDemoContainers =
     overrides.localDemoContainers !== undefined
       ? Boolean(overrides.localDemoContainers)
@@ -119,6 +124,7 @@ export function loadConfig(overrides = {}) {
     maxSourceBytes,
     trustedMode,
     externalWorker,
-    localDemoContainers
+    localDemoContainers,
+    publicRegistration
   };
 }

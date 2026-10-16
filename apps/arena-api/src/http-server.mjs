@@ -25,6 +25,7 @@ import {
   resetLoginFailure
 } from "./auth/accounts.mjs";
 import { authenticate, checkRole } from "./auth/authorization.mjs";
+import { handleRegistration } from "./routes/auth.mjs";
 
 import { handleBotsRoute } from "./routes/bots.mjs";
 import { handleMatchesRoute } from "./routes/matches.mjs";
@@ -180,6 +181,7 @@ export function createArenaServer(options) {
     competitionRepo = null,
     competitionRoundsRepo = null,
     localDemoContainers = false,
+    publicRegistration = false,
     executionCapabilities = null,
     getExecutionCapabilities = null
   } = options;
@@ -260,6 +262,7 @@ export function createArenaServer(options) {
           ? profileRegistry.listProfiles().map((p) => p.id)
           : ["node", "python", "cpp", "java"];
         return sendJson(res, 200, {
+          publicRegistration: Boolean(publicRegistration),
           executor: localDemoContainers ? "oci-container-local-demo-v1" : "trusted-local-v1",
           trusted: Boolean(trustedMode),
           untrusted: Boolean(localDemoContainers && currentExecutionCapabilities?.available),
@@ -267,6 +270,12 @@ export function createArenaServer(options) {
           profiles: localDemoContainers && currentExecutionCapabilities?.available ? ["python", "node"] : availableProfiles,
           localDemoContainers: Boolean(localDemoContainers),
           localDocker: localDemoContainers ? (currentExecutionCapabilities || { available: false, reason: "not_configured" }) : null
+        });
+      }
+
+      if (pathname === "/api/arena/v1/auth/register") {
+        return await handleRegistration(req, res, {
+          db, publicRegistration, maxBodyBytes, parseJsonBody, sendError, sendJson
         });
       }
 
@@ -367,7 +376,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /bots ──────────────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/bots")) {
-        return handleBotsRoute(req, res, {
+        return await handleBotsRoute(req, res, {
           db,
           botRepo: resolvedBotRepo,
           botVersionService,
@@ -385,7 +394,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /matches ───────────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/matches")) {
-        return handleMatchesRoute(req, res, {
+        return await handleMatchesRoute(req, res, {
           db,
           matchRepo: resolvedMatchRepo,
           jobQueue,
@@ -397,7 +406,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /tournaments ───────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/tournaments")) {
-        return handleTournamentsRoute(req, res, {
+        return await handleTournamentsRoute(req, res, {
           db,
           tournamentRepo,
           parsedUrl,
@@ -407,7 +416,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /competition-catalog ───────────────────────────────────────
       if (pathname === "/api/arena/v1/competition-catalog" || pathname === "/api/arena/v1/competition-catalog/") {
-        return handleCompetitionCatalogRoute(req, res, {
+        return await handleCompetitionCatalogRoute(req, res, {
           db,
           competitionRoundsRepo: resolvedCompetitionRoundsRepo,
           parsedUrl,
@@ -417,7 +426,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /competitions ───────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/competitions")) {
-        return handleCompetitionsRoute(req, res, {
+        return await handleCompetitionsRoute(req, res, {
           db,
           competitionRepo: resolvedCompetitionRepo,
           competitionRoundsRepo: resolvedCompetitionRoundsRepo,
@@ -429,7 +438,7 @@ export function createArenaServer(options) {
 
       // ── Routes: /leaderboard ───────────────────────────────────────────────
       if (pathname.startsWith("/api/arena/v1/leaderboard")) {
-        return handleLeaderboardRoute(req, res, {
+        return await handleLeaderboardRoute(req, res, {
           db,
           parsedUrl
         });

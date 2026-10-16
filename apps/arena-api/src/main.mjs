@@ -102,6 +102,7 @@ export async function startArenaService(overrides = {}) {
       liveFrameStore,
       finalizer,
       localDemoContainers: config.localDemoContainers,
+      publicRegistration: config.publicRegistration,
       executionCapabilities,
       getExecutionCapabilities
     });
