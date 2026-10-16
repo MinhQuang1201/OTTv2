@@ -222,6 +222,40 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
     assert.ok(probe.reason.includes("image_digest_drift"), `reason was: ${probe.reason}`);
   });
 
+  it("uses an explicit runner image reference from the environment without relaxing the pinned ID check", async () => {
+    const { probeContainerRuntime, PINNED_RUNNER_IMAGE_ID } = await import(
+      "../packages/arena-node/src/execution/container-executor.mjs"
+    );
+    const previous = process.env.ARENA_RUNNER_IMAGE;
+    process.env.ARENA_RUNNER_IMAGE = "docker.io/library/ottv2-arena-runner:local";
+    const inspected = [];
+    const fakeRunner = {
+      spawnSync(cmd, args) {
+        if (args.includes("version")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ Server: { Os: "linux", Version: "28.0", Arch: "amd64" } })
+          };
+        }
+        if (args.includes("inspect")) {
+          inspected.push(args.at(-1));
+          return { status: 0, stdout: `${PINNED_RUNNER_IMAGE_ID}\n` };
+        }
+        return { status: 0, stdout: "" };
+      }
+    };
+    try {
+      const probe = probeContainerRuntime({ commandRunner: fakeRunner });
+      assert.equal(probe.available, true);
+      assert.equal(probe.image, "docker.io/library/ottv2-arena-runner:local");
+      assert.deepEqual(inspected, ["docker.io/library/ottv2-arena-runner:local"]);
+      assert.equal(probe.imageId, PINNED_RUNNER_IMAGE_ID);
+    } finally {
+      if (previous === undefined) delete process.env.ARENA_RUNNER_IMAGE;
+      else process.env.ARENA_RUNNER_IMAGE = previous;
+    }
+  });
+
   it("rejects bare boolean verifiedTargetHost forgery (local desktop remains unverified)", async () => {
     const { probeContainerRuntime } = await import(
       "../packages/arena-node/src/execution/container-executor.mjs"

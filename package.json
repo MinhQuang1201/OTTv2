@@ -25,6 +25,7 @@
     "test:arena:profiles": "node --test tests/runtime/arena-profiles.test.js",
     "test:arena:isolation": "node --test tests/isolation/arena-isolation.test.js",
     "arena:api": "node apps/arena-api/src/main.mjs",
+    "arena:demo": "node scripts/arena-demo.js",
     "arena:worker": "node packages/arena-node/src/worker/job-worker.mjs",
     "arena:user": "node apps/arena-api/scripts/manage-user.mjs"
   },

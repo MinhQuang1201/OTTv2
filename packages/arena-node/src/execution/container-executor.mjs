@@ -222,7 +222,7 @@ export function probeContainerRuntime(options = {}) {
     }
 
     // Verify pinned runner image & reject image digest drift BEFORE execution
-    const image = options.image || PINNED_RUNNER_IMAGE;
+    const image = options.image || process.env.ARENA_RUNNER_IMAGE || PINNED_RUNNER_IMAGE;
     const expectedImageId = options.expectedImageId !== undefined
       ? options.expectedImageId
       : (options.image && options.image.startsWith("sha256:") ? options.image : PINNED_RUNNER_IMAGE_ID);
