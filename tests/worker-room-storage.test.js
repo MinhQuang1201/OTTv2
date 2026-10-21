@@ -304,3 +304,84 @@ test("markTerminalized keeps the room for the retention window and arms the wipe
   await adapter.scheduleAlarm();
   assert.equal(storage.values.get("alarm"), 5_100, "later alarm scheduling must not drop the wipe deadline");
 });
+
+async function playingAdapter(roomId, now) {
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const storage = fakeStorage({ creatorName: "Alice", "seat-name:B": "Bob" });
+  const adapter = await DurableRoomAdapter.create(roomId, storage, now, { reconnectGraceMs: 60_000 });
+  const playerA = { id: `${roomId}-a`, open: true, send() {} };
+  const playerB = { id: `${roomId}-b`, open: true, send() {} };
+  await adapter.attach(playerA, "A");
+  adapter.commitAttach(playerA);
+  await adapter.attach(playerB, "B");
+  adapter.commitAttach(playerB);
+  return { DurableRoomAdapter, storage, adapter, playerA, playerB };
+}
+
+test("reattaching only the off-turn seat keeps the disconnected on-turn seat's clock stopped", async () => {
+  let now = 1_000;
+  const { storage, adapter, playerA, playerB } = await playingAdapter("ott-resume-off-turn", () => now);
+  assert.equal((await adapter.move(playerA, { x: 4, y: 7 }, { x: 3, y: 6 })).result.ok, true);
+  await adapter.close(playerB);
+  await adapter.close(playerA);
+
+  now = 2_000;
+  const returningA = { id: "ott-resume-off-turn-a2", open: true, send() {} };
+  assert.equal((await adapter.attach(returningA, "A")).ok, true);
+  adapter.commitAttach(returningA);
+
+  assert.equal(adapter.room.state.turn, "B");
+  assert.equal(adapter.room.state.clock.runningSeat, null);
+  // The next alarm is B's reconnect deadline, not a clock deadline for the absent seat.
+  assert.equal(storage.values.get("alarm"), adapter.room.players.B.reconnectDeadlineMs);
+  const remainingB = adapter.room.state.clock.remainingMs.B;
+  now = 30_000;
+  await adapter.onAlarm();
+  assert.equal(adapter.room.state.clock.remainingMs.B, remainingB);
+
+  const returningB = { id: "ott-resume-off-turn-b2", open: true, send() {} };
+  assert.equal((await adapter.attach(returningB, "B")).ok, true);
+  adapter.commitAttach(returningB);
+  assert.equal(adapter.room.state.clock.runningSeat, "B");
+});
+
+test("restoreLiveConnection does not start the clock of a seat that is still disconnected", async () => {
+  let now = 1_000;
+  const { DurableRoomAdapter, storage, adapter, playerA, playerB } = await playingAdapter("ott-restore-live", () => now);
+  assert.equal((await adapter.move(playerA, { x: 4, y: 7 }, { x: 3, y: 6 })).result.ok, true);
+
+  now = 2_000;
+  const hydrated = await DurableRoomAdapter.load("ott-restore-live", storage, () => now, { reconnectGraceMs: 60_000 });
+  assert.equal(hydrated.room.state.clock.runningSeat, null);
+
+  assert.equal(hydrated.restoreLiveConnection(playerA, "A"), true);
+  assert.equal(hydrated.room.state.turn, "B");
+  assert.equal(hydrated.room.state.clock.runningSeat, null);
+
+  assert.equal(hydrated.restoreLiveConnection(playerB, "B"), true);
+  assert.equal(hydrated.room.state.clock.runningSeat, "B");
+});
+
+test("B attaching while the creator is inside its grace window does not run the creator's clock", async () => {
+  let now = 1_000;
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const storage = fakeStorage({ creatorName: "Alice", "seat-name:B": "Bob" });
+  const adapter = await DurableRoomAdapter.create("ott-join-during-grace", storage, () => now, { reconnectGraceMs: 60_000 });
+  const playerA = { id: "ott-join-during-grace-a", open: true, send() {} };
+  await adapter.attach(playerA, "A");
+  adapter.commitAttach(playerA);
+  await adapter.close(playerA);
+
+  now = 5_000;
+  const playerB = { id: "ott-join-during-grace-b", open: true, send() {} };
+  assert.equal((await adapter.attach(playerB, "B")).ok, true);
+  adapter.commitAttach(playerB);
+
+  assert.equal(adapter.room.status, "playing");
+  assert.equal(adapter.room.state.clock.runningSeat, null);
+  assert.equal(storage.values.get("alarm"), adapter.room.players.A.reconnectDeadlineMs);
+
+  now = 20_000;
+  await adapter.onAlarm();
+  assert.equal(adapter.room.state.clock.remainingMs.A, adapter.room.initialClockMs);
+});
