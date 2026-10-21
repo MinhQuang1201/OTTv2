@@ -192,6 +192,11 @@ async function ownerCredentialHash(credential: string, salt: string): Promise<st
   return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 }
 
+export function internalSecretMatches(request: Request, secret: string | undefined): boolean {
+  if (!secret) return false;
+  return constantTimeStringEqual(request.headers.get("x-ott-internal-secret") ?? "", secret);
+}
+
 function constantTimeStringEqual(left: string, right: string): boolean {
   let difference = left.length ^ right.length;
   const length = Math.max(left.length, right.length);
@@ -559,7 +564,8 @@ export async function verifyCapabilityTransaction<T>(
     if (typeof error === "object" && error !== null && "capabilityMutationRejected" in error && error.capabilityMutationRejected === true) {
       return { ok: false, reason: "mutation-rejected", value: (error as any).value as T };
     }
-    console.warn("OTT capability transaction failed", error instanceof Error ? error.message : typeof error);
+    // Structured line (same shape as observability/log.ts); this module stays import-free.
+    console.warn(JSON.stringify({ level: "warn", event: "transaction-failed", message: error instanceof Error ? error.message : typeof error }));
     return { ok: false, reason: "transaction-failed" };
   }
 }

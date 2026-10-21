@@ -10,6 +10,7 @@ import {
   SeatInviteRecord,
   deleteOwnerCredentials,
   internalRequest,
+  internalSecretMatches,
   issueCapability,
   retryRecoverableInitialization,
   rotateOwnerCredential,
@@ -28,6 +29,7 @@ import {
   normalizeAlias,
   type PublicMatchView,
 } from "../../../../packages/protocol/src/index.js";
+import { logEvent } from "../observability/log.js";
 import { TournamentCoordinator } from "./tournament-coordinator.js";
 
 export type Allocation = {
@@ -48,6 +50,11 @@ export type Allocation = {
 const MAX_BODY = 4096;
 const DEFAULT_CREATOR_ATTACH_TTL_MS = 60_000;
 const RATE_LIMIT_RETENTION_MS = 60_000;
+const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
+const TERMINAL_GC_PREFIX = "terminal-gc:";
+const TERMINAL_GC_BACKFILL_KEY = "terminal-gc-backfill-v1";
+const WAITING_PREFIX = "waiting:";
+const WAITING_BACKFILL_KEY = "waiting-index-v1";
 const PUBLIC_CATALOG_NOTIFY_KEY = "public-catalog-notify";
 const PUBLIC_CATALOG_NOTIFY_CLAIM_PREFIX = "public-catalog-notify-claim:";
 const PUBLIC_CATALOG_EXHAUSTED_KEY = "public-catalog-notify-exhausted";
@@ -188,6 +195,50 @@ export class OttLobbyServer extends DurableObject<Env> {
     return [...values.values()];
   }
 
+  private async waitingRooms(): Promise<unknown[]> {
+    return this.transaction(async (storage) => {
+      if (!(await storage.get(WAITING_BACKFILL_KEY))) {
+        const values = await storage.list<Allocation>({ prefix: "allocation:" });
+        for (const item of values.values()) {
+          if (item.status === "waiting" && !item.tournamentMatch) await storage.put(`${WAITING_PREFIX}${item.id}`, publicAllocation(item));
+        }
+        await storage.put(WAITING_BACKFILL_KEY, true);
+      }
+      const rooms = await storage.list<unknown>({ prefix: WAITING_PREFIX });
+      return [...rooms.values()];
+    });
+  }
+
+  private async backfillTerminalGc(): Promise<void> {
+    if (await this.ctx.storage.get(TERMINAL_GC_BACKFILL_KEY)) return;
+    const now = Date.now();
+    const values = await this.ctx.storage.list<Allocation>({ prefix: "allocation:" });
+    for (const item of values.values()) {
+      if (item.status !== "terminal" || item.tournamentMatch) continue;
+      const outcome = await this.ctx.storage.get<{ completedAt?: number }>(`terminal-outcome:${item.id}`);
+      const completedAt = typeof outcome?.completedAt === "number" ? outcome.completedAt : now;
+      await this.ctx.storage.put(`${TERMINAL_GC_PREFIX}${item.id}`, completedAt + TERMINAL_RETENTION_MS);
+    }
+    await this.ctx.storage.put(TERMINAL_GC_BACKFILL_KEY, true);
+  }
+
+  private async collectTerminalAllocations(now: number): Promise<void> {
+    await this.backfillTerminalGc();
+    const due = await this.ctx.storage.list<number>({ prefix: TERMINAL_GC_PREFIX });
+    let removed = 0;
+    for (const [key, deadline] of due) {
+      if (typeof deadline === "number" && deadline > now) continue;
+      const id = key.slice(TERMINAL_GC_PREFIX.length);
+      await this.transaction(async (storage) => {
+        await storage.delete(`allocation:${id}`);
+        await storage.delete(`terminal-outcome:${id}`);
+        await storage.delete(key);
+      });
+      removed += 1;
+    }
+    if (removed) logEvent("info", "allocation_gc", { removed });
+  }
+
   private alarmScheduleTail?: Promise<void>;
 
   private async scheduleAlarm(): Promise<void> {
@@ -200,6 +251,12 @@ export class OttLobbyServer extends DurableObject<Env> {
     try {
       const now = Date.now();
       let nextDeadline: number | undefined;
+      await this.backfillTerminalGc();
+      const gcEntries = await this.ctx.storage.list<number>({ prefix: TERMINAL_GC_PREFIX });
+      for (const deadline of gcEntries.values()) {
+        if (typeof deadline !== "number" || !Number.isFinite(deadline)) continue;
+        nextDeadline = nextDeadline === undefined ? deadline : Math.min(nextDeadline, deadline);
+      }
       const legacyExhausted = await this.ctx.storage.list({ prefix: PUBLIC_CATALOG_LEGACY_EXHAUSTED_PREFIX });
       for (const key of legacyExhausted.keys()) await this.ctx.storage.delete(key);
       const rateEntries = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
@@ -262,6 +319,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       for (const key of claims.keys()) await this.ctx.storage.delete(key);
       await this.ctx.storage.delete(PUBLIC_CATALOG_EXHAUSTED_KEY);
     }
+    await this.collectTerminalAllocations(now);
     await this.deliverCatalogNotification(now);
     await this.scheduleAlarm();
   }
@@ -469,6 +527,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       if (current?.status !== "joining" || current.seats !== 1) return;
       current.status = "waiting";
       await storage.put(`allocation:${id}`, current);
+      if (!current.tournamentMatch) await storage.put(`${WAITING_PREFIX}${id}`, publicAllocation(current));
       await storage.delete(`owner-credential:${id}:B`);
       await storage.delete(`owner-ticket:${id}:B`);
     });
@@ -510,14 +569,16 @@ export class OttLobbyServer extends DurableObject<Env> {
     const clientKey = clientIdentity(request);
     const rateKey = `rate:last:${action}:${clientKey}`;
     const last = await this.ctx.storage.get<number>(rateKey);
-    if (last !== undefined && now - last < 40) return json({ error: "rate_limited" }, 429);
+    if (last !== undefined && now - last < 40) {
+      logEvent("warn", "rate_limited", { action, scope: "burst" });
+      return json({ error: "rate_limited" }, 429);
+    }
     await this.ctx.storage.put(rateKey, now);
     await this.scheduleAlarm();
     if (tournamentActions.includes(action)) {
       return this.tournamentCoordinator.handleAction(action, body, now);
     }
-    const list = await this.allocations();
-    if (action === "list") return json({ rooms: list.filter((item) => item.status === "waiting" && !item.tournamentMatch).map(publicAllocation) });
+    if (action === "list") return json({ rooms: await this.waitingRooms() });
     if (action === "active") {
       if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
       const catalog = await this.currentPublicCatalog();
@@ -526,13 +587,20 @@ export class OttLobbyServer extends DurableObject<Env> {
     }
 
     if (!this.env.OTT_INTERNAL_SECRET) {
-      console.warn("OTT lobby control request rejected: missing secret binding");
+      logEvent("error", "authority_unavailable", { action, cause: "missing_secret" });
       return json({ error: "authority_unavailable" }, 503);
     }
 
     const name = cleanName(body.name);
     if (action === "create") {
       if (!name) return json({ error: "invalid_name" }, 400);
+      if (this.env.CREATE_RATE_LIMITER) {
+        const { success } = await this.env.CREATE_RATE_LIMITER.limit({ key: clientKey });
+        if (!success) {
+          logEvent("warn", "rate_limited", { action, scope: "create_per_minute" });
+          return json({ error: "rate_limited" }, 429);
+        }
+      }
       const id = crypto.randomUUID();
       const allocation: Allocation = {
         id,
@@ -580,6 +648,7 @@ export class OttLobbyServer extends DurableObject<Env> {
           if (pending?.status === "initializing") {
             pending.status = "waiting";
             await storage.put(`allocation:${id}`, pending);
+            await storage.put(`${WAITING_PREFIX}${id}`, publicAllocation(pending));
           }
         });
         return json({ allocationId: id, room: allocation.roomId, alias, seat: "A", ticket, resumeCredential: owner.credential });
@@ -591,10 +660,14 @@ export class OttLobbyServer extends DurableObject<Env> {
             await storage.delete(`allocation-alias:${id}`);
           }
           await storage.delete(`allocation:${id}`);
+          await storage.delete(`${WAITING_PREFIX}${id}`);
           await deleteOwnerCredentials(storage, id);
         });
       });
-      if (!initialized.ok) return json({ error: "authority_unavailable" }, 503);
+      if (!initialized.ok) {
+        logEvent("error", "authority_unavailable", { action, cause: "game_initialization" });
+        return json({ error: "authority_unavailable" }, 503);
+      }
       return initialized.value;
     }
 
@@ -839,6 +912,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       if (claimTx.seatUpdateNeeded) {
         const game = this.env.Main?.get(this.env.Main.idFromName(claimTx.seatUpdateNeeded.roomId));
         if (!game || !this.env.OTT_INTERNAL_SECRET) {
+          logEvent("error", "authority_unavailable", { action, cause: "game_binding" });
           return json({ error: "authority_unavailable", message: "Game server authority unavailable" }, 503);
         }
 
@@ -862,6 +936,7 @@ export class OttLobbyServer extends DurableObject<Env> {
         }
 
         if (!updateOk) {
+          logEvent("error", "authority_unavailable", { action, cause: "seat_update" });
           return json({ error: "authority_unavailable", message: "Failed to update seat on game server" }, 503);
         }
 
@@ -877,6 +952,7 @@ export class OttLobbyServer extends DurableObject<Env> {
             }
             delete allocation.pendingSeatBInvite;
             await storage.put(`allocation:${allocation.id}`, allocation);
+            await storage.delete(`${WAITING_PREFIX}${allocation.id}`);
           }
         });
       }
@@ -918,6 +994,7 @@ export class OttLobbyServer extends DurableObject<Env> {
         });
         current.status = "joining";
         await storage.put(`allocation:${targetAllocationId}`, current);
+        await storage.delete(`${WAITING_PREFIX}${targetAllocationId}`);
         await storage.put(`owner-credential:${targetAllocationId}:B`, { salt: owner.salt, hash: owner.hash });
         await storage.put(`owner-ticket:${targetAllocationId}:B`, { nonce: ticketNonce, expiresAt: issuedAt + 60_000 });
         return { allocation: current, owner, ticket, seatUpdate };
@@ -945,6 +1022,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       }
       if (!response?.ok) {
         await this.rollbackJoinReservation(targetAllocationId);
+        logEvent("error", "authority_unavailable", { action, cause: "seat_update" });
         return json({ error: "authority_unavailable" }, 503);
       }
       const finalized = await withJoinReservationRollback(async () => this.transaction(async (storage) => {
@@ -956,7 +1034,10 @@ export class OttLobbyServer extends DurableObject<Env> {
         await storage.put(`allocation:${targetAllocationId}`, current);
         return current;
       }), () => this.rollbackJoinReservation(targetAllocationId));
-      if (!finalized.ok) return json({ error: "authority_unavailable" }, 503);
+      if (!finalized.ok) {
+        logEvent("error", "authority_unavailable", { action, cause: "join_finalize" });
+        return json({ error: "authority_unavailable" }, 503);
+      }
       const joined = finalized.value;
       return json({ allocationId: targetAllocationId, room: joined.roomId, seat: "B", ticket: reserved.ticket, resumeCredential: reserved.owner.credential });
     }
@@ -964,7 +1045,7 @@ export class OttLobbyServer extends DurableObject<Env> {
   }
 
   private async handleActiveUpdate(request: Request): Promise<Response> {
-    if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
+    if (!internalSecretMatches(request, this.env.OTT_INTERNAL_SECRET)) {
       return new Response("Forbidden", { status: 403 });
     }
     const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);
@@ -1022,7 +1103,7 @@ export class OttLobbyServer extends DurableObject<Env> {
   }
 
   private async handlePublicActiveSnapshot(request: Request): Promise<Response> {
-    if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
+    if (!internalSecretMatches(request, this.env.OTT_INTERNAL_SECRET)) {
       return new Response("Forbidden", { status: 403 });
     }
     if (await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES) === null) return new Response("Bad request", { status: 400 });
@@ -1032,7 +1113,7 @@ export class OttLobbyServer extends DurableObject<Env> {
   }
 
   private async terminalize(request: Request): Promise<Response> {
-    if (!this.env.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.env.OTT_INTERNAL_SECRET) {
+    if (!internalSecretMatches(request, this.env.OTT_INTERNAL_SECRET)) {
       return new Response("Forbidden", { status: 403 });
     }
     const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);
@@ -1060,6 +1141,8 @@ export class OttLobbyServer extends DurableObject<Env> {
       });
       if (allocation.status === "terminal") return "already_terminal";
       allocation.status = "terminal";
+      await storage.delete(`${WAITING_PREFIX}${body.allocationId}`);
+      if (!allocation.tournamentMatch) await storage.put(`${TERMINAL_GC_PREFIX}${body.allocationId}`, Date.now() + TERMINAL_RETENTION_MS);
       delete allocation.summary;
       delete allocation.summaryVersion;
       await storage.put(key, allocation);

@@ -389,3 +389,64 @@ test("OttLobbyServer alarm removes expired rate-limit keys", async () => {
   assert.equal(alarms.length, 1);
 });
 
+
+function lobbyFixture(seed = []) {
+  const { OttLobbyServer } = loadOttLobbyServer();
+  const storageMap = new Map(seed);
+  const ctx = {
+    storage: {
+      async get(k) { return storageMap.get(k); },
+      async put(k, v) { storageMap.set(k, v); },
+      async delete(k) { storageMap.delete(k); },
+      async list(opts) { return new Map([...storageMap].filter(([k]) => !opts?.prefix || k.startsWith(opts.prefix))); },
+      async setAlarm() {},
+      async deleteAlarm() {},
+      async transaction(cb) { return cb(ctx.storage); },
+    },
+  };
+  return { storageMap, server: new OttLobbyServer(ctx, {}) };
+}
+
+let listIp = 0;
+const listRooms = (server) => server.fetch(new Request("https://ott.internal/control/list", {
+  method: "POST",
+  headers: { "content-type": "application/json", "cf-connecting-ip": `203.0.113.${++listIp}` },
+  body: "{}",
+})).then((r) => r.json());
+
+test("OttLobbyServer list reads the waiting index and backfills it once from allocations", async () => {
+  const waiting = { id: "w1", roomId: "ott-w1", names: { A: "An" }, seats: 1, status: "waiting" };
+  const playing = { id: "p1", roomId: "ott-p1", names: { A: "A", B: "B" }, seats: 2, status: "playing" };
+  const tournament = { id: "t1", roomId: "ott-t1", names: { A: "T" }, seats: 1, status: "waiting", tournamentMatch: true };
+  const { server, storageMap } = lobbyFixture([["allocation:w1", waiting], ["allocation:p1", playing], ["allocation:t1", tournament]]);
+
+  const first = await listRooms(server);
+
+  assert.deepEqual(first.rooms.map((room) => room.id), ["w1"]);
+  assert.equal(storageMap.has("waiting:w1"), true);
+  assert.equal(storageMap.get("waiting-index-v1"), true);
+  storageMap.delete("allocation:w1");
+  assert.deepEqual((await listRooms(server)).rooms.map((room) => room.id), ["w1"], "second list must use the index, not scan allocations");
+});
+
+test("OttLobbyServer alarm purges terminal allocations after 24 hours but keeps recent and tournament ones", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const { server, storageMap } = lobbyFixture([
+    ["allocation:old", { id: "old", roomId: "ott-old", status: "terminal", names: {}, seats: 2 }],
+    ["terminal-outcome:old", { completedAt: now - day - 1000 }],
+    ["allocation:new", { id: "new", roomId: "ott-new", status: "terminal", names: {}, seats: 2 }],
+    ["terminal-outcome:new", { completedAt: now - 1000 }],
+    ["allocation:tour", { id: "tour", roomId: "ott-tour", status: "terminal", tournamentMatch: true, names: {}, seats: 2 }],
+    ["terminal-outcome:tour", { completedAt: now - 2 * day }],
+  ]);
+
+  await server.alarm();
+
+  assert.equal(storageMap.has("allocation:old"), false);
+  assert.equal(storageMap.has("terminal-outcome:old"), false);
+  assert.equal(storageMap.has("terminal-gc:old"), false);
+  assert.equal(storageMap.has("allocation:new"), true);
+  assert.equal(storageMap.has("terminal-gc:new"), true);
+  assert.equal(storageMap.has("allocation:tour"), true);
+});

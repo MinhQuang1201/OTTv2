@@ -113,12 +113,14 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 
 ### Giai đoạn 3 — Vận hành Worker an toàn
 
-- [ ] Alarm của Lobby xoá allocation `terminal` cũ hơn 24 giờ; lưu phòng đang chờ ở key riêng để `list` không phải quét hết.
-- [ ] Game DO tự xoá storage (`deleteAll`) sau khi ván kết thúc một khoảng thời gian (code hiện tại không gọi hàm này ở đâu, nên storage của mọi ván cũ vẫn còn).
-- [ ] Thay rate limit bằng binding Rate Limiting của Cloudflare, giới hạn số phòng một IP được tạo mỗi phút.
-- [ ] Bật Workers Logs và log có cấu trúc cho các lỗi `authority_unavailable`, `transaction-failed`, `rate_limited`.
-- [ ] Quy định xử lý khi hai ghế cùng hết grace; sửa `reconnectGraceMs` trong `room.js`.
-- [ ] So sánh secret nội bộ bằng phép so sánh thời gian hằng.
+- [x] Alarm của Lobby xoá allocation `terminal` cũ hơn 24 giờ (kèm `terminal-outcome`); phòng đang chờ lưu ở key `waiting:<id>` nên `list` không quét `allocation:*`. Dữ liệu cũ được backfill một lần. *(Allocation của trận giải đấu không bị xoá vì coordinator còn đọc `terminal-outcome`.)*
+- [x] Game DO tự `deleteAll` sau khi ván kết thúc 1 giờ (`OTT_TERMINAL_RETENTION_MS`); trong lúc đó ván vẫn đọc được.
+- [~] Binding Rate Limiting `CREATE_RATE_LIMITER` (5 phòng/IP/phút, production và staging) áp dụng cho `create`. Giới hạn 40 ms mỗi action vẫn ghi storage vì test hiện tại ràng buộc key `rate:last:*`; thay hẳn cần sửa các test đó.
+- [x] Bật Workers Logs (`observability`) và log JSON một dòng cho `authority_unavailable`, `transaction-failed`, `rate_limited` (`apps/worker/src/observability/log.ts`).
+- [x] Hai ghế cùng hết grace: ghế còn ít thời gian hơn thua, bằng nhau thì ghế đang tới lượt thua (`Rule.md` mục 10.5, `room.js`). `reconnectGraceMs` đã đúng từ trước.
+- [x] So sánh secret nội bộ bằng `internalSecretMatches` (thời gian hằng) ở cả bốn DO handler.
+
+*Chưa kiểm chứng trên Cloudflare thật:* deploy staging, rồi tạo/kết thúc vài ván để xem key Lobby ổn định, và tạo dashboard/saved query trong Workers Logs lọc `event` theo ba lỗi trên. Hai việc này là điều kiện của tiêu chí bên dưới.
 
 **Tiêu chí xong:** số key trong Lobby DO ổn định theo thời gian thay vì tăng mãi; có dashboard lỗi.
 

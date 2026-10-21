@@ -851,7 +851,7 @@ test("initialization retry receipt binds canonical identity and immutable payloa
 test("Lobby exposes only control routes and a public list projection", () => {
   assert.match(lobby, /create.*list.*join.*resume/);
   assert.match(lobby, /publicAllocation/);
-  assert.match(lobby, /rooms: list\.filter/);
+  assert.match(lobby, /rooms: await this\.waitingRooms\(\)/);
   assert.doesNotMatch(lobby, /ticket.*publicAllocation|capability.*publicAllocation|state.*publicAllocation/);
   assert.match(lobby, /OTT_INTERNAL_SECRET/);
   assert.match(lobby, /this\.env\.Main\.get\(this\.env\.Main\.idFromName\(allocation\.roomId\)\)/);

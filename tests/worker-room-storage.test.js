@@ -288,3 +288,19 @@ test("nonce expiry participates in the shared earliest alarm", async () => {
 
   assert.equal(storage.values.get("alarm"), 450);
 });
+
+test("markTerminalized keeps the room for the retention window and arms the wipe alarm", async () => {
+  const { DurableRoomAdapter, TERMINAL_GC_KEY } = await roomStorageModule();
+  let now = 100;
+  const storage = fakeStorage({ creatorName: "Alice" });
+  const adapter = await DurableRoomAdapter.create("ott-terminal-retention", storage, () => now, { retentionMs: 5_000 });
+  await adapter.attach({ id: "creator", open: true, send() {} }, "A");
+  await adapter.leave({ id: "creator", open: true, send() {} });
+
+  await adapter.markTerminalized("leave");
+
+  assert.equal(storage.values.get(TERMINAL_GC_KEY), 5_100);
+  assert.equal(storage.values.get("alarm"), 5_100);
+  await adapter.scheduleAlarm();
+  assert.equal(storage.values.get("alarm"), 5_100, "later alarm scheduling must not drop the wipe deadline");
+});
