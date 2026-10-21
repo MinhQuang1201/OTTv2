@@ -51,8 +51,9 @@ Người dùng yêu cầu **không tạo worktree riêng**, nên toàn bộ thay
    placeholder manual acceptance chưa chạy trong môi trường hiện tại.
 4. **Clean install còn peer conflict upstream.** `npm ci` không có cờ bổ sung
    fail do `y-partyserver@2.2.0` yêu cầu `@cloudflare/workers-types` v4 trong
-   khi Wrangler/PartyServer kéo v5. Verification hiện dùng
-   `npm ci --legacy-peer-deps`. `@testing-library/dom@10.4.2` đã được khai báo
+   khi Wrangler/PartyServer kéo v5. Đã xử lý ngày 21/10/2026: `package.json`
+   khai báo `@cloudflare/workers-types@5.20260925.1` và `overrides` ép mọi gói
+   dùng bản này, nên `npm ci` chạy không cần cờ. `@testing-library/dom@10.4.2` đã được khai báo
    trực tiếp để `@testing-library/react` cài đủ peer dependency.
 5. **Dependency audit còn cảnh báo.** Full audit báo 8 vulnerabilities; audit
    production dependency báo 4 vấn đề trong `esbuild`/`undici`. Chưa chạy

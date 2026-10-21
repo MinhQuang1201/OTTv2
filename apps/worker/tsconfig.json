@@ -6,7 +6,7 @@
     "lib": ["ES2022"],
     "strict": true,
     "noEmit": true,
-    "types": ["../../node_modules/partykit/node_modules/@cloudflare/workers-types/2023-07-01"]
+    "types": ["@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts", "worker-configuration.d.ts", "../../node_modules/partyserver/dist/index.d.ts", "../../node_modules/y-partyserver/dist/server/index.d.ts"]
 }

@@ -12,13 +12,16 @@
     "build:playhtml-browser": "esbuild vendor/playhtml-minimal/browser/runtime-entry.js --bundle --platform=browser --format=iife --global-name=OTTPlayHTMLRuntime --outfile=vendor/playhtml-minimal/browser/runtime.js",
     "test:browser-worker-runtime": "npm run build:playhtml-browser && npm run build:web && node scripts/run-browser-worker-runtime.js",
     "test:browser-worker:spectator": "npm run build:playhtml-browser && npm run build:web && node scripts/run-browser-worker-runtime.js --spectator",
-    "test:unit": "node --test tests/*.test.js",
+    "test:unit": "node scripts/run-node-tests.js unit",
+    "test:integration": "node scripts/run-node-tests.js integration",
+    "test:e2e": "npm run test:browser-worker-runtime",
     "test": "npm run test:unit",
     "dev:web": "vite --config apps/web/vite.config.ts",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "test:web": "vitest run --config apps/web/vitest.config.ts",
     "test:web:watch": "vitest --config apps/web/vitest.config.ts",
     "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
+    "typecheck:worker": "tsc -p apps/worker/tsconfig.json --noEmit",
     "arena:cli": "node apps/arena-cli/src/main.mjs",
     "arena:doctor": "node apps/arena-cli/src/main.mjs doctor",
     "test:arena": "node --test tests/arena-contracts.test.js tests/arena-ruleset.test.js tests/arena-controller.test.js tests/arena-replay.test.js tests/arena-elo.test.js tests/arena-persistence.test.js tests/arena-bot-versions.test.js tests/arena-finalizer.test.js tests/arena-cli.test.js tests/arena-process-bot.test.js tests/arena-profiles.test.js tests/arena-build.test.js tests/arena-queue.test.js tests/arena-worker.test.js tests/arena-round-robin.test.js tests/arena-tournament.test.js tests/arena-auth.test.js tests/arena-api.test.js tests/arena-acceptance.test.js tests/arena-container-executor.test.js",
@@ -30,7 +33,7 @@
     "arena:user": "node apps/arena-api/scripts/manage-user.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0",
@@ -44,6 +47,7 @@
     "yjs": "13.6.18"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260925.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.1.0",
@@ -57,5 +61,8 @@
     "vite": "5.4.14",
     "vitest": "2.1.8",
     "wrangler": "4.141.0"
+  },
+  "overrides": {
+    "@cloudflare/workers-types": "$@cloudflare/workers-types"
   }
 }

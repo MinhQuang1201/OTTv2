@@ -84,9 +84,18 @@ Các module JavaScript chính không còn nằm ở gốc; mã canonical ở `pa
 
 ## Kiểm thử
 
+Cần Node 22 (`.nvmrc`). `npm ci` chạy được không cần cờ bổ sung.
+
 ```bash
-npm test
+npm ci
+npm run build:web        # server.test.js kiểm tra bản build thật
+npm test                 # = npm run test:unit, không cần Worker thật
+npm run test:web
+npm run typecheck:web
+npm run typecheck:worker
 ```
+
+`npm run test:integration` khởi động `wrangler dev --local` (mỗi test có timeout 5 phút); `npm run test:e2e` chạy Playwright với hai context trên Worker local.
 
 `tests/rules.test.js` — phạm vi kiểm thử luật; chạy `npm test` để xác minh kết quả trên revision hiện tại.
 

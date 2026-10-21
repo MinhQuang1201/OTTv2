@@ -11,7 +11,7 @@ interface Env {
 }
 
 declare namespace Cloudflare {
-  type Env = globalThis.Env;
+  interface Env extends globalThis.Env {}
 }
 
 type Document = unknown;

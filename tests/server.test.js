@@ -6,6 +6,15 @@ const path = require("node:path");
 const test = require("node:test");
 const { server, isPrivatePath } = require("../server");
 
+const builtIndex = path.resolve(__dirname, "..", "apps", "web", "dist", "index.html");
+
+// These tests exercise the real Vite output; fail with a clear cause instead of ENOENT/404.
+async function requireBuiltApp() {
+  await fs.access(builtIndex).catch(() => {
+    throw new Error("apps/web/dist is missing: run `npm run build:web` before `npm run test:unit`");
+  });
+}
+
 function request(port, pathname) {
   return new Promise((resolve, reject) => {
     const req = http.get({ host: "127.0.0.1", port, path: pathname }, (res) => {
@@ -50,6 +59,7 @@ test("denies private source, test, and runtime paths regardless of case", async 
 });
 
 test("denies a public-path symlink to a file outside the project", async () => {
+  await requireBuiltApp();
   const root = path.resolve(__dirname, "..");
   const name = `server-test-outside-${process.pid}-${Date.now()}`;
   const linkPath = path.join(root, "apps", "web", "dist", name);
@@ -73,6 +83,7 @@ test("denies a public-path symlink to a file outside the project", async () => {
 });
 
 test("denies a public-path symlink into a private project directory", async () => {
+  await requireBuiltApp();
   const root = path.resolve(__dirname, "..");
   const name = `server-test-worker-${process.pid}-${Date.now()}`;
   const linkPath = path.join(root, "apps", "web", "dist", name);
@@ -91,6 +102,7 @@ test("denies a public-path symlink into a private project directory", async () =
 });
 
 test("denies a public-path symlink into repository directory outside public root", async () => {
+  await requireBuiltApp();
   const root = path.resolve(__dirname, "..");
   const name = `server-test-escape-${process.pid}-${Date.now()}`;
   const linkPath = path.join(root, "apps", "web", "dist", name);
@@ -130,6 +142,7 @@ test("isPrivatePath portably normalizes POSIX and Windows relative paths", () =>
 });
 
 test("serves a public asset", async () => {
+  await requireBuiltApp();
   const port = server.address().port;
   const index = await request(port, "/index.html");
   assert.equal(index.statusCode, 200);
@@ -151,6 +164,7 @@ test("returns 404 for directory paths (original 404 contract)", async () => {
 });
 
 test("serves static fonts with correct font MIME types", async () => {
+  await requireBuiltApp();
   const port = server.address().port;
 
   // Verify production bundled TTF assets (read-only, no mutation)

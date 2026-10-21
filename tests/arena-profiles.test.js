@@ -215,7 +215,8 @@ describe("profile-registry: createProfileRegistry lifecycle & resolution", () =>
     fs.writeFileSync(tempCpp, "int main() { return 0; }", "utf8");
 
     try {
-      const registry = createProfileRegistry();
+      // Probe double: the uncompiled-source branch must not depend on g++ being installed.
+      const registry = createProfileRegistry({ cppExecutable: process.execPath });
       assert.throws(
         () => registry.resolveBot(`cpp:${tempCpp}`, { botId: "uncompiled-cpp" }),
         (err) => {

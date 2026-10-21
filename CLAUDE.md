@@ -5,7 +5,7 @@ Cờ chiến thuật realtime 9×9. Luật thuần trong `packages/game-core/src
 ## Lệnh
 
 ```bash
-npm install
+npm ci
 npm test
 npm start
 npm run dev:web
@@ -14,7 +14,7 @@ npm run test:web
 npm run typecheck:web
 ```
 
-Node ≥ 18. Cổng mặc định 3000 (`PORT`).
+Node ≥ 22 (`.nvmrc`). Cổng mặc định 3000 (`PORT`).
 
 ## Ranh giới module
 
@@ -52,10 +52,14 @@ Không gọi ô thắng là “nhà vua”. Mỗi ô chỉ có một quân; khô
 Viết test tại `rules.applyMove` và `Room.handleMove`. Không test nội bộ UI.
 
 ```bash
-npm test
+npm ci
+npm run build:web        # server.test.js kiểm tra bản build thật, nên build trước
+npm run test:unit        # = npm test; không cần Worker thật
 npm run test:web
 npm run typecheck:web
-npm run build:web
+npm run typecheck:worker
+npm run test:integration # wrangler dev --local, có timeout
+npm run test:e2e         # Playwright hai context trên Worker local
 ```
 
 React parity/accessibility tests dùng feature/session contracts; board phải expose
