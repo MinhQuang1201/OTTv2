@@ -1,0 +1,50 @@
+name: CI
+
+# Pushes to main run this through deploy.yml, which gates the staging deploy on it.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Install, build, typecheck, unit and web tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # server.test.js checks the real build, so build before unit tests.
+      - run: npm run build:web
+      - run: npm run typecheck:web
+      - run: npm run typecheck:worker
+      - run: npm run test:unit
+      - run: npm run test:web
+
+  integration:
+    name: Worker integration (wrangler dev --local)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Write .dev.vars with a throwaway secret
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          printf 'OTT_INTERNAL_SECRET=%s\n' "$secret" > .dev.vars
+      - run: npm run test:integration

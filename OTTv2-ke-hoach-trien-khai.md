@@ -95,6 +95,14 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 
 **Tiêu chí xong:** production được deploy lại từ một tag, không có thao tác CLI trên máy cá nhân; rollback bằng cách deploy lại tag trước.
 
+*Tiến độ 21/10/2026 — phần trong repo đã xong, phần cần quyền tài khoản còn chờ:*
+
+- [x] Bước 1: `.github/workflows/ci.yml` (job `verify` + job `integration` với secret ngẫu nhiên). Đã kiểm bằng actionlint; chưa chạy trên GitHub.
+- [ ] Bước 2: bảo vệ `main` — cần admin repo bật trên GitHub (xem `DEPLOYMENT.md`).
+- [x] Bước 3 (phần repo): env `staging` trong `apps/worker/wrangler.jsonc` (Worker `ottv2-staging`, DO riêng, origin `https://ottv2-staging.vercel.app`); `wrangler deploy --dry-run --env staging` pass. Còn chờ: tạo GitHub Environment, đặt `OTT_INTERNAL_SECRET` cho Worker staging.
+- [x] Bước 4–6: `.github/workflows/deploy.yml` (main → staging, tag `v*` → production, chạy tay để rollback), ghi Worker version ID và URL Vercel vào GitHub Release, smoke test `scripts/smoke-deploy.js` (đã chạy pass trên production hiện tại).
+- [ ] Cổng: deploy thật lần đầu từ tag — chờ trả lời câu hỏi mở về quyền tài khoản Cloudflare `haixcxt` và team Vercel `lap-trinh-mang`.
+
 ### Giai đoạn 3 — Vận hành Worker an toàn
 
 - [ ] Alarm của Lobby xoá allocation `terminal` cũ hơn 24 giờ; lưu phòng đang chờ ở key riêng để `list` không phải quét hết.
