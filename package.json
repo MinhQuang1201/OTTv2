@@ -38,9 +38,7 @@
   "dependencies": {
     "better-sqlite3": "11.10.0",
     "dotenv": "18.0.4",
-    "partykit": "0.0.115",
     "partyserver": "0.5.10",
-    "playhtml": "2.15.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "y-partyserver": "2.2.0",

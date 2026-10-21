@@ -9,14 +9,15 @@ Cờ chiến thuật hai người trên bàn 9×9. Mỗi bên có 10 quân: 3 Đ
 
 ## Chạy
 
-Cần Node.js 18 trở lên.
+Cần Node.js 22 trở lên (`.nvmrc`).
 
 ```powershell
 npm.cmd install
 npm.cmd run dev:web
 ```
 
-Mở trình duyệt: [http://localhost:3000](http://localhost:3000)
+Mở trình duyệt: [http://localhost:5173](http://localhost:5173) (cổng mặc định của Vite dev server).
+Sau `build:web` + `start` bên dưới, bản build chạy tại [http://localhost:3000](http://localhost:3000).
 
 Để kiểm tra đường phục vụ giống production:
 
