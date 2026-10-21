@@ -8,3 +8,5 @@ Thumbs.db
 .dev.vars
 .wrangler/
 apps/web/dist/
+var/arena/
+.vercel/

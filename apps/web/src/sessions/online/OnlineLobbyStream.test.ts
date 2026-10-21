@@ -65,6 +65,7 @@ function createStream(connection = new FakeConnection(), runtime = runtimeFor(co
       runtime,
       host: "https://play.example",
       reconnectDelayMs: 0,
+      enabled: true,
       ...options,
     }),
   };
@@ -83,6 +84,35 @@ async function startWithOpen(stream: OnlineLobbyStream, connection: FakeConnecti
 }
 
 describe("OnlineLobbyStream", () => {
+  it("does not open a socket and transitions to unavailable when spectator capability is disabled", async () => {
+    const connection = new FakeConnection();
+    const runtime = runtimeFor(connection);
+    const stream = new OnlineLobbyStream({ runtime, host: "https://play.example", enabled: false });
+
+    expect(stream.getSnapshot()).toMatchObject<Partial<OnlineLobbyStreamSnapshot>>({ status: "unavailable", matches: [] });
+
+    await stream.start();
+
+    expect(stream.getSnapshot()).toMatchObject<Partial<OnlineLobbyStreamSnapshot>>({ status: "unavailable", matches: [] });
+    expect(runtime.bootstrap).not.toHaveBeenCalled();
+    expect(runtime.connectionFactory).not.toHaveBeenCalled();
+    expect(connection.connect).not.toHaveBeenCalled();
+  });
+
+  it("defaults enabled to false when VITE_OTT_SPECTATOR_ENABLED is not enabled", async () => {
+    const connection = new FakeConnection();
+    const runtime = runtimeFor(connection);
+    const stream = new OnlineLobbyStream({ runtime, host: "https://play.example" });
+
+    expect(stream.getSnapshot().status).toBe("unavailable");
+
+    await stream.start();
+
+    expect(stream.getSnapshot().status).toBe("unavailable");
+    expect(runtime.bootstrap).not.toHaveBeenCalled();
+    expect(runtime.connectionFactory).not.toHaveBeenCalled();
+  });
+
   it("maps a disabled pre-open bootstrap failure, including HTTP 404, to unavailable", async () => {
     const failure = Object.assign(new Error("Not found"), { status: 404 });
     const connection = new FakeConnection();
@@ -197,7 +227,7 @@ describe("OnlineLobbyStream", () => {
         }),
         dispose: vi.fn(async () => undefined),
       };
-      stream = new OnlineLobbyStream({ runtime, host: "https://play.example", reconnectDelayMs: 0 });
+      stream = new OnlineLobbyStream({ runtime, host: "https://play.example", reconnectDelayMs: 0, enabled: true });
 
       await startWithOpen(stream, first);
       first.emit("close");

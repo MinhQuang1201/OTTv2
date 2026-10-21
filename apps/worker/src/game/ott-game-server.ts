@@ -2,7 +2,7 @@ import { YServer } from "y-partyserver";
 import type {
   Connection,
   WSMessage,
-} from "../../../../node_modules/playhtml/node_modules/partyserver/dist/index.js";
+} from "partyserver";
 import {
   MIN_OTT_PACKET_INTERVAL_MS,
   parseOttMessage,
@@ -81,7 +81,7 @@ export class OttGameServer extends YServer {
     this.authority = authority;
   }
 
-  override ["fetch"](request: Request): Promise<Response> {
+  override async ["fetch"](request: Request): Promise<Response> {
     const pathname = new URL(request.url).pathname;
     if (pathname === "/internal/initialize") return this.initialize(request);
     if (pathname === "/internal/seat-update") return this.updateSeat(request);
@@ -209,7 +209,7 @@ export class OttGameServer extends YServer {
     return true;
   }
 
-  override onConnect(connection: Connection, context: Request): void {
+  override onConnect(connection: Connection, context: any): void {
     this.closedConnections.delete(connection);
     this.ensureConnectionGeneration(connection);
     super.onConnect(connection, context);
@@ -250,6 +250,7 @@ export class OttGameServer extends YServer {
     try {
       const roomId = await this.ctx.storage.get<string>("roomId");
       if (!roomId || command.roomId !== roomId || (reservation && !this.isCurrentReservation(connection, reservation))) return;
+      if (this.closedConnections.has(connection)) return;
       const existingIdentity = this.getIdentity(connection) ?? this.pendingIdentities.get(connection);
       if (command.type === "ott:attach") {
         const seat = await this.validateAttach(connection, command, reservation?.generation);
@@ -310,12 +311,18 @@ export class OttGameServer extends YServer {
         const allocationId = await this.ctx.storage.get<string>("allocationId");
         if (!allocationId) return { type: "ott:error", revision: adapter.room.revision, error: "attach_required" };
         if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
+        const previousSeatConnection = adapter.room?.players?.[seat]?.connection as Connection | undefined;
         const consumed = await attachWithCapabilityRecovery(this.ottEnv.OTT_INTERNAL_SECRET, capability.token, {
           allocationId,
           roomId: adapter.roomId,
           purpose: "attach",
-        }, (callback) => this.transaction(callback), adapter, connection);
-        result = consumed.ok ? consumed.value : { ok: false, error: consumed.reason === "replay" ? "attach_replayed" : "attach_rejected" };
+        // The capability is already authenticated and seat-bound. PartyServer
+        // may keep the old socket in its connection set until onClose runs, so
+        // the reconnect attach must be allowed to replace that same seat.
+        }, (callback) => this.transaction(callback), adapter, connection, () => false);
+        result = consumed.ok
+          ? consumed.value
+          : { ok: false, error: consumed.reason === "replay" ? "attach_replayed" : consumed.value?.error || "attach_rejected" };
         if (consumed.ok) {
           if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
           if (!this.installIdentity(connection, { role: "player", seat }, capability.nonce, generation)) {
@@ -335,6 +342,7 @@ export class OttGameServer extends YServer {
               error: "identity_install_failed",
             };
           }
+          this.supersedeSeatConnection(previousSeatConnection, connection);
           adapter.commitAttach(connection);
           this.attachCapabilities.delete(connection);
           this.pendingIdentities.delete(connection);
@@ -342,15 +350,19 @@ export class OttGameServer extends YServer {
           this.pendingIdentities.delete(connection);
         }
       } else if (command.type === "ott:move") {
-        committed = await adapter.move(connection, command.from, command.to);
-        result = committed.result;
+        committed = await adapter.move(connection, command.from, command.to, command.expectedRevision);
+        result = committed?.result;
       } else {
         committed = await adapter.leave(connection);
-        result = committed.result;
+        result = committed?.result;
       }
       if (!result || result.ok === false) {
         if (committed) await this.publishCommitted(adapter, committed);
         if (command.type === "ott:attach") this.pendingIdentities.delete(connection);
+        if (result?.error === "stale_revision") {
+          await this.broadcastState(adapter);
+          return { type: "ott:error", revision: adapter.room.revision, error: "stale_revision" };
+        }
         return { type: "ott:error", revision: (committed?.payload.revision as number | undefined) ?? adapter.room.revision, error: result?.error || "invalid_command" };
       }
       if (command.type === "ott:attach") {
@@ -398,7 +410,7 @@ export class OttGameServer extends YServer {
     };
   }
 
-  private async terminalizeAllocation(reason: string): Promise<void> {
+  private async terminalizeAllocation(reason: string, winner?: string | null): Promise<void> {
     const allocationId = await this.ctx.storage.get<string>("allocationId");
     const roomId = await this.ctx.storage.get<string>("roomId");
     if (!allocationId || !roomId) throw new Error("allocation identity unavailable for terminalization");
@@ -406,7 +418,7 @@ export class OttGameServer extends YServer {
     const response = await lobby.fetch(new Request("https://internal.invalid/internal/terminalize", {
       method: "POST",
       headers: { "content-type": "application/json", "x-ott-internal-secret": this.ottEnv.OTT_INTERNAL_SECRET },
-      body: JSON.stringify({ allocationId, roomId, reason }),
+      body: JSON.stringify({ allocationId, roomId, reason, winner: winner ?? null }),
     }));
     if (!response.ok) throw new Error(`Lobby terminalization failed with HTTP ${response.status}`);
   }
@@ -458,6 +470,12 @@ export class OttGameServer extends YServer {
     this.roleReservations.delete(connection);
     this.closedConnections.add(connection);
     return generation;
+  }
+
+  private supersedeSeatConnection(previous: Connection | undefined, replacement: Connection): void {
+    if (!previous || previous === replacement) return;
+    this.invalidateConnection(previous);
+    try { previous.close?.(4001, "replaced_by_reconnect"); } catch { /* close callback is defensive cleanup */ }
   }
 
   private forgetConnectionGeneration(connection: Connection, generation: number): void {
@@ -569,6 +587,7 @@ export class OttGameServer extends YServer {
     const live = new Map<"A" | "B", Connection>();
     if (typeof this.getConnections !== "function") return live;
     for (const connection of this.getConnections()) {
+      if (this.closedConnections.has(connection)) continue;
       const identity = this.getIdentity(connection);
       if (identity?.role === "player") live.set(identity.seat, connection);
     }
@@ -758,7 +777,8 @@ export class OttGameServer extends YServer {
       // Best-effort terminal broadcast failure must not block terminalization or Lobby cleanup.
     }
     try {
-      await this.terminalizeAllocation(outcome.terminalReason);
+      const winner = (outcome.payload?.state as Record<string, unknown> | undefined)?.winner as string | null | undefined;
+      await this.terminalizeAllocation(outcome.terminalReason, winner ?? null);
       await adapter.markTerminalized(outcome.terminalReason);
     } catch {
       // The committed Room and terminal projection remain durable; retry Lobby cleanup by alarm.

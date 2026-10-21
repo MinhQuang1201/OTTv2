@@ -2,6 +2,12 @@ import { DurableObject } from "cloudflare:workers";
 import {
   createCapabilityNonce,
   createOwnerCredential,
+  createSeatInvite,
+  claimSeatInvite,
+  confirmSeatInvite,
+  verifyOwnerCredential,
+  OwnerCredentialRecord,
+  SeatInviteRecord,
   deleteOwnerCredentials,
   internalRequest,
   issueCapability,
@@ -17,18 +23,27 @@ import {
 import {
   validatePublicMatchCatalog,
   MAX_OTT_PAYLOAD_BYTES,
+  ALIAS_ALPHABET,
+  generateRandomAlias,
+  normalizeAlias,
   type PublicMatchView,
 } from "../../../../packages/protocol/src/index.js";
+import { TournamentCoordinator } from "./tournament-coordinator.js";
 
-type Allocation = {
+export type Allocation = {
   id: string;
   roomId: string;
+  alias?: string;
   names: Partial<Record<"A" | "B", string>>;
   seats: number;
   status: "initializing" | "waiting" | "joining" | "playing" | "terminal";
   creatorAttachDeadlineMs: number;
+  tournamentMatch?: boolean;
+  tournamentId?: string;
+  matchId?: string;
   summary?: unknown;
   summaryVersion?: { roomRevision: number; summarySequence: number };
+  pendingSeatBInvite?: string;
 };
 const MAX_BODY = 4096;
 const DEFAULT_CREATOR_ATTACH_TTL_MS = 60_000;
@@ -72,7 +87,7 @@ async function readCappedUtf8Body(request: Request, maxBytes: number): Promise<s
   }
   const reader = request.body?.getReader();
   if (!reader) return "";
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
   let totalBytes = 0;
   let text = "";
   try {
@@ -116,12 +131,57 @@ function clientIdentity(request: Request): string {
   return "anonymous";
 }
 function publicAllocation(item: Allocation): unknown {
-  return { id: item.id, roomId: item.roomId, players: item.seats, names: item.names };
+  return { id: item.id, roomId: item.roomId, alias: item.alias, players: item.seats, names: item.names };
 }
 
 export class OttLobbyServer extends DurableObject<Env> {
+  private _tournamentCoordinator?: TournamentCoordinator;
+
+  private get tournamentCoordinator(): TournamentCoordinator {
+    if (!this._tournamentCoordinator) {
+      this._tournamentCoordinator = new TournamentCoordinator(
+        this.ctx.storage,
+        this.env,
+        (callback) => this.transaction(callback),
+        (storage, allocationId, roomId) => this.allocateAlias(storage, allocationId, roomId),
+      );
+    }
+    return this._tournamentCoordinator;
+  }
+
   private transaction<T>(callback: (storage: DurableObjectTransaction) => Promise<T>): Promise<T> {
     return this.ctx.storage.transaction(callback);
+  }
+  private async allocateAlias(storage: DurableObjectStorage | DurableObjectTransaction, allocationId: string, roomId: string): Promise<string> {
+    for (let i = 0; i < 10; i++) {
+      const candidate = generateRandomAlias();
+      const existing = await storage.get<{ allocationId: string }>(`alias:${candidate}`);
+      if (!existing || existing.allocationId === allocationId) {
+        await storage.put(`alias:${candidate}`, { allocationId, roomId, createdAt: Date.now() });
+        await storage.put(`allocation-alias:${allocationId}`, candidate);
+        return candidate;
+      }
+    }
+    const hash = allocationId.replace(/[^23456789ABCDEFGHJKMNPQRSTVWXYZ]/gi, "").toUpperCase().slice(0, 6).padEnd(6, "X");
+    const fallback = `${hash.slice(0, 3)}-${hash.slice(3)}`;
+    const existing = await storage.get<{ allocationId: string }>(`alias:${fallback}`);
+    if (!existing || existing.allocationId === allocationId) {
+      await storage.put(`alias:${fallback}`, { allocationId, roomId, createdAt: Date.now() });
+      await storage.put(`allocation-alias:${allocationId}`, fallback);
+      return fallback;
+    }
+
+    for (const char of ALIAS_ALPHABET) {
+      const alt = `${hash.slice(0, 2)}${char}-${hash.slice(3)}`;
+      const existingAlt = await storage.get<{ allocationId: string }>(`alias:${alt}`);
+      if (!existingAlt || existingAlt.allocationId === allocationId) {
+        await storage.put(`alias:${alt}`, { allocationId, roomId, createdAt: Date.now() });
+        await storage.put(`allocation-alias:${allocationId}`, alt);
+        return alt;
+      }
+    }
+
+    throw new Error("alias_allocation_exhausted");
   }
   private async allocations(): Promise<Allocation[]> {
     const values = await this.ctx.storage.list<Allocation>({ prefix: "allocation:" });
@@ -167,6 +227,12 @@ export class OttLobbyServer extends DurableObject<Env> {
             : Math.min(nextDeadline, claim.leaseUntilMs);
         }
       }
+      const invites = await this.ctx.storage.list<{ expiresAt?: number }>({ prefix: "seat-invite:" });
+      for (const inv of invites.values()) {
+        if (typeof inv?.expiresAt === "number" && Number.isFinite(inv.expiresAt)) {
+          nextDeadline = nextDeadline === undefined ? inv.expiresAt : Math.min(nextDeadline, inv.expiresAt);
+        }
+      }
       if (nextDeadline === undefined) await this.ctx.storage.deleteAlarm?.();
       else await this.ctx.storage.setAlarm?.(nextDeadline);
     } catch {
@@ -181,6 +247,12 @@ export class OttLobbyServer extends DurableObject<Env> {
     const entries = await this.ctx.storage.list<number>({ prefix: "rate:last:" });
     for (const [key, value] of entries) {
       if (typeof value !== "number" || now - value >= RATE_LIMIT_RETENTION_MS) {
+        await this.ctx.storage.delete(key);
+      }
+    }
+    const invites = await this.ctx.storage.list<{ expiresAt?: number; claimed?: boolean; createdAt?: number }>({ prefix: "seat-invite:" });
+    for (const [key, inv] of invites) {
+      if (!inv || (typeof inv.expiresAt === "number" && inv.expiresAt <= now) || (inv.claimed && typeof inv.createdAt === "number" && now - inv.createdAt > 60_000)) {
         await this.ctx.storage.delete(key);
       }
     }
@@ -420,9 +492,20 @@ export class OttLobbyServer extends DurableObject<Env> {
     if (pathname === "/internal/public-active-snapshot") {
       return this.handlePublicActiveSnapshot(request);
     }
-    const action = pathname.split("/").filter(Boolean).at(-1);
+    const rawAction = pathname.split("/").filter(Boolean).at(-1) || "";
+    const action = decodeURIComponent(rawAction);
     const body = await this.read(request);
-    if (!body || !["create", "list", "join", "resume", "active", "spectate"].includes(action ?? "")) return json({ error: "invalid_request" }, 400);
+    const tournamentActions = [
+      "tournament:create", "tournament-create",
+      "tournament:register", "tournament-register",
+      "tournament:start", "tournament-start",
+      "tournament:get", "tournament-get",
+      "tournament:access", "tournament-access",
+      "tournament:sync-match", "tournament-sync-match",
+      "tournament:advance", "tournament-advance",
+    ];
+    const standardActions = ["create", "list", "join", "resume", "active", "spectate", "resolve-alias", "create-invite", "claim-invite"];
+    if (!body || (!standardActions.includes(action) && !tournamentActions.includes(action))) return json({ error: "invalid_request" }, 400);
     const now = Date.now();
     const clientKey = clientIdentity(request);
     const rateKey = `rate:last:${action}:${clientKey}`;
@@ -430,8 +513,11 @@ export class OttLobbyServer extends DurableObject<Env> {
     if (last !== undefined && now - last < 40) return json({ error: "rate_limited" }, 429);
     await this.ctx.storage.put(rateKey, now);
     await this.scheduleAlarm();
+    if (tournamentActions.includes(action)) {
+      return this.tournamentCoordinator.handleAction(action, body, now);
+    }
     const list = await this.allocations();
-    if (action === "list") return json({ rooms: list.filter((item) => item.status === "waiting").map(publicAllocation) });
+    if (action === "list") return json({ rooms: list.filter((item) => item.status === "waiting" && !item.tournamentMatch).map(publicAllocation) });
     if (action === "active") {
       if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
       const catalog = await this.currentPublicCatalog();
@@ -461,6 +547,8 @@ export class OttLobbyServer extends DurableObject<Env> {
       const ticket = await issueCapability(this.env.OTT_INTERNAL_SECRET, {
         allocationId: id, roomId: allocation.roomId, purpose: "attach", seat: "A", now, nonce: ticketNonce,
       });
+      const alias = await this.allocateAlias(this.ctx.storage, id, allocation.roomId);
+      allocation.alias = alias;
       await this.transaction(async (storage) => {
         await storage.put(`allocation:${id}`, allocation);
         await storage.put(`owner-credential:${id}:A`, { salt: owner.salt, hash: owner.hash });
@@ -494,9 +582,14 @@ export class OttLobbyServer extends DurableObject<Env> {
             await storage.put(`allocation:${id}`, pending);
           }
         });
-        return json({ allocationId: id, room: allocation.roomId, seat: "A", ticket, resumeCredential: owner.credential });
+        return json({ allocationId: id, room: allocation.roomId, alias, seat: "A", ticket, resumeCredential: owner.credential });
       }, async () => {
         await this.transaction(async (storage) => {
+          const storedAlias = await storage.get<string>(`allocation-alias:${id}`);
+          if (storedAlias) {
+            await storage.delete(`alias:${storedAlias}`);
+            await storage.delete(`allocation-alias:${id}`);
+          }
           await storage.delete(`allocation:${id}`);
           await deleteOwnerCredentials(storage, id);
         });
@@ -547,26 +640,286 @@ export class OttLobbyServer extends DurableObject<Env> {
         resumeCredential: resumed.resumeCredential,
       });
     }
-    const allocation = await this.ctx.storage.get<Allocation>(`allocation:${id}`);
+
+    if (action === "resolve-alias") {
+      const rawAlias = typeof body.alias === "string" ? body.alias : typeof body.allocationId === "string" ? body.allocationId : "";
+      const normalized = normalizeAlias(rawAlias);
+      if (!normalized) return json({ error: "invalid_alias" }, 400);
+      const aliasRecord = await this.ctx.storage.get<{ allocationId: string; roomId: string }>(`alias:${normalized}`);
+      if (!aliasRecord) return json({ error: "alias_not_found" }, 404);
+      const allocation = await this.ctx.storage.get<Allocation>(`allocation:${aliasRecord.allocationId}`);
+      if (!allocation || allocation.status === "terminal") return json({ error: "room_unavailable" }, 410);
+      if (allocation.tournamentMatch) return json({ error: "room_unavailable" }, 404);
+      return json({
+        allocationId: allocation.id,
+        roomId: allocation.roomId,
+        alias: normalized,
+        status: allocation.status,
+        players: allocation.seats,
+        names: allocation.names,
+      });
+    }
+
+    if (action === "create-invite") {
+      let targetId = typeof body.allocationId === "string" ? body.allocationId.trim() : "";
+      if (!targetId) return json({ error: "invalid_request" }, 400);
+
+      let isAlias = false;
+      let allocation = await this.ctx.storage.get<Allocation>(`allocation:${targetId}`);
+      if (!allocation) {
+        const maybeAlias = normalizeAlias(targetId);
+        if (maybeAlias) {
+          const aliasRecord = await this.ctx.storage.get<{ allocationId: string }>(`alias:${maybeAlias}`);
+          if (aliasRecord) {
+            targetId = aliasRecord.allocationId;
+            allocation = await this.ctx.storage.get<Allocation>(`allocation:${targetId}`);
+            isAlias = true;
+          }
+        }
+      }
+      if (!allocation) {
+        return json({ error: "not_found" }, 404);
+      }
+      if (allocation.tournamentMatch) {
+        return json({ error: "tournament_room_reserved" }, 403);
+      }
+
+      // "no alias-as-auth": Public alias can NEVER authorize invite creation on ordinary rooms!
+      if (isAlias) {
+        return json({ error: "unauthorized", message: "Room alias cannot be used as authorization to create invites" }, 401);
+      }
+
+      if (allocation.status === "initializing") {
+        return json({ error: "room_unavailable" }, 409);
+      }
+      if (allocation.status !== "waiting") {
+        return json({ error: "room_unavailable" }, 409);
+      }
+
+      // Owner create-invite must authenticate resumeCredential of seat A!
+      // Canonical UUID allocationId is public ID NOT auth, preventing anonymous invite minting.
+      const ownerCredential = typeof body.ownerCredential === "string" ? body.ownerCredential.trim()
+        : typeof body.resumeCredential === "string" ? body.resumeCredential.trim() : "";
+      if (!ownerCredential) {
+        return json({ error: "unauthorized", message: "Owner credential required to create invites" }, 401);
+      }
+
+      const ownerRecord = await this.ctx.storage.get<OwnerCredentialRecord>(`owner-credential:${allocation.id}:A`);
+      if (!ownerRecord || !(await verifyOwnerCredential(ownerCredential, ownerRecord))) {
+        return json({ error: "unauthorized", message: "Invalid owner credential for seat A" }, 401);
+      }
+
+      const seat = body.seat === "A" || body.seat === "B" ? body.seat : "B";
+      if (seat === "A") {
+        // Seat A belongs to the room creator and is occupied. Outsider create is denied!
+        return json({ error: "seat_already_occupied", message: "Seat A is reserved for the room creator" }, 403);
+      }
+
+      // Seat B: check that Seat B is unoccupied
+      if (allocation.seats !== 1 || allocation.names.B) {
+        return json({ error: "seat_already_occupied", message: "Seat B is already occupied" }, 409);
+      }
+      if (allocation.pendingSeatBInvite) {
+        return json({ error: "seat_already_occupied", message: "Seat B has a pending reservation" }, 409);
+      }
+
+      const inviteeName = typeof body.inviteeName === "string" ? cleanName(body.inviteeName) : undefined;
+      const inviteRecord = await createSeatInvite(this.ctx.storage as any, {
+        allocationId: allocation.id,
+        roomId: allocation.roomId,
+        seat: "B",
+        inviteeName: inviteeName || undefined,
+      });
+      return json({
+        ok: true,
+        allocationId: allocation.id,
+        roomId: allocation.roomId,
+        alias: allocation.alias,
+        seat: "B",
+        inviteToken: inviteRecord.inviteToken,
+        expiresAt: inviteRecord.expiresAt,
+      });
+    }
+
+    if (action === "claim-invite") {
+      const inviteToken = typeof body.inviteToken === "string" ? body.inviteToken.trim() : "";
+      const playerName = cleanName(body.name);
+      const claimId = typeof body.claimId === "string" ? body.claimId.trim() : undefined;
+      const resumeCredential = typeof body.resumeCredential === "string" ? body.resumeCredential.trim() : undefined;
+      if (!inviteToken || !playerName) return json({ error: "invalid_request" }, 400);
+
+      const claimTx = await this.transaction(async (storage) => {
+        const invite = await storage.get<SeatInviteRecord>(`seat-invite:${inviteToken}`);
+        if (!invite) return { ok: false as const, error: "invite_not_found" as const, status: 400 };
+        if (invite.expiresAt <= now) return { ok: false as const, error: "invite_expired" as const, status: 400 };
+        if (invite.claimed && invite.claimStatus === "confirmed") {
+          return { ok: false as const, error: "invite_already_claimed" as const, status: 400 };
+        }
+
+        const allocation = await storage.get<Allocation>(`allocation:${invite.allocationId}`);
+        if (!allocation) return { ok: false as const, error: "not_found" as const, status: 404 };
+
+        // 1. Initializing guard
+        if (allocation.status === "initializing") {
+          return { ok: false as const, error: "room_unavailable" as const, status: 409 };
+        }
+
+        // 2. Disambiguate Tournament Room vs Ordinary Room:
+        if (allocation.tournamentMatch) {
+          // --- Tournament pre-reserved authorized path ---
+          const claimed = await claimSeatInvite(storage, this.env.OTT_INTERNAL_SECRET, {
+            inviteToken,
+            playerName,
+            claimId,
+            resumeCredential,
+            now,
+          });
+          if (!claimed.ok) {
+            return { ok: false as const, error: claimed.error, status: claimed.error === "seat_already_occupied" ? 409 : 400 };
+          }
+          const seatUpdateNeeded = claimed.seat === "B" ? { roomId: allocation.roomId, allocationId: allocation.id } : null;
+          if (!seatUpdateNeeded) {
+            await confirmSeatInvite(storage, inviteToken);
+          }
+          return { ok: true as const, claimed, seatUpdateNeeded };
+        } else {
+          // --- Ordinary Room ---
+          // Outsider Seat A claim denied!
+          if (invite.seat === "A") {
+            return { ok: false as const, error: "seat_already_occupied" as const, status: 403 };
+          }
+
+          // Seat B:
+          if (allocation.status === "playing" || allocation.seats >= 2 || allocation.names.B) {
+            return { ok: false as const, error: "seat_already_occupied" as const, status: 409 };
+          }
+
+          // Joining / Pending CAS reservation check
+          if (allocation.status === "joining") {
+            if (invite.claimStatus === "pending" && allocation.pendingSeatBInvite === inviteToken) {
+              // Valid retry for this pending claim
+            } else {
+              return { ok: false as const, error: "seat_already_occupied" as const, status: 409 };
+            }
+          } else if (allocation.pendingSeatBInvite && allocation.pendingSeatBInvite !== inviteToken) {
+            // Another invite already reserved Seat B!
+            return { ok: false as const, error: "seat_already_occupied" as const, status: 409 };
+          } else if (allocation.status !== "waiting" || allocation.seats !== 1) {
+            return { ok: false as const, error: "not_available" as const, status: 409 };
+          }
+
+          // Claim the invite record and establish credentials
+          const claimed = await claimSeatInvite(storage, this.env.OTT_INTERNAL_SECRET, {
+            inviteToken,
+            playerName,
+            claimId,
+            resumeCredential,
+            now,
+          });
+          if (!claimed.ok) {
+            return { ok: false as const, error: claimed.error, status: claimed.error === "seat_already_occupied" ? 409 : 400 };
+          }
+
+          // Reserve Seat B on allocation during pending Phase 1
+          allocation.pendingSeatBInvite = inviteToken;
+          await storage.put(`allocation:${allocation.id}`, allocation);
+
+          return {
+            ok: true as const,
+            claimed,
+            seatUpdateNeeded: { roomId: allocation.roomId, allocationId: allocation.id },
+          };
+        }
+      });
+
+      if (!claimTx.ok) {
+        return json({ error: claimTx.error }, claimTx.status);
+      }
+
+      if (claimTx.seatUpdateNeeded) {
+        const game = this.env.Main?.get(this.env.Main.idFromName(claimTx.seatUpdateNeeded.roomId));
+        if (!game || !this.env.OTT_INTERNAL_SECRET) {
+          return json({ error: "authority_unavailable", message: "Game server authority unavailable" }, 503);
+        }
+
+        let updateOk = false;
+        try {
+          const seatUpdate = await issueCapability(this.env.OTT_INTERNAL_SECRET, {
+            allocationId: claimTx.seatUpdateNeeded.allocationId,
+            roomId: claimTx.seatUpdateNeeded.roomId,
+            purpose: "seat-update",
+            seat: "B",
+          });
+          const response = await game.fetch(internalRequest(this.env.OTT_INTERNAL_SECRET, "/internal/seat-update", {
+            allocationId: claimTx.seatUpdateNeeded.allocationId,
+            roomId: claimTx.seatUpdateNeeded.roomId,
+            name: playerName,
+            capability: seatUpdate,
+          }));
+          updateOk = response.ok;
+        } catch {
+          updateOk = false;
+        }
+
+        if (!updateOk) {
+          return json({ error: "authority_unavailable", message: "Failed to update seat on game server" }, 503);
+        }
+
+        // Finalize confirmed claim and update allocation in storage
+        await this.transaction(async (storage) => {
+          await confirmSeatInvite(storage, inviteToken);
+          const allocation = await storage.get<Allocation>(`allocation:${claimTx.seatUpdateNeeded!.allocationId}`);
+          if (allocation) {
+            allocation.names.B = playerName;
+            allocation.seats = 2;
+            if (allocation.status === "waiting" || allocation.status === "joining") {
+              allocation.status = "playing";
+            }
+            delete allocation.pendingSeatBInvite;
+            await storage.put(`allocation:${allocation.id}`, allocation);
+          }
+        });
+      }
+
+      return json({
+        allocationId: claimTx.claimed.allocationId,
+        room: claimTx.claimed.roomId,
+        seat: claimTx.claimed.seat,
+        ticket: claimTx.claimed.ticket,
+        resumeCredential: claimTx.claimed.resumeCredential,
+      });
+    }
+
+    let targetAllocationId = id;
+    const maybeAliasForJoin = normalizeAlias(id);
+    if (maybeAliasForJoin) {
+      const aliasRecord = await this.ctx.storage.get<{ allocationId: string }>(`alias:${maybeAliasForJoin}`);
+      if (aliasRecord) targetAllocationId = aliasRecord.allocationId;
+    }
+    const allocation = await this.ctx.storage.get<Allocation>(`allocation:${targetAllocationId}`);
     if (!allocation) return json({ error: "not_found" }, 404);
     if (action === "join") {
-      if (allocation.status !== "waiting" || allocation.seats !== 1 || !name) return json({ error: "not_available" }, 409);
+      if (allocation.status !== "waiting" || allocation.seats !== 1 || allocation.tournamentMatch || !name) return json({ error: "not_available" }, 409);
+      if (allocation.pendingSeatBInvite) return json({ error: "not_available" }, 409);
       const reserved = await this.transaction(async (storage) => {
-        const current = await storage.get<Allocation>(`allocation:${id}`);
-        if (!current || current.status !== "waiting" || current.seats !== 1) return null;
+        const current = await storage.get<Allocation>(`allocation:${targetAllocationId}`);
+        if (!current || current.status !== "waiting" || current.seats !== 1 || current.tournamentMatch) return null;
+        if (current.pendingSeatBInvite) return null;
+        const existingCred = await storage.get(`owner-credential:${targetAllocationId}:B`);
+        if (existingCred) return null;
         const owner = await createOwnerCredential();
         const ticketNonce = createCapabilityNonce();
         const issuedAt = Date.now();
         const ticket = await issueCapability(this.env.OTT_INTERNAL_SECRET, {
-          allocationId: id, roomId: current.roomId, purpose: "attach", seat: "B", now: issuedAt, nonce: ticketNonce,
+          allocationId: targetAllocationId, roomId: current.roomId, purpose: "attach", seat: "B", now: issuedAt, nonce: ticketNonce,
         });
         const seatUpdate = await issueCapability(this.env.OTT_INTERNAL_SECRET, {
-          allocationId: id, roomId: current.roomId, purpose: "seat-update", seat: "B", now: issuedAt,
+          allocationId: targetAllocationId, roomId: current.roomId, purpose: "seat-update", seat: "B", now: issuedAt,
         });
         current.status = "joining";
-        await storage.put(`allocation:${id}`, current);
-        await storage.put(`owner-credential:${id}:B`, { salt: owner.salt, hash: owner.hash });
-        await storage.put(`owner-ticket:${id}:B`, { nonce: ticketNonce, expiresAt: issuedAt + 60_000 });
+        await storage.put(`allocation:${targetAllocationId}`, current);
+        await storage.put(`owner-credential:${targetAllocationId}:B`, { salt: owner.salt, hash: owner.hash });
+        await storage.put(`owner-ticket:${targetAllocationId}:B`, { nonce: ticketNonce, expiresAt: issuedAt + 60_000 });
         return { allocation: current, owner, ticket, seatUpdate };
       });
       if (!reserved) return json({ error: "not_available" }, 409);
@@ -575,13 +928,13 @@ export class OttLobbyServer extends DurableObject<Env> {
       try {
         response = await retrySeatUpdateRequest(async (attempt) => {
           const capability = attempt === 0 ? reserved.seatUpdate : await issueCapability(this.env.OTT_INTERNAL_SECRET, {
-            allocationId: id,
+            allocationId: targetAllocationId,
             roomId: reserved.allocation.roomId,
             purpose: "seat-update",
             seat: "B",
           });
           return game.fetch(internalRequest(this.env.OTT_INTERNAL_SECRET, "/internal/seat-update", {
-            allocationId: id,
+            allocationId: targetAllocationId,
             roomId: reserved.allocation.roomId,
             name,
             capability,
@@ -591,21 +944,21 @@ export class OttLobbyServer extends DurableObject<Env> {
         response = null;
       }
       if (!response?.ok) {
-        await this.rollbackJoinReservation(id);
+        await this.rollbackJoinReservation(targetAllocationId);
         return json({ error: "authority_unavailable" }, 503);
       }
       const finalized = await withJoinReservationRollback(async () => this.transaction(async (storage) => {
-        const current = await storage.get<Allocation>(`allocation:${id}`);
+        const current = await storage.get<Allocation>(`allocation:${targetAllocationId}`);
         if (!current || current.status !== "joining" || current.seats !== 1) throw new Error("Join reservation changed before finalization");
         current.names.B = name;
         current.seats = 2;
         current.status = "playing";
-        await storage.put(`allocation:${id}`, current);
+        await storage.put(`allocation:${targetAllocationId}`, current);
         return current;
-      }), () => this.rollbackJoinReservation(id));
+      }), () => this.rollbackJoinReservation(targetAllocationId));
       if (!finalized.ok) return json({ error: "authority_unavailable" }, 503);
       const joined = finalized.value;
-      return json({ allocationId: id, room: joined.roomId, seat: "B", ticket: reserved.ticket, resumeCredential: reserved.owner.credential });
+      return json({ allocationId: targetAllocationId, room: joined.roomId, seat: "B", ticket: reserved.ticket, resumeCredential: reserved.owner.credential });
     }
     return json({ error: "invalid_request" }, 400);
   }
@@ -628,10 +981,10 @@ export class OttLobbyServer extends DurableObject<Env> {
         typeof body.allocationId !== "string" || typeof body.roomId !== "string" ||
         !version || typeof version !== "object" || Array.isArray(version) ||
         Object.keys(version).sort().join(",") !== "roomRevision,summarySequence" ||
-        !Number.isSafeInteger((version as Record<string, unknown>).roomRevision) ||
-        !Number.isSafeInteger((version as Record<string, unknown>).summarySequence) ||
-        (version as Record<string, unknown>).roomRevision < 0 ||
-        (version as Record<string, unknown>).summarySequence < 0 || !summary.ok ||
+        !Number.isSafeInteger((version as Record<string, number>).roomRevision) ||
+        !Number.isSafeInteger((version as Record<string, number>).summarySequence) ||
+        (version as Record<string, number>).roomRevision < 0 ||
+        (version as Record<string, number>).summarySequence < 0 || !summary.ok ||
         summary.value.allocationId !== body.allocationId || summary.value.roomId !== body.roomId) {
       return new Response("Bad request", { status: 400 });
     }
@@ -684,11 +1037,11 @@ export class OttLobbyServer extends DurableObject<Env> {
     }
     const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);
     if (text === null) return new Response("Bad request", { status: 400 });
-    let body: { allocationId?: string; roomId?: string; reason?: string };
+    let body: { allocationId?: string; roomId?: string; reason?: string; winner?: string | null };
     try {
       const parsed: unknown = JSON.parse(text);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Response("Bad request", { status: 400 });
-      body = parsed as { allocationId?: string; roomId?: string; reason?: string };
+      body = parsed as { allocationId?: string; roomId?: string; reason?: string; winner?: string | null };
     } catch { return new Response("Bad request", { status: 400 }); }
     if (typeof body.allocationId !== "string" || typeof body.roomId !== "string" ||
         !["creator_attach_timeout", "disconnect_timeout", "timeout", "leave", "goal", "elimination", "no_moves"].includes(body.reason ?? "")) {
@@ -698,12 +1051,32 @@ export class OttLobbyServer extends DurableObject<Env> {
       const key = `allocation:${body.allocationId}`;
       const allocation = await storage.get<Allocation>(key);
       if (!allocation || allocation.roomId !== body.roomId) return "not_found";
+      await storage.put(`terminal-outcome:${body.allocationId}`, {
+        allocationId: body.allocationId,
+        roomId: body.roomId,
+        reason: body.reason,
+        winner: body.winner ?? null,
+        completedAt: Date.now(),
+      });
       if (allocation.status === "terminal") return "already_terminal";
       allocation.status = "terminal";
       delete allocation.summary;
       delete allocation.summaryVersion;
       await storage.put(key, allocation);
+      const storedAlias = await storage.get<string>(`allocation-alias:${body.allocationId}`);
+      if (storedAlias) {
+        await storage.delete(`alias:${storedAlias}`);
+        await storage.delete(`allocation-alias:${body.allocationId}`);
+      }
       await deleteOwnerCredentials(storage, body.allocationId!);
+      if (storage.list && storage.delete) {
+        const invites = await storage.list<{ allocationId?: string }>({ prefix: "seat-invite:" });
+        for (const [inviteKey, inv] of invites) {
+          if (inv && inv.allocationId === body.allocationId) {
+            await storage.delete(inviteKey);
+          }
+        }
+      }
       const catalogRevision = ((await storage.get<number>("public-catalog-revision")) ?? 0) + 1;
       await storage.put("public-catalog-revision", catalogRevision);
       if (this.env.OTT_SPECTATOR_ENABLED === "true") {

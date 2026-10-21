@@ -150,12 +150,13 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
 
 function connection(id) {
   let attachment = null;
-  return {
+  const value = {
     id,
     serializeAttachment(value) { attachment = value; },
     deserializeAttachment() { return attachment; },
-    close() {},
+    close() { value.closeCalled = true; },
   };
+  return value;
 }
 
 function deferred() {
@@ -1218,6 +1219,44 @@ test("real adapter B attach rollback restores a live A and permits a later B att
   assert.equal(adapter.room.players.A.connection, playerA);
   assert.equal(adapter.room.players.B.connection, playerB);
   assert.deepEqual(adapter.connectionsSnapshot(), [playerA, playerB]);
+});
+
+test("same-seat reconnect supersedes a retained old connection before it can move or leave", async () => {
+  const { OttGameServer } = await gameModule();
+  const { DurableRoomAdapter } = await roomStorageModule();
+  const { issueCapability } = await authModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.values.set("creatorName", "Alice");
+  const adapter = await DurableRoomAdapter.create("ott-room-task6", fixture.storage, () => 100, { reconnectGraceMs: 5_000 });
+  fixture.server.roomLoad = Promise.resolve(adapter);
+  const oldConnection = connection("retained-old");
+  const replacement = connection("reconnect-new");
+  const firstToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "retained-old-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(oldConnection, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: firstToken,
+  }));
+  assert.deepEqual(fixture.server.identities.get(oldConnection), { role: "player", seat: "A" });
+
+  const reconnectToken = await issueCapability("test-secret", {
+    allocationId: "allocation-task6", roomId: "ott-room-task6", purpose: "attach", seat: "A", nonce: "reconnect-new-attach-01",
+  });
+  await fixture.server.dispatchOttMessage(replacement, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: reconnectToken,
+  }));
+
+  assert.equal(fixture.server.closedConnections.has(oldConnection), true);
+  assert.equal(oldConnection.closeCalled, true);
+  assert.equal(adapter.room.players.A.connection, replacement);
+  assert.deepEqual(fixture.server.identities.get(replacement), { role: "player", seat: "A" });
+
+  fixture.server.lastOttPacketMs.delete(oldConnection);
+  await fixture.server.dispatchOttMessage(oldConnection, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:leave",
+  }));
+  assert.equal(adapter.room.players.A.connection, replacement);
+  assert.equal(adapter.room.players.A.connected, true);
 });
 
 test("room operations serialize move, leave, and alarm payload revisions", async () => {

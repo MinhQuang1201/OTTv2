@@ -141,6 +141,16 @@ export class AppLifecycleCoordinator {
     return this.enqueue(run);
   }
 
+  releaseCurrentSession(): Promise<void> {
+    this.cancelPendingSpectatorTransitions();
+    const generation = ++this.generation;
+    const run = async () => {
+      if (this.disposed || generation !== this.generation) return;
+      await this.releaseCurrent();
+    };
+    return this.enqueue(run);
+  }
+
   private enqueue(operation: () => Promise<void>): Promise<void> {
     const previous = this.queue;
     let next: Promise<void>;

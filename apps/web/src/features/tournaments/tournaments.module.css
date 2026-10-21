@@ -1,0 +1,141 @@
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--ui-space-4);
+  backdrop-filter: blur(2px);
+}
+
+.dialogContainer {
+  background: var(--ui-surface-1);
+  border: 2px solid var(--ui-glass-border-strong);
+  box-shadow: var(--ui-shadow-float);
+  width: min(100%, 720px);
+  max-height: min(90vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dialogHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--ui-space-3) var(--ui-space-4);
+  background: var(--ui-surface-2);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.dialogTitle {
+  font-family: var(--ui-font-pixel), sans-serif;
+  font-size: var(--ui-text-lg, 18px);
+  font-weight: 700;
+  margin: 0;
+  color: var(--ui-text);
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.tabBar {
+  display: flex;
+  border-bottom: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-0);
+}
+
+.tabButton {
+  flex: 1;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  background: none;
+  border: none;
+  border-right: 1px solid var(--ui-line);
+  font-family: var(--ui-font-body);
+  font-weight: 600;
+  font-size: var(--ui-text-sm, 14px);
+  color: var(--ui-text-muted);
+  cursor: pointer;
+}
+
+.tabButton:last-child {
+  border-right: none;
+}
+
+.tabActive {
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  border-bottom: 2px solid var(--ui-seat-b);
+}
+
+.dialogBody {
+  padding: var(--ui-space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.joinSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+}
+
+.helperText {
+  font-size: var(--ui-text-xs, 12px);
+  color: var(--ui-text-muted);
+  margin: 0;
+}
+
+.standingsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ui-text-sm, 13px);
+  font-family: var(--ui-font-mono, monospace);
+}
+
+.standingsTable th,
+.standingsTable td {
+  padding: var(--ui-space-1) var(--ui-space-2);
+  border: 1px solid var(--ui-line);
+  text-align: left;
+}
+
+.standingsTable th {
+  background: var(--ui-surface-2);
+  font-weight: 700;
+  color: var(--ui-text);
+}
+
+.matchList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.matchCard {
+  border: 1px solid var(--ui-line);
+  background: var(--ui-surface-0);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.matchVersus {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-weight: 600;
+}
+
+.tagAlias {
+  font-family: var(--ui-font-mono);
+  background: var(--ui-surface-2);
+  padding: 2px 6px;
+  border: 1px solid var(--ui-line);
+  font-size: 11px;
+}

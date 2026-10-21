@@ -37,12 +37,16 @@ class Room {
     this.state.clock.remainingMs = { A: this.initialClockMs, B: this.initialClockMs };
     this.status = "waiting";
     this.lastEvents = [];
-    this.revision = 0;
+    this.revision = Number.isInteger(deps.revision) ? deps.revision : 0;
+    this.structuralRevision = Number.isInteger(deps.structuralRevision)
+      ? deps.structuralRevision
+      : this.revision;
     this.nextEventId = 1;
     this.createdAt = this.now();
     this.clockAnchorMs = this.createdAt;
     this.clockTimer = null;
     this.reconnectTimers = new Map();
+    this.lastMove = null;
   }
 
   isEmpty() {
@@ -72,8 +76,11 @@ class Room {
     if (typeof this.onUpdate === "function") this.onUpdate(update);
   }
 
-  commitStateChange(events = null) {
+  commitStateChange(events = null, isStructural = true) {
     this.revision += 1;
+    if (isStructural) {
+      this.structuralRevision = this.revision;
+    }
     if (events && events.length) {
       this.lastEvents = events.map((event) => ({ ...event, id: this.nextEventId++ }));
       return this.lastEvents;
@@ -161,8 +168,9 @@ class Room {
     const result = rules.elapseClock(this.state, elapsed);
     this.state = result.state;
     this.clockAnchorMs = now;
-    if (this.state.winner) this.finishTerminal();
-    result.events = options.commit === false ? result.events : this.commitStateChange(result.events);
+    const isWin = Boolean(this.state.winner);
+    if (isWin) this.finishTerminal();
+    result.events = options.commit === false ? result.events : this.commitStateChange(result.events, isWin);
     return result;
   }
 
@@ -201,25 +209,76 @@ class Room {
     this.status = "done";
   }
 
-  handleMove(connection, from, to) {
+  handleMove(connection, from, to, expectedRevision) {
     const seat = this.seatOf(connection);
     if (!seat) return { ok: false, error: "Bạn không ở trong phòng này", state: null, events: [] };
+
+    // Dedupe before stale rejection: if exact duplicate of last applied move
+    if (
+      this.lastMove &&
+      this.lastMove.seat === seat &&
+      from && typeof from === "object" &&
+      to && typeof to === "object" &&
+      this.lastMove.from.x === from.x && this.lastMove.from.y === from.y &&
+      this.lastMove.to.x === to.x && this.lastMove.to.y === to.y &&
+      (expectedRevision === undefined ||
+        expectedRevision === this.lastMove.revisionBefore ||
+        expectedRevision === this.lastMove.expectedRevision ||
+        (Number.isInteger(expectedRevision) &&
+          expectedRevision >= this.lastMove.structuralRevisionBefore &&
+          expectedRevision <= this.lastMove.revisionBefore))
+    ) {
+      return { ok: true, duplicate: true, state: this.state, events: this.lastMove.events };
+    }
+
     if (this.status !== "playing") return { ok: false, error: "Ván chưa bắt đầu", state: null, events: [] };
+
+    // Stale-revision guard: accept expectedRevision only when integer and within current clock-only interval
+    if (expectedRevision !== undefined) {
+      const isInteger = Number.isInteger(expectedRevision) && expectedRevision >= 0;
+      const isWithinInterval = isInteger && expectedRevision >= this.structuralRevision && expectedRevision <= this.revision;
+      if (!isWithinInterval) {
+        return {
+          ok: false,
+          error: "stale_revision",
+          currentRevision: this.revision,
+          expectedRevision,
+          state: this.state,
+          events: []
+        };
+      }
+    }
+
     const settled = this.settleClock(this.now(), { commit: false });
     if (this.state.winner) {
-      if (settled.events.length) settled.events = this.commitStateChange(settled.events);
+      if (settled.events.length) settled.events = this.commitStateChange(settled.events, true);
       return { ok: false, error: "Ván đã kết thúc", state: this.state, events: settled.events };
     }
     const result = rules.applyMove(this.state, seat, from, to);
     if (!result.ok) {
-      if (settled.events.length) settled.events = this.commitStateChange(settled.events);
+      if (settled.events.length) settled.events = this.commitStateChange(settled.events, false);
       return result;
     }
+    const revisionBefore = this.revision;
+    const structuralRevisionBefore = this.structuralRevision;
     this.state = result.state;
     this.clockAnchorMs = this.now();
     if (this.state.winner) this.finishTerminal();
-    else this.scheduleClockDeadline();
-    result.events = this.commitStateChange([...(settled.events || []), ...(result.events || [])]);
+    else if (!this.players[this.state.turn]?.connected) {
+      this.state.clock.runningSeat = null;
+      this.cancelClockDeadline();
+    } else this.scheduleClockDeadline();
+    result.events = this.commitStateChange([...(settled.events || []), ...(result.events || [])], true);
+    this.lastMove = {
+      seat,
+      from: { x: from.x, y: from.y },
+      to: { x: to.x, y: to.y },
+      revisionBefore,
+      revisionAfter: this.revision,
+      structuralRevisionBefore,
+      expectedRevision,
+      events: result.events
+    };
     return result;
   }
 
@@ -251,7 +310,7 @@ class Room {
       this.reconnectTimers.delete(seat);
       const result = this.expireReconnect(this.now(), seat);
       if (result && result.events.length) this.notify({ type: "reconnect", result, terminal: Boolean(this.state.winner) });
-    }, config.TIME_CONTROL.reconnectGraceMs);
+    }, this.reconnectGraceMs);
     this.reconnectTimers.set(seat, timer);
     return { seat, name: player.name, reason: "disconnect", resumeToken: player.resumeToken };
   }

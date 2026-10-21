@@ -1,0 +1,170 @@
+.livePanel {
+  background: var(--surface-primary, #13131c);
+  border: 1px solid var(--border-color, #2e2e3e);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color, #2e2e3e);
+}
+
+.titleArea {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary, #fff);
+}
+
+.pulseIndicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.contentGrid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 300px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.boardColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sidebarColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.scrubBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.scrubSlider {
+  flex: 1;
+  cursor: pointer;
+}
+
+.terminalBanner {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.resetBanner {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: #fcd34d;
+}
+
+.infoCard {
+  background: var(--surface-tertiary, #1a1a26);
+  border: 1px solid var(--border-color, #2e2e3e);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.infoCard h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #aaa);
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+}
+
+.clockRow {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #111118;
+  border-radius: 4px;
+}
+
+.clockSeat {
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.clockTime {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.activeClock {
+  color: #10b981;
+}
+
+.frameComment {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--text-muted, #888);
+  margin-top: 0.35rem;
+  word-break: break-all;
+}

@@ -21,6 +21,7 @@ function serializeRoom(room) {
     lastEvents: clone(room.lastEvents || []),
     terminalBroadcasted: Boolean(room._terminalBroadcasted),
     revision: room.revision,
+    structuralRevision: Number.isInteger(room.structuralRevision) ? room.structuralRevision : room.revision,
     nextEventId: room.nextEventId,
     players: { A: playerData(room.players.A), B: playerData(room.players.B) }
   };
@@ -51,6 +52,7 @@ function hydrateRoom(saved, id, deps = {}) {
   room.lastEvents = clone(saved.lastEvents || []);
   room._terminalBroadcasted = Boolean(saved.terminalBroadcasted);
   room.revision = saved.revision;
+  room.structuralRevision = Number.isInteger(saved.structuralRevision) ? saved.structuralRevision : saved.revision;
   room.nextEventId = saved.nextEventId;
   for (const seat of ["A", "B"]) {
     const player = saved.players[seat];
@@ -64,6 +66,7 @@ function validatePersistedRoom(saved) {
   if (typeof saved.id !== "string" || !["waiting", "playing", "done"].includes(saved.status)) invalid();
   if (!finiteNonNegative(saved.createdAt) || !finiteNonNegative(saved.clockAnchorMs)) invalid();
   if (!Number.isInteger(saved.revision) || saved.revision < 0) invalid();
+  if (saved.structuralRevision !== undefined && (!Number.isInteger(saved.structuralRevision) || saved.structuralRevision < 0 || saved.structuralRevision > saved.revision)) invalid();
   if (!Number.isInteger(saved.nextEventId) || saved.nextEventId < 1) invalid();
   if (typeof saved.terminalBroadcasted !== "boolean") invalid();
   validateState(saved.state, saved.status, saved.players);

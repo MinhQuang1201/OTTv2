@@ -5,6 +5,11 @@ import { App } from "./app/App";
 import "./shared/theme/reset.css";
 import "./shared/theme/tokens.css";
 import "./shared/theme/global.css";
+import { applyTheme, initialTheme } from "./shared/theme/theme";
+
+if (typeof window !== "undefined") {
+  applyTheme(initialTheme());
+}
 
 const rootElement = document.getElementById("root");
 

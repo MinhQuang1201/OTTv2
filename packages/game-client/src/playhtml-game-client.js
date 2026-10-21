@@ -445,7 +445,11 @@
         this.emit("error", { message: "Tọa độ không hợp lệ" });
         return false;
       }
-      return this.send("move", { from, to });
+      return this.send("move", {
+        from,
+        to,
+        ...(Number.isInteger(this.stateRevision) && this.stateRevision >= 0 ? { expectedRevision: this.stateRevision } : {})
+      });
     }
     leave() {
       this.intentionalClose = true;

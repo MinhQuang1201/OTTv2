@@ -14,10 +14,13 @@ function spawnLocalCommand(command, args, options, spawnProcess) {
   if (process.platform !== "win32") return spawnProcess(command, args, options);
   const quote = (value) => {
     const text = String(value);
-    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
+    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   };
-  const commandLine = [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ");
-  return spawnProcess(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], options);
+  const commandLine = [command, ...args].map((value) => quote(value)).join(" ");
+  return spawnProcess(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${commandLine}"`], {
+    ...options,
+    windowsVerbatimArguments: true,
+  });
 }
 
 function buildWranglerArgs(port, extraArgs = [], host = readWorkerHost()) {
@@ -70,4 +73,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildWranglerArgs, main };
+module.exports = { buildWranglerArgs, main, spawnLocalCommand };

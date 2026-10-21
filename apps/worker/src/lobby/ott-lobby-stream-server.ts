@@ -44,7 +44,7 @@ async function readCappedUtf8Body(request: Request, maxBytes: number): Promise<s
   }
   const reader = request.body?.getReader();
   if (!reader) return "";
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
   let totalBytes = 0;
   let text = "";
   try {

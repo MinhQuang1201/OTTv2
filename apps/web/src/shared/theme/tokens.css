@@ -1,39 +1,41 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  /* Arena Canvas & Liquid Glass Surfaces */
-  --ui-canvas: #050811;
-  --ui-surface-0: #0a0e18;
-  --ui-surface-1: rgba(15, 23, 42, 0.72);
-  --ui-surface-2: rgba(22, 33, 56, 0.65);
-  --ui-surface-raised: rgba(30, 44, 72, 0.75);
+  /* Paper / Ink surfaces (Light default) */
+  --ui-canvas: #f8f6ee;
+  --ui-surface-0: #f0ede1;
+  --ui-surface-1: #fffdf8;
+  --ui-surface-2: #e9e5d6;
+  --ui-surface-raised: #ffffff;
 
-  --ui-glass-border: rgba(223, 242, 255, 0.12);
-  --ui-glass-border-strong: rgba(0, 240, 255, 0.35);
-  --ui-line: rgba(255, 255, 255, 0.1);
-  --ui-line-strong: rgba(255, 255, 255, 0.2);
+  /* Sharp retro ink borders */
+  --ui-glass-border: #a5ad96;
+  --ui-glass-border-strong: #19201b;
+  --ui-line: #cbd2c0;
+  --ui-line-strong: #19201b;
 
-  --ui-text: #f8fafc;
-  --ui-text-muted: #94a3b8;
-  --ui-text-subtle: #64748b;
+  /* Text & Ink hierarchy */
+  --ui-text: #19201b;
+  --ui-text-muted: #57634e;
+  --ui-text-subtle: #798770;
 
-  /* Neon Seat & Tactical Accents */
-  --ui-seat-a: #ff007a;
-  --ui-seat-a-strong: #ff4b89;
-  --ui-seat-b: #00f0ff;
-  --ui-seat-b-strong: #00dbe9;
-  --ui-amber: #ffba20;
-  --ui-purple: #8a2be2;
-  --ui-danger: #ff4b89;
-  --ui-legal: #00f0ff;
-  --ui-selection: #ff007a;
-  --ui-focus: #00f0ff;
+  /* Seat & Tactical Accents (Preserving A Red / B Blue) */
+  --ui-seat-a: #c83232;
+  --ui-seat-a-strong: #9e1f1f;
+  --ui-seat-b: #2364aa;
+  --ui-seat-b-strong: #16487e;
+  --ui-amber: #b45309;
+  --ui-purple: #6d28d9;
+  --ui-danger: #c83232;
+  --ui-legal: #15803d;
+  --ui-selection: #c83232;
+  --ui-focus: #2563eb;
 
   /* Board specifics */
-  --ui-board-light: #1a233a;
-  --ui-board-dark: #131b2c;
-  --ui-goal-a: color-mix(in srgb, var(--ui-seat-a) 24%, var(--ui-surface-0));
-  --ui-goal-b: color-mix(in srgb, var(--ui-seat-b) 24%, var(--ui-surface-0));
+  --ui-board-light: #fffdf8;
+  --ui-board-dark: #e8e3d3;
+  --ui-goal-a: color-mix(in srgb, var(--ui-seat-a) 24%, var(--ui-surface-1));
+  --ui-goal-b: color-mix(in srgb, var(--ui-seat-b) 24%, var(--ui-surface-1));
 
   /* 4px rhythm */
   --ui-space-1: 4px;
@@ -46,20 +48,23 @@
   --ui-space-10: 40px;
   --ui-space-12: 48px;
 
-  --ui-radius-cell: 6px;
-  --ui-radius-control: 10px;
-  --ui-radius-panel: 16px;
-  --ui-radius-pill: 9999px;
+  /* Sharp pixel radii */
+  --ui-radius-cell: 0px;
+  --ui-radius-control: 0px;
+  --ui-radius-panel: 0px;
+  --ui-radius-pill: 0px;
 
-  /* Photonic Glows and Liquid Glass Shadows */
-  --ui-shadow-panel: 0 16px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --ui-shadow-float: 0 24px 64px rgba(0, 0, 0, 0.75), 0 0 40px rgba(0, 240, 255, 0.12);
-  --ui-glow-cyan: 0 0 20px rgba(0, 240, 255, 0.45);
-  --ui-glow-pink: 0 0 20px rgba(255, 0, 122, 0.45);
+  /* Sharp pixel drop shadows */
+  --ui-shadow-panel: 4px 4px 0px var(--ui-glass-border-strong);
+  --ui-shadow-float: 6px 6px 0px var(--ui-glass-border-strong);
+  --ui-glow-cyan: 0 0 0 2px var(--ui-seat-b);
+  --ui-glow-pink: 0 0 0 2px var(--ui-seat-a);
 
-  --ui-font-display: "Space Grotesk", "Segoe UI", sans-serif;
-  --ui-font-body: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-  --ui-font-mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+  /* Typography: Readable Vietnamese-capable sans for body to avoid mixed-font words; Pixeloid for ASCII branding/numerals/icons */
+  --ui-font-display: "Space Grotesk", "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  --ui-font-body: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --ui-font-mono: "PixelMono", "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+  --ui-font-pixel: "Pixeloid", monospace;
 
   --ui-text-xs: 0.75rem;
   --ui-text-sm: 0.875rem;
@@ -81,4 +86,59 @@
   --ui-z-hud: 2;
   --ui-z-toast: 20;
   --ui-z-dialog: 30;
+
+  /* Pixel artwork palette helpers */
+  --pixel-stroke: #19201b;
+  --pixel-highlight: #fffdf8;
+  --pixel-wood: #8d5b32;
+  --pixel-gold: #ffd33d;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Dark Slate / Ink Surfaces */
+  --ui-canvas: #151a17;
+  --ui-surface-0: #191e1b;
+  --ui-surface-1: #222924;
+  --ui-surface-2: #28312b;
+  --ui-surface-raised: #2d3830;
+
+  /* Sharp Dark Ink Borders */
+  --ui-glass-border: #445140;
+  --ui-glass-border-strong: #7d8a70;
+  --ui-line: #374233;
+  --ui-line-strong: #8a997d;
+
+  /* Typography Colors */
+  --ui-text: #f2f2e5;
+  --ui-text-muted: #b4bfaa;
+  --ui-text-subtle: #7e8a75;
+
+  /* Seat & Tactical Accents (Dark Mode) */
+  --ui-seat-a: #e05353;
+  --ui-seat-a-strong: #ff6e6e;
+  --ui-seat-b: #4aa3ff;
+  --ui-seat-b-strong: #7cc2ff;
+  --ui-amber: #f59e0b;
+  --ui-purple: #a78bfa;
+  --ui-danger: #f87171;
+  --ui-legal: #4ade80;
+  --ui-selection: #e05353;
+  --ui-focus: #60a5fa;
+
+  /* Board specifics */
+  --ui-board-light: #28312b;
+  --ui-board-dark: #1e2520;
+  --ui-goal-a: color-mix(in srgb, var(--ui-seat-a) 25%, var(--ui-surface-1));
+  --ui-goal-b: color-mix(in srgb, var(--ui-seat-b) 25%, var(--ui-surface-1));
+
+  /* Shadows */
+  --ui-shadow-panel: 4px 4px 0px #090c0a;
+  --ui-shadow-float: 6px 6px 0px #090c0a;
+  --ui-glow-cyan: 0 0 0 2px var(--ui-seat-b);
+  --ui-glow-pink: 0 0 0 2px var(--ui-seat-a);
+
+  --pixel-stroke: #090c0a;
+  --pixel-highlight: #f2f2e5;
 }

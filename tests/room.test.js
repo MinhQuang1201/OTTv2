@@ -347,4 +347,166 @@ describe("room", () => {
     const joined = room.addPlayer(fakeConnection(), "  <b>Lan</b>  ");
     assert.equal(joined.name, "Lan");
   });
+
+  it("safely rejects null or invalid coordinates without crashing on dedupe check", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    const firstMove = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"));
+    assert.equal(firstMove.ok, true);
+    assert.ok(room.lastMove);
+
+    // Call from same seat 'a' with null/undefined to trigger dedupe property access
+    assert.doesNotThrow(() => {
+      const nullFromResult = room.handleMove(a, null, rules.parseSquare("d2"));
+      assert.equal(nullFromResult.ok, false);
+    });
+
+    assert.doesNotThrow(() => {
+      const nullToResult = room.handleMove(a, rules.parseSquare("d1"), null);
+      assert.equal(nullToResult.ok, false);
+    });
+
+    assert.doesNotThrow(() => {
+      const undefFromResult = room.handleMove(a, undefined, rules.parseSquare("d2"));
+      assert.equal(undefFromResult.ok, false);
+    });
+
+    assert.doesNotThrow(() => {
+      const primitiveResult = room.handleMove(a, 42, "invalid");
+      assert.equal(primitiveResult.ok, false);
+    });
+  });
+
+  it("uses injected reconnectGraceMs when scheduling reconnect expiry timer", () => {
+    const clock = fakeClock(0);
+    const customGraceMs = 15000;
+    const room = new Room("TEST_GRACE", {
+      now: clock.now,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      reconnectGraceMs: customGraceMs
+    });
+    const a = fakeConnection();
+    const b = fakeConnection();
+    room.addPlayer(a, "An");
+    room.addPlayer(b, "Bình");
+
+    room.removePlayer(b);
+    assert.equal(room.players.B.reconnectDeadlineMs, customGraceMs);
+
+    clock.advance(customGraceMs);
+    assert.equal(room.status, "done");
+    assert.equal(room.state.winner, "A");
+    assert.equal(room.state.reason, "disconnect_timeout");
+  });
+
+  it("accepts moves during clock-only revision intervals but rejects moves predating structural transitions, future revisions, or malformed revisions", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    assert.equal(room.revision, 2);
+    assert.equal(room.structuralRevision, 2);
+
+    // 1. Clock-only read advances revision but not structural revision
+    clock.advance(500);
+    const readPayload = room.payload();
+    assert.equal(readPayload.revision, 3);
+    assert.equal(room.revision, 3);
+    assert.equal(room.structuralRevision, 2);
+
+    // Future revision is rejected
+    const futureMove = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), 99);
+    assert.equal(futureMove.ok, false);
+    assert.equal(futureMove.error, "stale_revision");
+
+    // Malformed revisions are rejected
+    const negativeMove = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), -1);
+    assert.equal(negativeMove.ok, false);
+    assert.equal(negativeMove.error, "stale_revision");
+
+    const fractionalMove = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), 2.5);
+    assert.equal(fractionalMove.ok, false);
+    assert.equal(fractionalMove.error, "stale_revision");
+
+    // Valid move with expectedRevision within clock-only interval [2..3] is ACCEPTED
+    const moveResult = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), 2);
+    assert.equal(moveResult.ok, true);
+    // Structural revision advanced on move to current revision
+    assert.equal(room.revision, 4);
+    assert.equal(room.structuralRevision, 4);
+
+    // 2. Intervening move: move with expectedRevision predating move is rejected
+    const staleMoveresult = room.handleMove(b, rules.parseSquare("e2"), rules.parseSquare("e3"), 2);
+    assert.equal(staleMoveresult.ok, false);
+    assert.equal(staleMoveresult.error, "stale_revision");
+    assert.equal(staleMoveresult.currentRevision, 4);
+  });
+
+  it("rejects moves predating seat disconnect/reconnect transitions even within same turn", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    assert.equal(room.revision, 2);
+    assert.equal(room.structuralRevision, 2);
+
+    // Seat disconnect structural transition
+    room.removePlayer(b);
+    assert.equal(room.revision, 3);
+    assert.equal(room.structuralRevision, 3);
+
+    // Move from A with expectedRevision 2 (predating seat disconnect) is rejected
+    const result = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), 2);
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "stale_revision");
+
+    // Move from A with expectedRevision 3 (matching post-disconnect structural revision) is accepted
+    const validResult = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"), 3);
+    assert.equal(validResult.ok, true);
+  });
+
+  it("defaults cold restore without structuralRevision fail-closed to current revision", () => {
+    const clock = fakeClock(0);
+    // Cold restore where structuralRevision is absent in persisted snapshot
+    const room = new Room("TEST_COLD", {
+      now: clock.now,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      revision: 5
+      // structuralRevision omitted
+    });
+    assert.equal(room.revision, 5);
+    assert.equal(room.structuralRevision, 5, "defaults fail-closed to current revision");
+
+    // Add players and check structural advance
+    const a = fakeConnection();
+    const b = fakeConnection();
+    room.addPlayer(a, "An");
+    room.addPlayer(b, "Bình");
+    assert.equal(room.revision, 7);
+    assert.equal(room.structuralRevision, 7);
+  });
+
+  it("enforces disconnected seat clock invariant when opponent moves during reconnect grace", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    const tokenB = room.players.B.resumeToken;
+    room.removePlayer(b);
+    assert.equal(room.players.B.connected, false);
+    assert.equal(room.state.clock.runningSeat, "A");
+
+    const moveResult = room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7"));
+    assert.equal(moveResult.ok, true);
+    assert.equal(room.state.turn, "B");
+    // Under Rule 14.2: disconnected player's clock must stop
+    assert.equal(room.state.clock.runningSeat, null);
+
+    // Advancing time does not elapse B's clock
+    const remainingBBefore = room.state.clock.remainingMs.B;
+    clock.advance(5000);
+    assert.equal(room.state.clock.remainingMs.B, remainingBBefore);
+
+    // When B resumes, their clock is restored to running
+    const resumeConn = fakeConnection();
+    const resumeResult = room.resumePlayer(resumeConn, tokenB);
+    assert.equal(resumeResult.ok, true);
+    assert.equal(room.state.clock.runningSeat, "B");
+  });
 });

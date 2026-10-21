@@ -5,10 +5,35 @@ export const MAX_PUBLIC_MATCH_SPECTATOR_COUNT = 100_000;
 export const MAX_PUBLIC_MATCH_CLOCK_MS = 10 * 60 * 1000;
 export const MAX_PUBLIC_MATCHES = 100;
 
+export const ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+export const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+export function generateRandomAlias(random: () => number = Math.random): string {
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += ALIAS_ALPHABET[Math.floor(random() * ALIAS_ALPHABET.length)];
+  }
+  return `${code.slice(0, 3)}-${code.slice(3)}`;
+}
+
+export function normalizeAlias(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const mapped = raw
+    .toUpperCase()
+    .replace(/[IL]/g, "1")
+    .replace(/O/g, "0");
+  const cleaned = mapped.replace(/[^0123456789ABCDEFGHJKMNPQRSTVWXYZ]/g, "");
+  if (cleaned.length !== 6) return null;
+  return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
+}
+
+const MOVE_COMMAND_KEYS_LEGACY = ["__ott", "roomId", "type", "from", "to"] as const;
+const MOVE_COMMAND_KEYS_WITH_REVISION = ["__ott", "roomId", "type", "from", "to", "expectedRevision"] as const;
+
 const COMMAND_KEYS = {
   "ott:attach": ["__ott", "roomId", "type", "ticket"],
   "ott:spectate": ["__ott", "roomId", "type", "ticket"],
-  "ott:move": ["__ott", "roomId", "type", "from", "to"],
+  "ott:move": MOVE_COMMAND_KEYS_LEGACY,
   "ott:leave": ["__ott", "roomId", "type"],
 } as const;
 
@@ -21,7 +46,7 @@ const RESPONSE_KEYS = {
 export type OttCommand =
   | { __ott: true; roomId: string; type: "ott:attach"; ticket: string }
   | { __ott: true; roomId: string; type: "ott:spectate"; ticket: string }
-  | { __ott: true; roomId: string; type: "ott:move"; from: Coordinate; to: Coordinate }
+  | { __ott: true; roomId: string; type: "ott:move"; from: Coordinate; to: Coordinate; expectedRevision?: number }
   | { __ott: true; roomId: string; type: "ott:leave" };
 
 export type Coordinate = { x: number; y: number };
@@ -191,13 +216,19 @@ export function parseOttMessage(value: string): ParseResult<OttCommand> {
   if (object.__ott !== true || typeof object.roomId !== "string" || object.roomId.length === 0 || typeof object.type !== "string") {
     return { ok: false, error: "invalid_envelope" };
   }
+  if (object.type === "ott:move") {
+    const validMoveKeys = hasExactKeys(object, MOVE_COMMAND_KEYS_LEGACY) || hasExactKeys(object, MOVE_COMMAND_KEYS_WITH_REVISION);
+    if (!validMoveKeys) return { ok: false, error: "unknown_command" };
+    if (!isCoordinate(object.from) || !isCoordinate(object.to)) return { ok: false, error: "invalid_command" };
+    if (object.expectedRevision !== undefined && (!Number.isSafeInteger(object.expectedRevision) || (object.expectedRevision as number) < 0)) {
+      return { ok: false, error: "invalid_command" };
+    }
+    return { ok: true, value: object as OttCommand };
+  }
   const keys = COMMAND_KEYS[object.type as keyof typeof COMMAND_KEYS];
   if (!keys || !hasExactKeys(object, keys)) return { ok: false, error: "unknown_command" };
   if ((object.type === "ott:attach" || object.type === "ott:spectate") &&
       typeof object.ticket === "string" && object.ticket.length > 0) {
-    return { ok: true, value: object as OttCommand };
-  }
-  if (object.type === "ott:move" && isCoordinate(object.from) && isCoordinate(object.to)) {
     return { ok: true, value: object as OttCommand };
   }
   if (object.type === "ott:leave") return { ok: true, value: object as OttCommand };

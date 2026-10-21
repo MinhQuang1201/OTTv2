@@ -5,7 +5,6 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname);
-const REAL_ROOT = fs.realpathSync(ROOT);
 const PUBLIC_ROOT = path.resolve(ROOT, "apps/web/dist");
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -15,7 +14,11 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".json": "application/json; charset=utf-8",
   ".md": "text/plain; charset=utf-8",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".otf": "font/otf"
 };
 const DENY = new Set([
   "server.js",
@@ -29,14 +32,22 @@ const DENY = new Set([
 ]);
 const PRIVATE_DIRS = new Set(["partykit", "workers"]);
 const PRIVATE_RELATIVE_PATHS = new Set([
-  "packages\\game-core\\src\\room.js"
+  "packages/game-core/src/room.js"
 ]);
-const PRIVATE_RELATIVE_PREFIXES = ["apps\\worker\\", "packages\\protocol\\"];
+const PRIVATE_RELATIVE_PREFIXES = ["apps/worker/", "packages/protocol/"];
+
+function getRealPublicRoot() {
+  try {
+    return fs.realpathSync(PUBLIC_ROOT);
+  } catch {
+    return PUBLIC_ROOT;
+  }
+}
 
 function isPrivatePath(filePath) {
   const rel = path.relative(ROOT, filePath);
-  const normalizedRel = rel.toLowerCase();
-  const firstSegment = rel.split(path.sep)[0].toLowerCase();
+  const normalizedRel = rel.replace(/\\/g, "/").toLowerCase();
+  const firstSegment = normalizedRel.split("/")[0];
   const base = path.basename(filePath).toLowerCase();
   return DENY.has(base) || PRIVATE_DIRS.has(firstSegment) || PRIVATE_RELATIVE_PATHS.has(normalizedRel) ||
     PRIVATE_RELATIVE_PREFIXES.some((prefix) => normalizedRel.startsWith(prefix)) ||
@@ -98,7 +109,8 @@ const server = http.createServer((req, res) => {
       res.end("Không tìm thấy");
       return;
     }
-    if (realPath !== REAL_ROOT && !realPath.startsWith(REAL_ROOT + path.sep)) {
+    const realPublic = getRealPublicRoot();
+    if (realPath !== realPublic && !realPath.startsWith(realPublic + path.sep)) {
       res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Không cho phép");
       return;
@@ -125,4 +137,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, publicPath };
+module.exports = { server, publicPath, isPrivatePath };

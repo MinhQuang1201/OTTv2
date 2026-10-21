@@ -12,7 +12,7 @@ export type StorageLike = {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
   list?<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
-  delete?(key: string): Promise<void>;
+  delete?(key: string): Promise<boolean | void>;
   setAlarm?(deadline: number): Promise<void>;
   deleteAlarm?(): Promise<void>;
 };
@@ -349,7 +349,13 @@ export class DurableRoomAdapter {
     } as CommittedRoomOutcome & { clock: unknown; waiting: unknown; reconnect: unknown };
   }
 
-  async attach(connection: RoomConnection, seat: "A" | "B", name: string | undefined, storage: StorageLike = this.storage): Promise<any> {
+  async attach(
+    connection: RoomConnection,
+    seat: "A" | "B",
+    name: string | undefined,
+    storage: StorageLike = this.storage,
+    isLiveConnection: (candidate: RoomConnection) => boolean = () => true,
+  ): Promise<any> {
     const trustedName = name ?? await storage.get<string>(seat === "A" ? "creatorName" : `seat-name:${seat}`);
     if (typeof trustedName !== "string" || !trustedName.trim()) return { ok: false, error: "seat_name_unavailable" };
     const snapshot = serializeRoom(this.room);
@@ -376,6 +382,15 @@ export class DurableRoomAdapter {
         await this.rollbackAttach(connection);
         return { ok: false, error: "Sai ghế được cấp quyền" };
       }
+    } else if (existing.connection && (
+      existing.connection.readyState === 3 ||
+      existing.connection.open === false ||
+      !isLiveConnection(existing.connection)
+    )) {
+      // A reconnect can attach before the old socket's close callback runs.
+      // Apply the normal disconnect transition, then resume the same seat.
+      this.room.disconnectPlayer(existing.connection);
+      result = (await this.mutate((room) => room.resumePlayer(connection, existing.resumeToken), storage, storage === this.storage)).result;
     } else {
       return { ok: false, error: "Ghế đã được sử dụng" };
     }
@@ -415,8 +430,8 @@ export class DurableRoomAdapter {
     this.unavailable = false;
   }
 
-  async move(connection: RoomConnection, from: unknown, to: unknown): Promise<any> {
-    return this.mutate((room) => room.handleMove(connection, from, to));
+  async move(connection: RoomConnection, from: unknown, to: unknown, expectedRevision?: number): Promise<any> {
+    return this.mutate((room) => room.handleMove(connection, from, to, expectedRevision));
   }
 
   async leave(connection: RoomConnection): Promise<any> {

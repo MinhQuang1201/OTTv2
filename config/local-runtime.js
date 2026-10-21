@@ -60,6 +60,23 @@ function wranglerLauncher() {
   };
 }
 
+// Spawn option so stopProcessTree can reach wrangler's workerd grandchildren on POSIX.
+const PROCESS_GROUP_SPAWN_OPTIONS = process.platform === "win32" ? {} : { detached: true };
+
+// npx -> wrangler -> workerd: signalling only the npx root leaves workerd holding the stdio pipes open.
+function stopProcessTree(child, { spawnProcess = require("node:child_process").spawn } = {}) {
+  if (process.platform === "win32") {
+    const killer = spawnProcess("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    return new Promise((resolve) => killer.once("exit", resolve));
+  }
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    child.kill("SIGTERM");
+  }
+  return Promise.resolve();
+}
+
 loadLocalEnv();
 
 module.exports = {
@@ -71,4 +88,6 @@ module.exports = {
   resolveWorkerPort,
   workerOrigin,
   wranglerLauncher,
+  PROCESS_GROUP_SPAWN_OPTIONS,
+  stopProcessTree,
 };

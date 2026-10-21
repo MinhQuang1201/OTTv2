@@ -1,5 +1,5 @@
 {
-  "$schema": "../../node_modules/playhtml/node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ottv2-minimal",
   "main": "src/entry/ott-worker.ts",
   "compatibility_date": "2024-09-23",
@@ -7,7 +7,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "OTT_BROWSER_ORIGIN": "https://ottv2-two.vercel.app",
+    "OTT_BROWSER_ORIGIN": "https://ottv2-psi.vercel.app",
     "OTT_SPECTATOR_ENABLED": "true"
   },
   "durable_objects": {
@@ -41,6 +41,22 @@
     }
   ],
   "env": {
+    "staging": {
+      "name": "ottv2-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "durable_objects": {
+        "bindings": [
+          { "name": "Main", "class_name": "OttGameServer" },
+          { "name": "OTT_LOBBY", "class_name": "OttLobbyServer" },
+          { "name": "Lobby", "class_name": "OttLobbyStreamServer" }
+        ]
+      },
+      "vars": {
+        "OTT_BROWSER_ORIGIN": "https://ottv2-staging.vercel.app",
+        "OTT_SPECTATOR_ENABLED": "true"
+      }
+    },
     "test": {
       "name": "ottv2-test",
       "durable_objects": {
@@ -70,6 +86,7 @@
         "OTT_TEST_CLOCK_MS": "600000",
         "OTT_TEST_RECONNECT_GRACE_MS": "300000",
         "OTT_TEST_CREATOR_ATTACH_TTL_MS": "600000",
+        "OTT_SPECTATOR_ENABLED": "true",
         "OTT_BROWSER_ORIGIN": "http://127.0.0.1:3000"
       }
     }

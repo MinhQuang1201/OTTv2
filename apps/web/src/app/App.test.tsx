@@ -10,6 +10,11 @@ import { DemoSession } from "../sessions/demo/DemoSession";
 import type { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import type { DemoScenario } from "../shared/model/game";
 import { AppLifecycleCoordinator } from "./AppLifecycleCoordinator";
+import userEvent from "@testing-library/user-event";
+import { ReplaySession } from "../sessions/replay/ReplaySession";
+import deterministicFixture from "../../../../tests/fixtures/arena/replays/deterministic-match.json";
+import forfeitFixture from "../../../../tests/fixtures/arena/replays/forfeit-ply0.json";
+import type { ReplayDocument } from "../../../../packages/arena/src/contracts/index.d.mts";
 
 describe("App shell lifecycle", () => {
   afterEach(() => {
@@ -1216,4 +1221,327 @@ describe("App shell lifecycle", () => {
     expect(started).toEqual(["started"]);
     await coordinator.dispose();
   });
+
+  describe("Replay routing and lifecycle", () => {
+    it("routes replay mode before phase checks and never renders live ResultDialog", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      // Verify initially on lobby
+      expect(screen.getByRole("button", { name: /Mở file Replay/i })).toBeInTheDocument();
+
+      // Upload deterministic match fixture
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const file = new File([JSON.stringify(deterministicFixture)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      // Successfully transitioned to ReplayScreen
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("replay-timeline-slider")).toBeInTheDocument();
+
+      // Board has 81 cells
+      expect(screen.getAllByRole("button", { name: /^Ô /i })).toHaveLength(81);
+
+      // Fast-forward cursor to terminal ply 19 so phase is 'finished'
+      replaySession.seek(19);
+
+      // Terminal ArenaResultSummary should appear, NOT live ResultDialog
+      await waitFor(() => {
+        expect(screen.getByRole("region", { name: /kết quả trận đấu/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("dialog", { name: /kết quả ván đấu/i })).not.toBeInTheDocument();
+
+      // Return to lobby and verify replaySession is disposed
+      const lobbyBtn = screen.getByTestId("replay-lobby-btn");
+      await user.click(lobbyBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Mở file Replay/i })).toBeInTheDocument();
+      });
+      expect(replayDisposeSpy).toHaveBeenCalled();
+    });
+
+    it("routes forfeit ply 0 replay directly to ReplayScreen without error screen", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const file = new File([JSON.stringify(forfeitFixture)], "forfeit.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      // Directly routes to ReplayScreen with forfeit summary
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+      const summary = await screen.findByRole("region", { name: /kết quả trận đấu/i });
+      expect(summary).toHaveTextContent(/xử thua|bỏ cuộc|thua/i);
+      expect(screen.queryByRole("dialog", { name: /kết quả ván đấu/i })).not.toBeInTheDocument();
+    });
+
+    it("does not acquire RuntimeBridge for replay mode transitions", async () => {
+      const runtime = {
+        bootstrap: vi.fn(),
+        connectionFactory: vi.fn(),
+        dispose: vi.fn(async () => undefined),
+      };
+      const replaySession = new ReplaySession();
+      const coordinator = new AppLifecycleCoordinator({
+        runtime: runtime as any,
+        gateway: {} as any,
+        createLobbyStream: () => { throw new Error("not used"); },
+      });
+
+      await coordinator.transition({
+        factory: () => replaySession,
+        options: { mode: "replay", document: deterministicFixture as unknown as ReplayDocument },
+        onSession: () => undefined,
+        onLobbyStream: () => undefined,
+      });
+
+      expect(runtime.bootstrap).not.toHaveBeenCalled();
+      expect(runtime.connectionFactory).not.toHaveBeenCalled();
+
+      await coordinator.dispose();
+    });
+
+    it("forks practice from replay frame into AI session and disposes replaySession cleanly", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const fixtureWithCurrentEngine = {
+        ...deterministicFixture,
+        engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      };
+      const file = new File([JSON.stringify(fixtureWithCurrentEngine)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+
+      // Seek to ply 5
+      replaySession.seek(5);
+
+      const forkAiBtn = await screen.findByTestId("replay-fork-ai-btn");
+      expect(forkAiBtn).toBeEnabled();
+
+      await user.click(forkAiBtn);
+
+      // Successfully transitioned away from replay to game screen
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /Xem lại trận đấu/i })).not.toBeInTheDocument();
+        expect(screen.getByTestId("game-screen")).toBeInTheDocument();
+      });
+
+      // Replay session was cleanly disposed
+      expect(replayDisposeSpy).toHaveBeenCalled();
+
+      // App state transitioned to playing
+      const appStateEl = screen.getByTestId("app-state");
+      expect(appStateEl).toHaveAttribute("data-state", "playing");
+
+      // Clocks reset to fresh 10:00 (600,000ms)
+      expect(screen.getAllByText("10:00").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("forks practice from replay frame into local session and disposes replaySession cleanly", async () => {
+      const user = userEvent.setup();
+      const replaySession = new ReplaySession();
+      const replayDisposeSpy = vi.spyOn(replaySession, "dispose");
+
+      render(
+        <App
+          initialScenario="lobby-default"
+          replaySessionFactory={() => replaySession}
+        />
+      );
+
+      const input = screen.getByTestId("lobby-replay-file-input") as HTMLInputElement;
+      const fixtureWithCurrentEngine = {
+        ...deterministicFixture,
+        engineRevision: "sha256:d9cec0298cf11aba83a986223446ad220ec2c390a2b4e63906b4218681a5d164",
+      };
+      const file = new File([JSON.stringify(fixtureWithCurrentEngine)], "replay.json", { type: "application/json" });
+      await user.upload(input, file);
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Xem lại trận đấu/i })).toBeInTheDocument();
+      });
+
+      replaySession.seek(5);
+
+      const forkLocalBtn = await screen.findByTestId("replay-fork-local-btn");
+      expect(forkLocalBtn).toBeEnabled();
+
+      await user.click(forkLocalBtn);
+
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /Xem lại trận đấu/i })).not.toBeInTheDocument();
+        expect(screen.getByTestId("game-screen")).toBeInTheDocument();
+      });
+
+      expect(replayDisposeSpy).toHaveBeenCalled();
+      const appStateEl = screen.getByTestId("app-state");
+      expect(appStateEl).toHaveAttribute("data-state", "playing");
+      expect(screen.getAllByText("10:00").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("Spectator and lobby stream capability gating", () => {
+    it("does not open a lobby stream socket and keeps spectator controls unavailable when spectator capability is off", async () => {
+      const user = userEvent.setup();
+      const bootstrap = vi.fn(async () => undefined);
+      const runtime = {
+        bootstrap,
+        connectionFactory: vi.fn(),
+        dispose: vi.fn(async () => undefined),
+      };
+      const createdSession = fakeSession();
+      createdSession.session.start = vi.fn(async () => undefined);
+      const onlineSessionFactory = vi.fn(() => createdSession.session);
+      const gateway = {
+        available: true,
+        listRooms: vi.fn(async () => ({
+          available: true,
+          rooms: [{ roomId: "room-abc", hostName: "HostPlayer", createdAt: Date.now() }],
+        })),
+        createRoom: vi.fn(async () => ({ roomId: "room-new" })),
+      } as unknown as OnlineLobbyGateway;
+
+      render(
+        <App
+          demoEnabled={false}
+          spectatorEnabled={false}
+          runtime={runtime}
+          onlineGateway={gateway}
+          onlineSessionFactory={onlineSessionFactory}
+        />
+      );
+
+      // Verify lobby rendered
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+      });
+
+      // Spectator stream must NOT have been opened
+      expect(bootstrap).not.toHaveBeenCalledWith(expect.objectContaining({ room: "ott-lobby-public" }));
+      expect(bootstrap).not.toHaveBeenCalled();
+
+      // Spectator list displays unavailable state, not live matches or watch buttons
+      expect(screen.getByText("Danh sách trận đang diễn ra hiện không khả dụng.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Xem trận/i })).not.toBeInTheDocument();
+
+      // Normal lobby room listing still works
+      await waitFor(() => {
+        expect(screen.getByText(/room-abc/i)).toBeInTheDocument();
+      });
+
+      // Normal room creation works
+      const nameInput = screen.getByRole("textbox", { name: "Tên của bạn" });
+      await user.clear(nameInput);
+      await user.type(nameInput, "Alice");
+      await user.click(screen.getByRole("button", { name: /Tạo phòng/i }));
+
+      await waitFor(() => {
+        expect(onlineSessionFactory).toHaveBeenCalledTimes(1);
+      });
+      expect(createdSession.session.start).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "online", intent: "create", playerName: "Alice" }),
+      );
+    });
+
+    it("opens lobby stream and binds stream when spectator capability is enabled", async () => {
+      const startSpy = vi.fn(async () => undefined);
+      const fakeStream = {
+        start: startSpy,
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+        getSnapshot: vi.fn(() => ({ status: "ready" as const, matches: [], catalogRevision: 1 })),
+      };
+      const onlineLobbyStreamFactory = vi.fn(() => fakeStream as any);
+      const gateway = {
+        available: true,
+        listRooms: vi.fn(async () => ({ available: true, rooms: [] })),
+      } as unknown as OnlineLobbyGateway;
+
+      render(
+        <App
+          demoEnabled={false}
+          spectatorEnabled={true}
+          onlineGateway={gateway}
+          onlineLobbyStreamFactory={onlineLobbyStreamFactory}
+        />
+      );
+
+      await waitFor(() => {
+        expect(onlineLobbyStreamFactory).toHaveBeenCalledTimes(1);
+        expect(startSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  describe("Arena route integration", () => {
+    it("enters arena route, disposes active session, and returns to lobby", async () => {
+      const user = userEvent.setup();
+      const { session, controls } = fakeSession();
+      const sessionFactory = vi.fn(() => session);
+      const states: AppState[] = [];
+
+      render(
+        <App
+          sessionFactory={sessionFactory}
+          arenaAvailable={true}
+          onStateChange={(state) => states.push(state)}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Vào đấu trường/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: /Vào đấu trường/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /Đấu trường AI/i })).toBeInTheDocument();
+        expect(states.at(-1)?.status).toBe("arena");
+      });
+
+      expect(controls.dispose).toHaveBeenCalled();
+
+      // Return to lobby
+      await user.click(screen.getByRole("button", { name: /Về sảnh/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /OTTv2/i })).toBeInTheDocument();
+        expect(states.at(-1)?.status).toBe("lobby");
+      });
+    });
+  });
 });
+

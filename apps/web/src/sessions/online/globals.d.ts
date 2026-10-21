@@ -13,6 +13,7 @@ export interface PlayhtmlAllocation {
   readonly seat: Seat;
   readonly ticket: string;
   readonly resumeCredential: string;
+  readonly alias?: string;
 }
 
 export interface PlayhtmlSpectatorAllocation {

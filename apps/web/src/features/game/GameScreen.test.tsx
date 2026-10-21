@@ -1,12 +1,16 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GameScreen } from "./GameScreen";
 import { DemoSession } from "../../sessions/demo/DemoSession";
 import { AppProviders } from "../../app/AppProviders";
+import * as soundSynthesis from "../../shared/audio/soundSynthesis";
 
 describe("GameScreen", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
   it("shows the table HUD, side rail, and leaves local games directly", async () => {
     const user = userEvent.setup();
     const session = new DemoSession("game-active-a");
@@ -113,5 +117,164 @@ describe("GameScreen", () => {
     expect(screen.queryByText("Bạn thắng")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Xem bàn" }));
     expect(screen.getAllByRole("button", { name: /^Ô /i })).toHaveLength(81);
+  });
+
+  it("provides accessible flip perspective controls via button and keyboard shortcut F", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+
+    const flipBtn = screen.getByTestId("game-flip-btn");
+    expect(flipBtn).toBeInTheDocument();
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+
+    const cellsInitial = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsInitial[0]).toHaveAttribute("data-testid", "board-cell-A1");
+
+    // Click flip button in top bar
+    await user.click(flipBtn);
+    expect(flipBtn).toHaveAttribute("aria-pressed", "true");
+
+    const cellsFlipped = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsFlipped[0]).toHaveAttribute("data-testid", "board-cell-I9");
+    expect(cellsFlipped[0]).toHaveAccessibleName(/^Ô I9/i);
+
+    // Keyboard shortcut F toggles back
+    fireEvent.keyDown(window, { key: "f" });
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+
+    const cellsRestored = screen.getAllByRole("button", { name: /^Ô /i });
+    expect(cellsRestored[0]).toHaveAttribute("data-testid", "board-cell-A1");
+  });
+
+  it("provides accessible audio toggle controls via button and keyboard shortcut M", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+
+    const soundBtn = screen.getByTestId("game-sound-toggle-btn");
+    expect(soundBtn).toBeInTheDocument();
+    expect(soundBtn).toHaveAttribute("aria-pressed", "false");
+
+    // Click to enable audio
+    await user.click(soundBtn);
+    expect(soundBtn).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("ott:audio-enabled")).toBe("true");
+
+    // Shortcut M toggles off
+    fireEvent.keyDown(window, { key: "m" });
+    expect(soundBtn).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("ott:audio-enabled")).toBe("false");
+  });
+
+  it("disables keyboard shortcuts while leave confirmation dialog is open", async () => {
+    const user = userEvent.setup();
+    const session = new DemoSession("game-active-a");
+    const snapshot = {
+      ...session.getSnapshot(),
+      mode: "online" as const,
+      capabilities: { ...session.getSnapshot().capabilities, canLeaveGame: true },
+    };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+
+    const flipBtn = screen.getByTestId("game-flip-btn");
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: /rời bàn/i }));
+    expect(screen.getByRole("dialog", { name: /rời bàn/i })).toBeInTheDocument();
+
+    // Press 'f' while dialog is open - must not flip
+    fireEvent.keyDown(window, { key: "f" });
+    expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("does not play audio on mount for pre-existing historical events", () => {
+    localStorage.setItem("ott:audio-enabled", "true");
+    const playSound = vi.spyOn(soundSynthesis, "playSynthesizedSound");
+    const session = new DemoSession("result-goal");
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+
+    expect(playSound).not.toHaveBeenCalled();
+  });
+
+  it("handles session swaps cleanly: no historical replay, triggers audio/highlight on new events, and preserves monotonicity across event eviction", async () => {
+    localStorage.setItem("ott:audio-enabled", "true");
+    const playSound = vi.spyOn(soundSynthesis, "playSynthesizedSound");
+
+    // 1. Initial mount with active session: no historical sounds
+    const session1 = new DemoSession("game-active-a");
+    const { rerender } = render(
+      <AppProviders>
+        <GameScreen session={session1} snapshot={session1.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+    expect(playSound).not.toHaveBeenCalled();
+
+    // 2. Swap to session 2 (finished goal match with terminal events): must NOT replay historical sounds
+    const session2 = new DemoSession("result-goal");
+    rerender(
+      <AppProviders>
+        <GameScreen session={session2} snapshot={session2.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+    expect(playSound).not.toHaveBeenCalled();
+
+    // 3. Swap to session 3 (active game) and make a real legal move
+    const session3 = new DemoSession("game-active-a");
+    rerender(
+      <AppProviders>
+        <GameScreen session={session3} snapshot={session3.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+    expect(playSound).not.toHaveBeenCalled();
+
+    // Move A3 to A2 ({ x: 0, y: 2 } to { x: 0, y: 1 })
+    const moveResult = await session3.move({ x: 0, y: 2 }, { x: 0, y: 1 });
+    expect(moveResult.accepted).toBe(true);
+
+    // New event in session3 triggers sound!
+    expect(playSound).toHaveBeenCalledWith("move");
+
+    // Last move highlight is rendered on board
+    expect(screen.getByTestId("board-cell-A3")).toHaveAttribute("data-last-move-from", "true");
+    expect(screen.getByTestId("board-cell-A2")).toHaveAttribute("data-last-move-to", "true");
+
+    // 4. Test bounded event collection eviction within the same session:
+    // If the event collection in the snapshot shrinks or temporarily clears,
+    // subsequent renders within the same session must NOT reset tracking downwards
+    // and must NOT replay past events when re-presented.
+    playSound.mockClear();
+    const snapshotWithEvictedEvents = { ...session3.getSnapshot(), events: [] };
+    rerender(
+      <AppProviders>
+        <GameScreen session={session3} snapshot={snapshotWithEvictedEvents} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+    expect(playSound).not.toHaveBeenCalled();
+
+    // Re-render with previous events restored: still no replay
+    rerender(
+      <AppProviders>
+        <GameScreen session={session3} snapshot={session3.getSnapshot()} onLobby={vi.fn()} />
+      </AppProviders>
+    );
+    expect(playSound).not.toHaveBeenCalled();
   });
 });

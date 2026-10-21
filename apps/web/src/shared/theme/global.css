@@ -1,3 +1,27 @@
+@font-face {
+  font-family: "Pixeloid";
+  src: url("/fonts/PixeloidSans.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pixeloid";
+  src: url("/fonts/PixeloidSans-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PixelMono";
+  src: url("/fonts/PixeloidMono.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   font-family: var(--ui-font-body);
   font-size: var(--ui-text-md);
@@ -9,12 +33,9 @@
 body {
   background-color: var(--ui-canvas);
   background-image:
-    radial-gradient(circle at 18% 20%, rgba(255, 0, 122, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 82% 80%, rgba(0, 240, 255, 0.09) 0%, transparent 45%),
-    radial-gradient(circle at 50% 50%, rgba(13, 19, 31, 0.95) 0%, #06080d 100%),
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+    linear-gradient(var(--ui-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ui-line) 1px, transparent 1px);
+  background-size: 24px 24px;
   background-attachment: fixed;
   color: var(--ui-text);
   min-height: 100vh;
@@ -22,13 +43,12 @@ body {
 
 ::selection {
   color: #fff;
-  background: rgba(0, 240, 255, 0.35);
+  background: var(--ui-text);
 }
 
 :focus-visible {
-  outline: 2px solid var(--ui-focus);
+  outline: 3px solid var(--ui-focus);
   outline-offset: 2px;
-  box-shadow: 0 0 12px var(--ui-focus);
 }
 
 @media (prefers-reduced-motion: reduce) {

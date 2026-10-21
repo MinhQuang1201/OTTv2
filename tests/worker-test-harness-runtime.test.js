@@ -10,9 +10,14 @@ const {
   readWorkerHost,
   workerOrigin,
   wranglerLauncher,
+  PROCESS_GROUP_SPAWN_OPTIONS,
+  stopProcessTree,
 } = require("../config/local-runtime");
+const { spawnLocalCommand: spawnShellSafe } = require("../scripts/worker-dev");
 
 const root = path.resolve(__dirname, "..");
+// workerd on Windows releases its SQLite handles shortly after taskkill; async rm retries EBUSY (rmSync does not).
+const RM_PERSIST_OPTIONS = { recursive: true, force: true, maxRetries: 20, retryDelay: 250 };
 const probeSecret = "ott-test-probe-local-only";
 const LOG_LIMIT = 32_000;
 
@@ -22,13 +27,7 @@ function appendLog(current, chunk) {
 }
 
 function spawnLocalCommand(command, args, options) {
-  if (process.platform !== "win32") return spawn(command, args, options);
-  const quote = (value) => {
-    const text = String(value);
-    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
-  };
-  const commandLine = [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ");
-  return spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], options);
+  return spawnShellSafe(command, args, { ...options, ...PROCESS_GROUP_SPAWN_OPTIONS }, spawn);
 }
 
 function spawnHarness({ host, port, persistTo }) {
@@ -53,11 +52,7 @@ async function stopHarness(harness) {
   if (!harness) return;
   const { child } = harness;
   if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32") {
-      await new Promise((resolve) => spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).once("exit", resolve));
-    } else {
-      child.kill("SIGTERM");
-    }
+    await stopProcessTree(child);
   }
   await harness.exited.catch(() => {});
   if (child.exitCode === null && child.signalCode === null) throw new Error(`Worker harness process ${child.pid} did not stop`);
@@ -82,7 +77,7 @@ async function startHarness(persistRoot) {
     } catch (error) {
       lastError = error;
       await stopHarness(harness);
-      fs.rmSync(persistTo, { recursive: true, force: true });
+      await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
       if (fixedPort || !isBindFailure(error)) throw error;
     }
   }
@@ -156,7 +151,7 @@ test("test-only Worker initializes Main through stub.fetch and exposes safe rece
     assert.equal(denied.status, 404);
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });
 
@@ -193,7 +188,7 @@ test("Game accepts canonical initialization once and rejects replay without chan
     assert.deepEqual(await afterReplay.json(), { room: true, receipt: true, nonce: true, attachNonce: false });
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });
 
@@ -228,7 +223,7 @@ test("Game accepts a fresh exact initialization retry but rejects conflicting im
     });
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });
 
@@ -260,7 +255,7 @@ test("Game rejects wrong-room, expired, and malformed initialization capabilitie
     });
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });
 
@@ -295,7 +290,7 @@ test("parallel fresh initialization capabilities produce one durable room and tw
     });
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });
 
@@ -328,6 +323,6 @@ test("parallel attach ticket replay allows only one guarded mutation", async () 
     });
   } finally {
     await stopHarness(child);
-    fs.rmSync(persistTo, { recursive: true, force: true });
+    await fs.promises.rm(persistTo, RM_PERSIST_OPTIONS);
   }
 });

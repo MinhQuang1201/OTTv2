@@ -1,0 +1,171 @@
+name: Deploy
+
+# main      -> staging
+# tag v*    -> production
+# manual    -> chosen target on the selected ref; production only from a v* tag (this is the rollback path)
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.target.outputs.target }}
+    steps:
+      - id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+        run: |
+          case "$EVENT:$GITHUB_REF" in
+            workflow_dispatch:*) target="$INPUT_TARGET" ;;
+            push:refs/tags/v*) target=production ;;
+            *) target=staging ;;
+          esac
+          if [ "$target" = production ] && [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::Production deploys only from a v* tag; got $GITHUB_REF"
+            exit 1
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "Deploy target: $target ($GITHUB_REF)"
+
+  verify:
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: ${{ needs.resolve.outputs.target }}
+      url: ${{ vars.FRONTEND_URL }}
+    concurrency:
+      group: deploy-${{ needs.resolve.outputs.target }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      TARGET: ${{ needs.resolve.outputs.target }}
+      WORKER_URL: ${{ vars.WORKER_URL }}
+      FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+      WRANGLER_ENV: ${{ needs.resolve.outputs.target == 'staging' && 'staging' || '' }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_CLI: vercel@61.1.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Check environment configuration
+        run: |
+          missing=""
+          for name in WORKER_URL FRONTEND_URL CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::GitHub Environment '$TARGET' is missing:$missing"
+            exit 1
+          fi
+          case "$WORKER_URL$FRONTEND_URL" in
+            *http://*) echo "::error::WORKER_URL and FRONTEND_URL must be HTTPS"; exit 1 ;;
+          esac
+
+      - name: Deploy Worker
+        id: worker
+        env:
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
+        run: |
+          # The allowed browser origin comes from the GitHub Environment, not from wrangler.jsonc, so it always
+          # matches the frontend that this same run deploys and the smoke test checks.
+          npx --no-install wrangler deploy --config apps/worker/wrangler.jsonc ${WRANGLER_ENV:+--env "$WRANGLER_ENV"} --var "OTT_BROWSER_ORIGIN:$FRONTEND_URL"
+          version_id="$(node -e '
+            const lines = require("fs").readFileSync(process.argv[1], "utf8").trim().split("\n").map((line) => JSON.parse(line));
+            const deploy = lines.reverse().find((entry) => entry.type === "deploy");
+            if (!deploy?.version_id) process.exit(1);
+            console.log(deploy.version_id);
+          ' "$WRANGLER_OUTPUT_FILE_PATH")"
+          echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
+          echo "Worker version: $version_id"
+
+      - name: Check Worker secret is set
+        run: |
+          npx --no-install wrangler secret list --config apps/worker/wrangler.jsonc ${WRANGLER_ENV:+--env "$WRANGLER_ENV"} --format json > "$RUNNER_TEMP/secrets.json"
+          node -e '
+            const names = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).map((entry) => entry.name);
+            if (!names.includes("OTT_INTERNAL_SECRET")) {
+              console.error("::error::OTT_INTERNAL_SECRET is not set on this Worker. Run wrangler secret put once; see DEPLOYMENT.md.");
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/secrets.json"
+
+      - name: Build frontend against this Worker
+        env:
+          VITE_OTT_PLAYHTML_HOST: ${{ vars.WORKER_URL }}
+          VITE_OTT_PLAYHTML_CONTROL_ENDPOINT: ${{ vars.WORKER_URL }}
+        run: npm run build:web
+
+      - name: Deploy frontend to Vercel
+        id: frontend
+        run: |
+          prod_flag=""
+          [ "$TARGET" = production ] && prod_flag="--prod"
+          url="$(npx --yes "$VERCEL_CLI" deploy apps/web/dist --yes $prod_flag --token "$VERCEL_TOKEN")"
+          echo "deployment_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Vercel deployment: $url"
+          if [ "$TARGET" = staging ]; then
+            npx --yes "$VERCEL_CLI" alias set "$url" "${FRONTEND_URL#https://}" --token "$VERCEL_TOKEN"
+          fi
+
+      - name: Smoke test
+        run: node scripts/smoke-deploy.js --worker "$WORKER_URL" --frontend "$FRONTEND_URL"
+
+      - name: Record deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKER_VERSION: ${{ steps.worker.outputs.version_id }}
+          VERCEL_URL: ${{ steps.frontend.outputs.deployment_url }}
+        run: |
+          notes="$RUNNER_TEMP/deploy-notes.md"
+          {
+            echo "## Deploy $TARGET"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Ref | \`$GITHUB_REF_NAME\` (\`$GITHUB_SHA\`) |"
+            echo "| Deployed at | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+            echo "| Worker | $WORKER_URL |"
+            echo "| Worker version ID | \`$WORKER_VERSION\` |"
+            echo "| Frontend | $FRONTEND_URL |"
+            echo "| Vercel deployment | $VERCEL_URL |"
+            echo "| Run | $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID |"
+            echo
+            echo "Rollback: run the Deploy workflow manually on the previous v* tag with target production."
+          } > "$notes"
+          cat "$notes" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TARGET" = production ]; then
+            if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+              gh release edit "$GITHUB_REF_NAME" --notes-file "$notes"
+            else
+              gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file "$notes" --verify-tag
+            fi
+          fi

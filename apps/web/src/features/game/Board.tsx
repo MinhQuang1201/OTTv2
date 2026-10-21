@@ -10,26 +10,100 @@ export interface BoardProps {
   readonly snapshot: GameSnapshot;
   readonly onMove?: (from: Position, to: Position) => void;
   readonly onError?: (error: SessionErrorView) => void;
+  readonly highlightMove?: { readonly from?: Position; readonly to?: Position } | null;
+  readonly perspective?: "A" | "B";
+  readonly lastCapture?: Position | null;
 }
 
-export function Board({ session, snapshot, onMove, onError }: BoardProps) {
+export function Board({
+  session,
+  snapshot,
+  onMove,
+  onError,
+  highlightMove,
+  perspective = "A",
+  lastCapture,
+}: BoardProps) {
   const { selection, canInteract, pieceByPosition, select } = useBoardSelection({ session, snapshot, onMove, onError });
-  const cells = useMemo(() => Array.from({ length: 81 }, (_, index) => ({ x: index % 9, y: Math.floor(index / 9) })), []);
+
+  const cells = useMemo(() => {
+    return Array.from({ length: 81 }, (_, index) => {
+      const col = index % 9;
+      const row = Math.floor(index / 9);
+      if (perspective === "B") {
+        return { x: 8 - col, y: 8 - row };
+      }
+      return { x: col, y: row };
+    });
+  }, [perspective]);
+
+  const files = useMemo(() => {
+    return Array.from({ length: 9 }, (_, x) => {
+      const colIndex = perspective === "B" ? 8 - x : x;
+      return String.fromCharCode(65 + colIndex);
+    });
+  }, [perspective]);
+
+  const ranks = useMemo(() => {
+    return Array.from({ length: 9 }, (_, y) => {
+      return perspective === "B" ? 9 - y : y + 1;
+    });
+  }, [perspective]);
+
   const legal = (position: Position) => Boolean(selection?.legalMoves.some((move) => move.x === position.x && move.y === position.y));
+
+  const isMoveFrom = (pos: Position) =>
+    Boolean(highlightMove?.from && highlightMove.from.x === pos.x && highlightMove.from.y === pos.y);
+
+  const isMoveTo = (pos: Position) =>
+    Boolean(highlightMove?.to && highlightMove.to.x === pos.x && highlightMove.to.y === pos.y);
+
+  const isCapture = (pos: Position) =>
+    Boolean(lastCapture && lastCapture.x === pos.x && lastCapture.y === pos.y);
+
+  const isHighlighted = (pos: Position) => isMoveFrom(pos) || isMoveTo(pos);
+
   return (
     <div className={styles.boardFrame} aria-label="Bàn cờ 9 x 9">
-      <div className={styles.boardCoordinatesTop} aria-hidden="true">{Array.from({ length: 9 }, (_, x) => <span key={x}>{String.fromCharCode(65 + x)}</span>)}</div>
+      <div className={styles.boardCoordinatesTop} aria-hidden="true">
+        {files.map((file, idx) => (
+          <span key={idx}>{file}</span>
+        ))}
+      </div>
       <div className={styles.boardWithRanks}>
-        <div className={styles.boardRanks} aria-hidden="true">{Array.from({ length: 9 }, (_, y) => <span key={y}>{y + 1}</span>)}</div>
+        <div className={styles.boardRanks} aria-hidden="true">
+          {ranks.map((rank, idx) => (
+            <span key={idx}>{rank}</span>
+          ))}
+        </div>
         <div className={styles.board} role="grid" aria-label="Bàn cờ 9 x 9">
           {cells.map((position) => {
             const piece = pieceByPosition.get(`${position.x}:${position.y}`);
             const selected = Boolean(selection?.from.x === position.x && selection.from.y === position.y);
-            return <BoardCell key={`${position.x}:${position.y}`} position={position} piece={piece} selected={selected} legal={legal(position)} goal={position.x === 0 && position.y === 0 ? "A" : position.x === 8 && position.y === 8 ? "B" : undefined} disabled={!canInteract} onClickPosition={select} />;
+            return (
+              <BoardCell
+                key={`${position.x}:${position.y}`}
+                position={position}
+                piece={piece}
+                selected={selected}
+                legal={legal(position)}
+                highlighted={isHighlighted(position)}
+                isMoveFrom={isMoveFrom(position)}
+                isMoveTo={isMoveTo(position)}
+                isCapture={isCapture(position)}
+                goal={position.x === 0 && position.y === 0 ? "A" : position.x === 8 && position.y === 8 ? "B" : undefined}
+                disabled={!canInteract}
+                onClickPosition={select}
+              />
+            );
           })}
         </div>
       </div>
-      <div className={styles.boardCoordinatesBottom} aria-hidden="true">{Array.from({ length: 9 }, (_, x) => <span key={x}>{String.fromCharCode(65 + x)}</span>)}</div>
+      <div className={styles.boardCoordinatesBottom} aria-hidden="true">
+        {files.map((file, idx) => (
+          <span key={idx}>{file}</span>
+        ))}
+      </div>
     </div>
   );
 }
