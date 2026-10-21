@@ -594,7 +594,8 @@ export class OttLobbyServer extends DurableObject<Env> {
     const name = cleanName(body.name);
     if (action === "create") {
       if (!name) return json({ error: "invalid_name" }, 400);
-      if (this.env.CREATE_RATE_LIMITER) {
+      // Cloudflare always sets cf-connecting-ip; "anonymous" (local or internal calls) would share one bucket.
+      if (this.env.CREATE_RATE_LIMITER && clientKey !== "anonymous") {
         const { success } = await this.env.CREATE_RATE_LIMITER.limit({ key: clientKey });
         if (!success) {
           logEvent("warn", "rate_limited", { action, scope: "create_per_minute" });

@@ -165,17 +165,24 @@ export class AiSession implements GameSession {
       move = await this.local.chooseMoveAsync(this.aiSeat, (state, seat) => engine.choose(state, seat, level));
     }
     if (this.disposed || run !== this.runId) return;
-    if (!move) {
-      this.aiThinking = false;
-      this.snapshot = this.decorate(this.local.getSnapshot());
-      this.publish();
-      return;
+    // A lost or rejected answer must not leave the AI seat stuck on its turn.
+    if (!move) move = this.inlineMove();
+    let result = move ? await this.local.move(move.from, move.to) : null;
+    if (this.disposed || run !== this.runId) return;
+    if (result && !result.accepted) {
+      const fallback = this.inlineMove();
+      if (fallback) result = await this.local.move(fallback.from, fallback.to);
     }
-    const result = await this.local.move(move.from, move.to);
     this.aiThinking = false;
     this.snapshot = this.decorate(this.local.getSnapshot());
     if (!this.disposed) this.publish();
-    if (!result.accepted && this.snapshot.phase === "playing") this.scheduleIfNeeded();
+  }
+
+  private inlineMove() {
+    const ai = globalThis.OTT_AI;
+    if (!ai) return null;
+    const level = this.level;
+    return this.local.chooseMove(this.aiSeat, (state, seat) => ai.chooseMove(state, seat, { level }));
   }
 
   private cancelAi(): void {

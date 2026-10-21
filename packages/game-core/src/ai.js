@@ -76,6 +76,27 @@
     return moves;
   }
 
+  /** Same legality as generateMoves, without allocating or sorting; used at every leaf. */
+  function countMoves(position, side) {
+    const { pieces, board } = position;
+    let total = 0;
+    for (const piece of pieces) {
+      if (!piece.alive || piece.side !== side) continue;
+      for (const [dx, dy] of DELTAS) {
+        const x = piece.x + dx;
+        const y = piece.y + dy;
+        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) continue;
+        const occupant = board[y * SIZE + x];
+        if (occupant) {
+          const target = pieces[occupant - 1];
+          if (target.side === side || CAPTURES[piece.type] !== target.type) continue;
+        }
+        total += 1;
+      }
+    }
+    return total;
+  }
+
   function orderingBonus(side, piece, x, y) {
     return distanceToGoal(side, piece.x, piece.y) - distanceToGoal(side, x, y) + 1;
   }
@@ -140,7 +161,7 @@
       if (byType[other][hunter] === 0) score += 4 * byType[side][type];
       if (byType[side][hunter] === 0) score -= 4 * byType[other][type];
     }
-    score += generateMoves(position, side).length - generateMoves(position, other).length;
+    score += countMoves(position, side) - countMoves(position, other);
     return score;
   }
 
@@ -229,11 +250,15 @@
     if (!scored) scored = createSearch(position, Infinity).rootScores(side, 1);
 
     const piecesOf = position.pieces;
-    if (settings.randomMoveChance > 0 && settings.rng() < settings.randomMoveChance) {
-      const pick = scored[Math.floor(settings.rng() * scored.length) % scored.length];
-      return toResult(piecesOf[pick.move.index], pick.move);
-    }
     scored.sort((a, b) => b.value - a.value || a.move.index - b.move.index);
+    // Easy sometimes plays a random move, but never skips a win or walks into a forced loss.
+    if (settings.randomMoveChance > 0 && scored[0].value < WIN / 2 && settings.rng() < settings.randomMoveChance) {
+      const safe = scored.filter((entry) => entry.value > -WIN / 2);
+      if (safe.length) {
+        const pick = safe[Math.floor(settings.rng() * safe.length) % safe.length];
+        return toResult(piecesOf[pick.move.index], pick.move);
+      }
+    }
     const pool = scored.slice(0, Math.max(1, settings.pickAmongTop));
     // Only choose among near-equal moves, never trade a win/loss for variety.
     const bestValue = pool[0].value;

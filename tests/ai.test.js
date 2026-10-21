@@ -77,8 +77,11 @@ test('every level takes a win in one and refuses a move that hands the opponent 
     { id: 'enemy', player: 'B', type: 'la', x: 5, y: 5 }
   ]);
   for (const level of ['easy', 'medium', 'hard']) {
-    const move = chooseMove(winning, 'A', { level, rng: () => 0.99 });
-    assert.equal(rules.applyMove(winning, 'A', move.from, move.to).state.winner, 'A', level);
+    // 0.01 forces easy into its random-move branch, which must still keep the win.
+    for (const roll of [0.01, 0.99]) {
+      const move = chooseMove(winning, 'A', { level, rng: () => roll });
+      assert.equal(rules.applyMove(winning, 'A', move.from, move.to).state.winner, 'A', `${level} roll ${roll}`);
+    }
   }
   const defend = position([
     { id: 'guard', player: 'A', type: 'dam', x: 7, y: 7 },

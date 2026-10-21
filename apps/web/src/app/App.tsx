@@ -11,7 +11,7 @@ import { LobbyScreen } from "../features/lobby/LobbyScreen";
 import { GameScreen } from "../features/game/GameScreen";
 import { LocalSession } from "../sessions/local/LocalSession";
 import { AiSession } from "../sessions/ai/AiSession";
-import type { AiLevel } from "../shared/model/aiLevel";
+import { DEFAULT_AI_LEVEL, type AiLevel } from "../shared/model/aiLevel";
 import { OnlineSession } from "../sessions/online/OnlineSession";
 import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
 import { ReplaySession } from "../sessions/replay/ReplaySession";
@@ -299,6 +299,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     );
   }, [demo.scenario, restartToken, transitionTo]);
 
+  const aiLevelRef = useRef<AiLevel>(DEFAULT_AI_LEVEL);
   const onLobby = () => {
     setRestartToken((value) => value + 1);
     demo.setScenario("lobby-default");
@@ -308,6 +309,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     transitionTo(() => new LocalSession(), { mode: "local", playerNames: names }, "game-active-a");
   };
   const onStartAi = (playerName: string, level: AiLevel) => {
+    aiLevelRef.current = level;
     transitionTo(() => new AiSession(), { mode: "ai", playerName, level }, "game-ai-thinking");
   };
   const startOnline = (options: Extract<StartGameOptions, { mode: "online" }>) => {
@@ -325,7 +327,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     if (mode === "local") {
       transitionTo(() => new LocalSession(), { mode: "local", playerNames: ["Người chơi Đỏ", "Người chơi Xanh"], practice }, "game-active-a");
     } else {
-      transitionTo(() => new AiSession(), { mode: "ai", playerName: "Người chơi", practice }, "game-ai-thinking");
+      transitionTo(() => new AiSession(), { mode: "ai", playerName: "Người chơi", practice, level: aiLevelRef.current }, "game-ai-thinking");
     }
   };
 
