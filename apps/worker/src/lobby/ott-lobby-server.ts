@@ -671,7 +671,10 @@ export class OttLobbyServer extends DurableObject<Env> {
       return initialized.value;
     }
 
-    const id = typeof body.allocationId === "string" ? body.allocationId : "";
+    // Players may paste the canonical room id (`ott-<uuid>`) that the game screen shows.
+    const rawId = typeof body.allocationId === "string" ? body.allocationId.trim() : "";
+    const canonicalRoomId = /^ott-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(rawId);
+    const id = canonicalRoomId ? canonicalRoomId[1]!.toLowerCase() : rawId;
     if (action === "spectate") {
       if (this.env.OTT_SPECTATOR_ENABLED !== "true") return json({ error: "not_found" }, 404);
       if (!id) return json({ error: "invalid_request" }, 400);
@@ -708,6 +711,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       return json({
         allocationId: resumed.allocation.id,
         room: resumed.allocation.roomId,
+        ...(resumed.allocation.alias ? { alias: resumed.allocation.alias } : {}),
         seat: resumed.seat,
         ticket: resumed.ticket,
         resumeCredential: resumed.resumeCredential,
@@ -1039,7 +1043,7 @@ export class OttLobbyServer extends DurableObject<Env> {
         return json({ error: "authority_unavailable" }, 503);
       }
       const joined = finalized.value;
-      return json({ allocationId: targetAllocationId, room: joined.roomId, seat: "B", ticket: reserved.ticket, resumeCredential: reserved.owner.credential });
+      return json({ allocationId: targetAllocationId, room: joined.roomId, ...(allocation.alias ? { alias: allocation.alias } : {}), seat: "B", ticket: reserved.ticket, resumeCredential: reserved.owner.credential });
     }
     return json({ error: "invalid_request" }, 400);
   }

@@ -4,7 +4,9 @@ export type LogEvent =
   | "transaction-failed"
   | "rate_limited"
   | "allocation_gc"
-  | "game_storage_wiped";
+  | "game_storage_wiped"
+  | "attach_rejected"
+  | "attach_failed";
 
 export function logEvent(level: "info" | "warn" | "error", event: LogEvent, fields: Record<string, unknown> = {}): void {
   const line = JSON.stringify({ level, event, ...fields });
