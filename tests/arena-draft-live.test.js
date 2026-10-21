@@ -1300,6 +1300,7 @@ describe("Arena Part B — Draft Execution & Live Frames", () => {
     let db;
     let authorToken;
     let author2Token;
+    let adminToken;
 
     before(async () => {
       const setup = createTestDb();
@@ -1307,12 +1308,14 @@ describe("Arena Part B — Draft Execution & Live Frames", () => {
 
       seedUser(db, { id: "u-api-author", username: "author", role: "author" });
       seedUser(db, { id: "u-api-author-2", username: "author2", role: "author" });
+      seedUser(db, { id: "u-api-admin", username: "admin", role: "admin" });
       seedBot(db, { id: "bot-api-1", ownerId: "u-api-author", name: "Api Bot" });
 
       const session = createSession(db, "u-api-author");
       authorToken = session.token;
       const session2 = createSession(db, "u-api-author-2");
       author2Token = session2.token;
+      adminToken = createSession(db, "u-api-admin").token;
 
       const profileRegistry = createProfileRegistry();
       const draftService = createDraftService({
@@ -1347,7 +1350,21 @@ describe("Arena Part B — Draft Execution & Live Frames", () => {
       assert.equal(res.statusCode, 401);
     });
 
-    it("POST /api/arena/v1/bots/:id/draft/run executes draft and returns 200 with diagnostics", async () => {
+    it("POST /api/arena/v1/bots/:id/draft/run rejects a non-admin owner with HTTP 403 when drafts run on the host", async () => {
+      const res = await makeRequest(server, {
+        method: "POST",
+        path: "/api/arena/v1/bots/bot-api-1/draft/run",
+        headers: { Authorization: `Bearer ${authorToken}` }
+      }, {
+        source: "console.log('host');",
+        profileId: "node"
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.body.error.code, "SOURCE_SUBMISSION_DISABLED");
+    });
+
+    it("POST /api/arena/v1/bots/:id/draft/run lets an admin execute a trusted draft and returns 200 with diagnostics", async () => {
       const nodeCode = `
         process.stdin.setEncoding('utf8');
         let buf = '';
@@ -1375,7 +1392,7 @@ describe("Arena Part B — Draft Execution & Live Frames", () => {
       const res = await makeRequest(server, {
         method: "POST",
         path: "/api/arena/v1/bots/bot-api-1/draft/run",
-        headers: { Authorization: `Bearer ${authorToken}` }
+        headers: { Authorization: `Bearer ${adminToken}` }
       }, {
         source: nodeCode,
         profileId: "node",
@@ -1441,7 +1458,7 @@ describe("Arena Part B — Draft Execution & Live Frames", () => {
         const res = await makeRequest(busyServer, {
           method: "POST",
           path: "/api/arena/v1/bots/bot-api-1/draft/run",
-          headers: { Authorization: `Bearer ${authorToken}` }
+          headers: { Authorization: `Bearer ${adminToken}` }
         }, {
           source: "console.log('hi');",
           profileId: "node"
