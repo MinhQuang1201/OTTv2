@@ -114,6 +114,8 @@ class Room {
       this.state = rules.createInitialState();
       this.state.clock.remainingMs = { A: this.initialClockMs, B: this.initialClockMs };
       this.clockAnchorMs = this.now();
+      // A creator still inside the reconnect grace must not lose time before returning.
+      if (!this.players[this.state.turn].connected) this.state.clock.runningSeat = null;
       this.scheduleClockDeadline();
     }
     return { ok: true, seat, name: player.name, resumeToken: player.resumeToken };
@@ -356,7 +358,8 @@ class Room {
     player.connected = true;
     player.reconnectDeadlineMs = null;
     if (!this.state.winner) {
-      this.state.clock.runningSeat = this.state.turn;
+      // The clock of a seat still waiting out its grace window stays stopped (Rule.md 14.2).
+      this.state.clock.runningSeat = this.players[this.state.turn]?.connected ? this.state.turn : null;
       this.clockAnchorMs = now;
       this.scheduleClockDeadline();
     }

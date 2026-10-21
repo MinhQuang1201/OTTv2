@@ -46,6 +46,8 @@ export interface DraftServiceOptions {
 }
 
 export interface DraftService {
+  /** True when drafts run as host processes instead of inside a container. */
+  readonly trustedLocalMode: boolean;
   runDraft(params: {
     db: Database;
     authorId: string;

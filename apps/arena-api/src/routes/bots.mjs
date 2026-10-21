@@ -377,6 +377,19 @@ export async function handleBotsRoute(req, res, ctx) {
       );
     }
 
+    // A trusted-process draft runs submitted source on the host, so it gets the same
+    // admin-only gate as version submission in trusted mode.
+    if (draftService?.trustedLocalMode && user.role !== "admin") {
+      return sendError(
+        res,
+        403,
+        "SOURCE_SUBMISSION_DISABLED",
+        "Draft execution on the host is admin-only; non-admin drafts require container isolation.",
+        { canSubmitSource: false },
+        req
+      );
+    }
+
     let body;
     try {
       body = await parseJsonBody(req, maxBodyBytes);

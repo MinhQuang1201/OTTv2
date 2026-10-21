@@ -94,6 +94,8 @@ export function createDraftService(options) {
   let activeConcurrentDrafts = 0;
 
   return {
+    trustedLocalMode: Boolean(trustedLocalMode),
+
     async runDraft({
       db,
       authorId,

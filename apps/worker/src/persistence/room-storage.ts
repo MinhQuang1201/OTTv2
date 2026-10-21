@@ -152,7 +152,10 @@ export class DurableRoomAdapter {
     player.connected = true;
     player.reconnectDeadlineMs = null;
     this.remember(connection);
-    if (this.room.status === "playing" && !this.room.state.winner && !this.room.state.clock.runningSeat) {
+    if (
+      this.room.status === "playing" && !this.room.state.winner && !this.room.state.clock.runningSeat &&
+      this.room.players?.[this.room.state.turn]?.connected
+    ) {
       this.room.state.clock.runningSeat = this.room.state.turn;
       this.room.clockAnchorMs = this.now();
     }
