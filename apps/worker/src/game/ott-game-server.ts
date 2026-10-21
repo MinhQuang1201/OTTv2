@@ -702,20 +702,19 @@ export class OttGameServer extends YServer {
     const room = adapter.room;
     const now = typeof room?.now === "function" ? room.now() : Date.now();
 
-    if (typeof room?.settleClock === "function") {
-      try {
-        room.settleClock(now, { commit: false });
-      } catch {
-        // Mock rooms or immutable states might not support settleClock
-      }
-    }
-
     const playerA = room?.players?.A ?? (payload?.players as any)?.A;
     const playerB = room?.players?.B ?? (payload?.players as any)?.B;
 
     const clockState = room?.state?.clock ?? (payload?.state as any)?.clock;
-    const remainingA = clockState?.remainingMs?.A ?? (room as any)?.clock?.remainingA ?? 0;
-    const remainingB = clockState?.remainingMs?.B ?? (room as any)?.clock?.remainingB ?? 0;
+    let remainingA = clockState?.remainingMs?.A ?? (room as any)?.clock?.remainingA ?? 0;
+    let remainingB = clockState?.remainingMs?.B ?? (room as any)?.clock?.remainingB ?? 0;
+    // Project the running clock to `now` without settling the Room: this is a read path, and
+    // only commands and alarms may change (and persist) authoritative Room state.
+    const anchor = (room as any)?.clockAnchorMs;
+    if (room?.status === "playing" && Number.isFinite(anchor) && now > anchor) {
+      if (clockState?.runningSeat === "A") remainingA = Math.max(0, remainingA - (now - anchor));
+      if (clockState?.runningSeat === "B") remainingB = Math.max(0, remainingB - (now - anchor));
+    }
 
     let runningSeat: "A" | "B" | null = null;
     if (clockState && "runningSeat" in clockState) {
