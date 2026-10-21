@@ -8,7 +8,7 @@ import {
   parseOttMessage,
   type OttCommand,
 } from "../../../../packages/protocol/src/index.js";
-import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, internalSecretMatches, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
+import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, internalSecretMatches, purgeExpiredNonces, verifyCapabilityDetailed, verifyCapabilityTransaction } from "../auth/internal-auth.js";
 import { logEvent } from "../observability/log.js";
 import { cleanDisplayName } from "../../../../packages/game-core/src/names.js";
 import { DurableRoomAdapter, TERMINAL_GC_KEY, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
@@ -50,6 +50,8 @@ type RoleReservation = {
 };
 
 const ATTACHMENT_PREFIX = "live-attachment:";
+/** Machine-readable code sent to clients; ROOM_UNAVAILABLE is the Vietnamese text used in snapshots. */
+const ROOM_UNAVAILABLE_CODE = "room_unavailable";
 
 const rejectingHandler: OttCommandHandler = {
   handle: () => ({ type: "ott:error", revision: 0, error: "authority_unavailable" }),
@@ -75,6 +77,8 @@ export class OttGameServer extends YServer {
   private roomLoad?: Promise<DurableRoomAdapter | null>;
   private roomOperationTail: Promise<void> = Promise.resolve();
   private readonly attachCapabilities = new Map<Connection, { seat: "A" | "B"; nonce: string; expiresAt: number; token: string }>();
+  /** Why the last attach on a connection was refused, so the client is told instead of waiting forever. */
+  private readonly attachRejections = new Map<Connection, string>();
 
   constructor(state: DurableObjectState, env: Env, ottCommandHandler: OttCommandHandler = rejectingHandler, authority?: GameAuthority) {
     super(state, env);
@@ -252,18 +256,34 @@ export class OttGameServer extends YServer {
       this.sendError(connection, command.roomId, "connection_role_already_fixed");
       return;
     }
-    await this.enqueueRoomOperation(() => this.processOttCommand(connection, command, reservation));
+    // A thrown command must not vanish silently: log it and tell an attaching client.
+    await this.enqueueRoomOperation(() => this.processOttCommand(connection, command, reservation))
+      .catch((cause) => this.dispatchFailed(connection, command, cause));
   }
 
   private async processOttCommand(connection: Connection, command: OttCommand, reservation: RoleReservation | null): Promise<void> {
     try {
       const roomId = await this.ctx.storage.get<string>("roomId");
-      if (!roomId || command.roomId !== roomId || (reservation && !this.isCurrentReservation(connection, reservation))) return;
+      if (reservation && !this.isCurrentReservation(connection, reservation)) return;
       if (this.closedConnections.has(connection)) return;
+      if (!roomId || command.roomId !== roomId) {
+        if (command.type === "ott:attach") {
+          logEvent("warn", "attach_rejected", { reason: roomId ? "room_mismatch" : "room_not_initialized" });
+          this.sendError(connection, command.roomId, ROOM_UNAVAILABLE_CODE);
+        }
+        return;
+      }
       const existingIdentity = this.getIdentity(connection) ?? this.pendingIdentities.get(connection);
       if (command.type === "ott:attach") {
         const seat = await this.validateAttach(connection, command, reservation?.generation);
-        if (!seat || !reservation || !this.isCurrentReservation(connection, reservation)) return;
+        if (!reservation || !this.isCurrentReservation(connection, reservation)) return;
+        if (!seat) {
+          const reason = this.attachRejections.get(connection) ?? "rejected";
+          this.attachRejections.delete(connection);
+          logEvent("warn", "attach_rejected", { reason });
+          this.sendError(connection, command.roomId, "attach_rejected");
+          return;
+        }
         this.pendingIdentities.set(connection, { role: "player", seat });
       } else if (command.type === "ott:spectate") {
         const spectator = await this.attachSpectator(connection, command, reservation?.generation);
@@ -293,6 +313,11 @@ export class OttGameServer extends YServer {
     } finally {
       if (reservation) this.releaseRole(connection, reservation);
     }
+  }
+
+  private async dispatchFailed(connection: Connection, command: OttCommand, cause: unknown): Promise<void> {
+    logEvent("error", "attach_failed", { type: command.type, cause: cause instanceof Error ? cause.message.slice(0, 120) : "unknown" });
+    if (command.type === "ott:attach") this.sendError(connection, command.roomId, ROOM_UNAVAILABLE_CODE);
   }
 
   private enqueueRoomOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -477,6 +502,7 @@ export class OttGameServer extends YServer {
     this.identityNonces.delete(connection);
     this.pendingIdentities.delete(connection);
     this.attachCapabilities.delete(connection);
+    this.attachRejections.delete(connection);
     this.roleReservations.delete(connection);
     this.closedConnections.add(connection);
     return generation;
@@ -830,10 +856,17 @@ export class OttGameServer extends YServer {
     }
     const allocationId = await this.ctx.storage.get<string>("allocationId");
     const roomId = await this.ctx.storage.get<string>("roomId");
-    if (!allocationId || !roomId || command.roomId !== roomId) return false;
-    const capability = await verifyCapability(this.ottEnv.OTT_INTERNAL_SECRET, command.ticket, { allocationId, roomId, purpose: "attach" });
+    if (!allocationId || !roomId || command.roomId !== roomId) {
+      this.attachRejections.set(connection, "room");
+      return false;
+    }
+    const verified = await verifyCapabilityDetailed(this.ottEnv.OTT_INTERNAL_SECRET, command.ticket, { allocationId, roomId, purpose: "attach" });
     if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return false;
-    if (!capability) return false;
+    if (!verified.ok) {
+      this.attachRejections.set(connection, verified.reason);
+      return false;
+    }
+    const capability = verified.payload;
     this.attachCapabilities.set(connection, { ...capability, token: command.ticket });
     return capability.seat;
   }

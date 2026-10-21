@@ -144,6 +144,7 @@ function gameFixture(prototype, roomId = "ott-room-task6") {
   server.roomOperationTail = Promise.resolve();
   server.identityNonces = new Map();
   server.attachCapabilities = new Map();
+  server.attachRejections = new Map();
   server.sendCustomMessage = (_connection, message) => messages.push(JSON.parse(message));
   return { values, storage, server, messages };
 }
@@ -1905,4 +1906,19 @@ test("throttled OTT commands get rate_limited and do not extend the throttle win
   now = 1_050;
   await fixture.server.dispatchOttMessage(player, "not json");
   assert.equal(fixture.messages.length, 1, "throttled non-OTT frames stay silent");
+});
+
+test("an attach the Game DO refuses is answered with ott:error instead of silence", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  const player = connection("refused-attach");
+
+  await fixture.server.dispatchOttMessage(player, JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:attach", ticket: "not.a-valid-capability" }));
+  assert.deepEqual(fixture.messages.at(-1), { __ott: true, roomId: "ott-room-task6", revision: 0, type: "ott:error", error: "attach_rejected" });
+  assert.equal(fixture.server.identities.has(player), false);
+
+  fixture.server.lastOttPacketMs.delete(player);
+  const other = connection("wrong-room-attach");
+  await fixture.server.dispatchOttMessage(other, JSON.stringify({ __ott: true, roomId: "ott-some-other-room", type: "ott:attach", ticket: "x.y" }));
+  assert.deepEqual(fixture.messages.at(-1), { __ott: true, roomId: "ott-some-other-room", revision: 0, type: "ott:error", error: "room_unavailable" });
 });

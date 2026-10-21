@@ -166,6 +166,8 @@ export interface GameSnapshot {
   readonly pendingMove: boolean;
   readonly aiThinking: boolean;
   readonly roomId: string | null;
+  /** Short shareable room code (for example `K7N-M4P`) when the server issued one. */
+  readonly roomAlias?: string | null;
   readonly waitingRooms?: readonly WaitingRoomView[];
   readonly publicMatches?: readonly ProtocolPublicMatchView[];
   readonly result: GameResultView | null;

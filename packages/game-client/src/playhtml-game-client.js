@@ -97,6 +97,7 @@
         ? options.eventDedupeLimit : 256;
       this.seenEventIds = new Set();
       this.seenEventQueue = [];
+      this.lastSend = Promise.resolve();
     }
 
     on(event, fn) {
@@ -115,13 +116,23 @@
         this.emit("error", { message: "Chưa kết nối máy chủ" });
         return false;
       }
-      this.connection.send({
+      const sending = this.connection.send({
         __ott: true,
         type: "ott:" + type,
         ...((type === "move" || type === "leave") && this.roomId ? { roomId: this.roomId } : {}),
         ...(payload || {})
       });
+      // The PlayHTML channel sends asynchronously; remember it so close() can wait for it.
+      this.lastSend = Promise.resolve(sending).then(() => undefined, () => undefined);
       return true;
+    }
+
+    /** Resolves once the last command left the socket, or after `timeoutMs` at the latest. */
+    flush(timeoutMs) {
+      const limit = Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : 1000;
+      let timer = null;
+      const timeout = new Promise((resolve) => { timer = setTimeout(resolve, limit); });
+      return Promise.race([this.lastSend, timeout]).then(() => { if (timer) clearTimeout(timer); });
     }
 
     connect() {

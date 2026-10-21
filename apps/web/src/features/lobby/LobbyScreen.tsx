@@ -4,7 +4,7 @@ import { Panel } from "../../shared/ui/Panel";
 import { TextField } from "../../shared/ui/TextField";
 import { PixelSprite } from "../../shared/icons/PixelSprite";
 import { ModeCard } from "./ModeCard";
-import { OnlineRoomPanel, type OnlineAvailability } from "./OnlineRoomPanel";
+import { OnlineRoomPanel, PendingGameCard, type OnlineAvailability, type PendingGameView } from "./OnlineRoomPanel";
 import { readPlayerName, writePlayerName } from "./playerNameStorage";
 import { type WaitingRoomState } from "./WaitingRoomList";
 import type { PublicMatchIdentity, PublicMatchListState } from "../spectator/PublicMatchList";
@@ -64,6 +64,11 @@ export interface LobbyScreenProps {
   readonly arenaAvailable?: boolean;
   readonly allowDemoWatch?: boolean;
   readonly onlineGateway?: OnlineLobbyGateway;
+  readonly pendingGame?: PendingGameView | null;
+  readonly onResumeOnline?: () => void;
+  readonly onDiscardResume?: () => void;
+  readonly initialRoomCode?: string;
+  readonly onCancelConnecting?: () => void;
 }
 
 export function LobbyScreen({
@@ -80,6 +85,11 @@ export function LobbyScreen({
   arenaAvailable,
   allowDemoWatch,
   onlineGateway,
+  pendingGame,
+  onResumeOnline,
+  onDiscardResume,
+  initialRoomCode,
+  onCancelConnecting,
 }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   const [aiLevel, setAiLevel] = useState<AiLevel>(DEFAULT_AI_LEVEL);
@@ -146,6 +156,9 @@ export function LobbyScreen({
 
   return (
     <section className={styles.lobby} aria-labelledby="lobby-title">
+      {pendingGame && onResumeOnline ? (
+        <PendingGameCard game={pendingGame} ready={onlineAvailability === "online"} onResume={onResumeOnline} onDiscard={onDiscardResume} />
+      ) : null}
       <div className={styles.lobbyIntro}>
         <div className={styles.eyebrow}>
           <PixelSprite kind="trophy" size={14} decorative />
@@ -336,6 +349,8 @@ export function LobbyScreen({
           onJoin={joinOnline}
           onWatch={onWatchMatch}
           allowDemoWatch={allowDemoWatch}
+          initialRoomCode={initialRoomCode}
+          onCancelConnecting={onCancelConnecting}
         />
 
         {showTournamentDialog ? (

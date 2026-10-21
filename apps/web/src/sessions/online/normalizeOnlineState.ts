@@ -122,10 +122,11 @@ export function normalizeOnlineState(message: OnlineStateMessage, receivedAt = D
   if (message.you !== undefined && !isSeat(message.you)) return null;
   const phase = message.status === "waiting" ? "waiting" : message.status === "done" || state.winner ? "finished" : "playing";
   const events = normalizeOnlineEvents(message.events);
-  const players = {
-    A: player(message.players?.A, "A", state),
-    B: player(message.players?.B, "B", state),
-  };
+  // A seat the server reports as `null` is still empty (waiting for the second player).
+  const players: Partial<Record<Seat, PlayerView>> = {};
+  for (const seat of ["A", "B"] as const) {
+    if (message.players?.[seat] !== null) players[seat] = player(message.players?.[seat], seat, state);
+  }
   const isSpectator = message.viewer?.role === "spectator";
   const viewerSeat = isSpectator ? null : message.you ?? null;
   const viewer = isSpectator
@@ -148,7 +149,7 @@ export function normalizeOnlineState(message: OnlineStateMessage, receivedAt = D
     viewerSeat,
     capabilities,
     spectatorCount,
-    turn: state.winner ? null : state.turn,
+    turn: state.winner || phase === "waiting" ? null : state.turn,
     board: Object.freeze(state.pieces.map((piece) => Object.freeze({ id: piece.id, seat: piece.player, type: piece.type, position: { x: piece.x, y: piece.y } }))),
     players,
     connection: "online",

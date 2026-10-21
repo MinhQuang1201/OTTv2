@@ -27,6 +27,8 @@ export interface PlayhtmlGameClientLike {
   attachAllocation(allocation: PlayhtmlAllocation): Promise<unknown>;
   move(from: Position, to: Position): boolean;
   leave(): boolean;
+  /** Waits until the last command left the socket (bounded); closing earlier can drop it. */
+  flush?(timeoutMs?: number): Promise<void>;
   close(): void;
   roomId?: string | null;
   you?: Seat | null;

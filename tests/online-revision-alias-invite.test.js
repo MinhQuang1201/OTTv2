@@ -729,4 +729,37 @@ describe("Human Tournament Worker Coordinator End-to-End Authority Flow", () => 
     assert.equal(seatUpdates.length, 1);
     assert.equal(seatUpdates[0].name, isAliceA ? "Bob" : "Alice");
   });
+  it("lets a player join with the room id shown in game (ott-<uuid>) or the alias, and returns the alias on join and resume", async () => {
+    await getLobbyServerClass();
+    const { server } = createLobbyServer(new Map());
+    let clientCounter = 1;
+    const post = async (action, body) => {
+      const response = await server.fetch(new Request(`https://ott.local/control/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": `room-code-${clientCounter++}` },
+        body: JSON.stringify(body),
+      }));
+      return { status: response.status, data: await response.json() };
+    };
+
+    const created = await post("create", { name: "Alice" });
+    assert.equal(created.status, 200);
+    assert.match(created.data.alias, /^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{3}$/);
+
+    const joined = await post("join", { name: "Bob", allocationId: created.data.room });
+    assert.equal(joined.status, 200, JSON.stringify(joined.data));
+    assert.equal(joined.data.allocationId, created.data.allocationId);
+    assert.equal(joined.data.seat, "B");
+    assert.equal(joined.data.alias, created.data.alias);
+
+    const resumed = await post("resume", { allocationId: created.data.room, resumeCredential: created.data.resumeCredential });
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.data));
+    assert.equal(resumed.data.seat, "A");
+    assert.equal(resumed.data.alias, created.data.alias);
+
+    const second = await post("create", { name: "Carol" });
+    const byAlias = await post("join", { name: "Dan", allocationId: second.data.alias.toLowerCase() });
+    assert.equal(byAlias.status, 200, JSON.stringify(byAlias.data));
+    assert.equal(byAlias.data.allocationId, second.data.allocationId);
+  });
 });

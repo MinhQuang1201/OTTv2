@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { InviteBanner } from "./InviteBanner";
 import type { GameSession } from "../../sessions/contract";
 import { useSessionSnapshot } from "../../sessions/useSessionSnapshot";
 import type { GameSnapshot, Seat } from "../../shared/model/game";
@@ -171,6 +172,9 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
        <main className={styles.boardColumn} aria-labelledby="game-title">
          <h1 id="game-title">Bàn chơi</h1>
         <TurnStatus snapshot={activeSnapshot} />
+        {!spectator && activeSnapshot.phase === "waiting" && activeSnapshot.roomAlias ? (
+          <InviteBanner code={activeSnapshot.roomAlias} onCopied={(message, ok) => pushToast(message, ok ? "success" : "warning")} />
+        ) : null}
         <div className={effectEventId !== null ? styles.effects : undefined} data-event-id={effectEventId ?? undefined}>
           <Board
             session={session}

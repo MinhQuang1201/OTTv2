@@ -200,6 +200,7 @@ function mockGameServerFixture(prototype, env = {}, roomId = "ott-room-flag-test
   server.roomOperationTail = Promise.resolve();
   server.identityNonces = new Map();
   server.attachCapabilities = new Map();
+  server.attachRejections = new Map();
   server.sendCustomMessage = (_connection, message) => messages.push(JSON.parse(message));
   return { values, storage, server, messages };
 }

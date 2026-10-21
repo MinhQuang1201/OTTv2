@@ -44,6 +44,19 @@ async function checkControlList(worker, frontend) {
   return body.rooms.length;
 }
 
+/** The live-match list the lobby shows when the spectator feature is on. */
+async function checkSpectatorCatalog(worker, frontend) {
+  const response = await fetch(`${worker}/control/active`, {
+    method: "POST",
+    headers: { origin: frontend, "content-type": "application/json" },
+    body: "{}",
+  });
+  if (response.status !== 200) throw new Error(`expected HTTP 200, got ${response.status}`);
+  const body = await response.json();
+  if (!Array.isArray(body?.matches)) throw new Error("response JSON has no matches array");
+  return body.matches.length;
+}
+
 async function checkFrontend(worker, frontend) {
   const page = await fetch(`${frontend}/`);
   if (page.status !== 200) throw new Error(`expected HTTP 200, got ${page.status}`);
@@ -62,9 +75,13 @@ async function checkFrontend(worker, frontend) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const { worker, frontend } = parseArgs(argv);
+  const { worker, frontend } = parseArgs(argv.filter((arg) => arg !== "--spectator"));
   const rooms = await withRetry("Worker /control/list", () => checkControlList(worker, frontend));
   console.log(`ok worker ${worker} /control/list -> 200, ${rooms} room(s), CORS ${frontend}`);
+  if (argv.includes("--spectator")) {
+    const matches = await withRetry("Worker /control/active", () => checkSpectatorCatalog(worker, frontend));
+    console.log(`ok worker ${worker} /control/active -> 200, ${matches} live match(es)`);
+  }
   const bundles = await withRetry("Frontend", () => checkFrontend(worker, frontend));
   console.log(`ok frontend ${frontend} -> 200, ${bundles} bundle(s) target the Worker, no secret markers`);
 }
@@ -76,4 +93,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, checkControlList, checkFrontend, withRetry, main };
+module.exports = { parseArgs, checkControlList, checkSpectatorCatalog, checkFrontend, withRetry, main };
