@@ -93,6 +93,26 @@ describe("OnlineSession recovery", () => {
     expect(store.value).toBeNull();
   });
 
+  it("waits for the leave command to be sent before closing the connection", async () => {
+    const { session, clients } = harness();
+    await session.start({ mode: "online", intent: "create", playerName: "An" });
+    clients[0]!.emit("state", state(1));
+    let releaseFlush!: () => void;
+    const flush = vi.fn(() => new Promise<void>((resolve) => { releaseFlush = resolve; }));
+    Object.assign(clients[0]!, { flush });
+
+    const leaving = session.leave();
+    await Promise.resolve();
+    expect(clients[0]!.leave).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalledWith(1_000);
+    expect(clients[0]!.close).not.toHaveBeenCalled();
+
+    releaseFlush();
+    await leaving;
+    expect(clients[0]!.close).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot()).toMatchObject({ phase: "finished", result: { winner: "B", reason: "leave" } });
+  });
+
   it("forgets the saved game when the player leaves", async () => {
     const { session, clients, store } = harness();
     await session.start({ mode: "online", intent: "create", playerName: "An" });

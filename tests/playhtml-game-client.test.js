@@ -722,3 +722,33 @@ test("unwraps revision from projection when not present at top level", async () 
   assert.equal(client.stateRevision, 5);
   assert.equal(client.spectatorCount, 2);
 });
+
+test("flush waits for an asynchronous channel send so leave is not dropped by close", async () => {
+  const connection = fakeConnection();
+  let deliver;
+  connection.send = function (message) {
+    return new Promise((resolve) => { deliver = () => { this.sent.push(message); resolve(); }; });
+  };
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection, storage: null });
+  await client.connect();
+  client.leave();
+
+  let flushed = false;
+  const flushing = client.flush(5_000).then(() => { flushed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(flushed, false, "flush must wait for the pending send");
+  deliver();
+  await flushing;
+  assert.deepEqual(connection.sent, [{ __ott: true, type: "ott:leave" }]);
+});
+
+test("flush gives up after its timeout when a send never settles", async () => {
+  const connection = fakeConnection();
+  connection.send = () => new Promise(() => undefined);
+  const client = new PlayhtmlGameClient({ connectionFactory: () => connection, storage: null });
+  await client.connect();
+  client.leave();
+  const started = Date.now();
+  await client.flush(30);
+  assert.ok(Date.now() - started < 1_000);
+});

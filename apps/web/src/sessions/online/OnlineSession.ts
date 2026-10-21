@@ -256,7 +256,12 @@ export class OnlineSession implements GameSession {
   async leave(): Promise<void> {
     if (this.disposed) return;
     this.resumeStore.clear();
-    try { this.client?.leave(); } catch { /* a closed transport is already left */ }
+    const client = this.client;
+    try { client?.leave(); } catch { /* a closed transport is already left */ }
+    // Closing destroys the provider synchronously; without this wait the server only sees a
+    // dropped socket and treats a deliberate leave as a disconnect with a 60 s grace.
+    try { await client?.flush?.(1_000); } catch { /* close anyway */ }
+    if (this.disposed) return;
     this.cleanupTransport();
     this.stopClockTimer();
     if (this.snapshot.phase !== "finished") {
