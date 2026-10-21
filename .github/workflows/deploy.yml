@@ -133,8 +133,15 @@ jobs:
           echo "deployment_url=$url" >> "$GITHUB_OUTPUT"
           echo "Vercel deployment: $url"
           if [ "$TARGET" = staging ]; then
-            # alias does not read VERCEL_ORG_ID like deploy does; without --scope it fails with "User not found".
-            npx --yes "$VERCEL_CLI" alias set "$url" "${FRONTEND_URL#https://}" --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+            # `vercel alias set` looks up the token's user (GET /v2/user), which a team-scoped token cannot do and
+            # fails with "User not found". Call the API directly with teamId instead.
+            api="https://api.vercel.com"
+            deployment_id="$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "$api/v13/deployments/${url#https://}?teamId=$VERCEL_ORG_ID" | node -pe 'JSON.parse(require("fs").readFileSync(0)).id')"
+            curl -fsS -X POST -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+              -d "{\"alias\":\"${FRONTEND_URL#https://}\"}" \
+              "$api/v2/deployments/$deployment_id/aliases?teamId=$VERCEL_ORG_ID" > /dev/null
+            echo "Aliased ${FRONTEND_URL#https://} -> ${url#https://}"
           fi
 
       - name: Smoke test
