@@ -18,6 +18,7 @@ import {
   withInitializationRollback,
   retrySeatUpdateRequest,
 } from "../auth/internal-auth.js";
+import { cleanDisplayName } from "../../../../packages/game-core/src/names.js";
 import {
   normalizePublicMatchSummary,
 } from "./public-match.js";
@@ -121,9 +122,7 @@ function configuredDuration(value: string | undefined, fallback: number): number
 
 function json(value: unknown, status = 200): Response { return Response.json(value, { status }); }
 function cleanName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const name = value.replace(/<[^>]*>/g, "").trim().slice(0, 32);
-  return name || null;
+  return cleanDisplayName(value) || null;
 }
 function clientIdentity(request: Request): string {
   const cfConnectingIp = request.headers.get("cf-connecting-ip")?.trim();

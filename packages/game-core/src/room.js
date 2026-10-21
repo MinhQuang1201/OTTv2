@@ -1,15 +1,10 @@
 const crypto = require("crypto");
 const rules = require("./rules");
 const config = require("./config");
+const { cleanDisplayName } = require("./names");
 
 function sanitizeName(name) {
-  const raw = String(name || "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[<>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!raw) return "Khách";
-  return raw.slice(0, config.NAME_MAX);
+  return cleanDisplayName(String(name || "")) || "Khách";
 }
 
 function snapshotPlayers(room) {

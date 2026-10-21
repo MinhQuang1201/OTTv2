@@ -210,7 +210,9 @@ export class OnlineSession implements GameSession {
     bind("left", () => { void this.leave(); });
     bind("error", (payload) => {
       const err = payload as Record<string, unknown> | undefined;
-      if (err?.error === "stale_revision" || err?.code === "stale_revision") {
+      // Recoverable command rejections: the move was not applied and the session stays valid.
+      const recoverable = ["stale_revision", "rate_limited"];
+      if (recoverable.includes(err?.error as string) || recoverable.includes(err?.code as string)) {
         if (this.snapshot.pendingMove) {
           this.snapshot = Object.freeze({ ...this.snapshot, pendingMove: false });
           this.publish();

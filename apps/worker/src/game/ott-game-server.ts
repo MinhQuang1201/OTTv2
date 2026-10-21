@@ -10,6 +10,7 @@ import {
 } from "../../../../packages/protocol/src/index.js";
 import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, internalSecretMatches, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
 import { logEvent } from "../observability/log.js";
+import { cleanDisplayName } from "../../../../packages/game-core/src/names.js";
 import { DurableRoomAdapter, TERMINAL_GC_KEY, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
 
 export interface OttCommandHandler {
@@ -165,7 +166,7 @@ export class OttGameServer extends YServer {
         typeof body.name !== "string" || typeof body.capability !== "string") {
       return new Response("Bad request", { status: 400 });
     }
-    const name = body.name.replace(/<[^>]*>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+    const name = cleanDisplayName(body.name);
     if (!name) return new Response("Bad request", { status: 400 });
     const result = await verifyCapabilityTransaction(this.ottEnv.OTT_INTERNAL_SECRET, body.capability, {
       allocationId: body.allocationId,
@@ -223,13 +224,20 @@ export class OttGameServer extends YServer {
   private async dispatchOttMessage(connection: Connection, message: string): Promise<void> {
     const now = this.now();
     const previous = this.lastOttPacketMs.get(connection);
-    this.lastOttPacketMs.set(connection, now);
-    if (previous !== undefined && now - previous < MIN_OTT_PACKET_INTERVAL_MS) return;
+    const throttled = previous !== undefined && now - previous < MIN_OTT_PACKET_INTERVAL_MS;
+    // Only accepted packets move the window, so a client sending slightly too fast is
+    // slowed down rather than starved.
+    if (!throttled) this.lastOttPacketMs.set(connection, now);
 
     const parsed = parseOttMessage(message);
     // Non-OTT custom messages are intentionally isolated from upstream handlers.
     if (!parsed.ok) return;
     const command = parsed.value;
+    if (throttled) {
+      // Tell the sender its command was not applied, so a pending move is not left waiting.
+      this.sendError(connection, command.roomId, "rate_limited");
+      return;
+    }
     if (command.type === "ott:spectate" && this.ottEnv.OTT_SPECTATOR_ENABLED !== "true") {
       this.sendError(connection, command.roomId, "spectate_rejected");
       return;

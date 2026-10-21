@@ -1880,3 +1880,29 @@ test("Worker uses separate Lobby and Game DO bindings without a process registry
   assert.doesNotMatch(worker, /new Map|process\./);
   assert.doesNotMatch(lobby, /new Map|process\./);
 });
+
+test("throttled OTT commands get rate_limited and do not extend the throttle window", async () => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  let now = 1_000;
+  fixture.server.now = () => now;
+  const player = connection("throttle-player");
+  const move = JSON.stringify({ __ott: true, roomId: "ott-room-task6", type: "ott:move", from: { x: 4, y: 7 }, to: { x: 3, y: 6 } });
+
+  await fixture.server.dispatchOttMessage(player, move);
+  assert.equal(fixture.messages.length, 0, "an accepted packet from an unattached socket is ignored silently");
+
+  now = 1_020;
+  await fixture.server.dispatchOttMessage(player, move);
+  assert.equal(fixture.messages.length, 1);
+  assert.deepEqual(fixture.messages[0], { __ott: true, roomId: "ott-room-task6", revision: 0, type: "ott:error", error: "rate_limited" });
+
+  // 45 ms after the last accepted packet, but only 25 ms after the throttled one.
+  now = 1_045;
+  await fixture.server.dispatchOttMessage(player, move);
+  assert.equal(fixture.messages.length, 1, "a throttled packet must not push the window forward");
+
+  now = 1_050;
+  await fixture.server.dispatchOttMessage(player, "not json");
+  assert.equal(fixture.messages.length, 1, "throttled non-OTT frames stay silent");
+});
