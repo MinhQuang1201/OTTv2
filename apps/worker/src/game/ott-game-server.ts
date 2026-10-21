@@ -10,6 +10,7 @@ import {
 } from "../../../../packages/protocol/src/index.js";
 import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, internalSecretMatches, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
 import { logEvent } from "../observability/log.js";
+import { cleanDisplayName } from "../../../../packages/game-core/src/names.js";
 import { DurableRoomAdapter, TERMINAL_GC_KEY, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
 
 export interface OttCommandHandler {
@@ -165,7 +166,7 @@ export class OttGameServer extends YServer {
         typeof body.name !== "string" || typeof body.capability !== "string") {
       return new Response("Bad request", { status: 400 });
     }
-    const name = body.name.replace(/<[^>]*>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+    const name = cleanDisplayName(body.name);
     if (!name) return new Response("Bad request", { status: 400 });
     const result = await verifyCapabilityTransaction(this.ottEnv.OTT_INTERNAL_SECRET, body.capability, {
       allocationId: body.allocationId,

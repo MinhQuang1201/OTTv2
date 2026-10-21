@@ -22,15 +22,17 @@ import {
   type MatchResult,
 } from "../../../../packages/arena/src/domain/human-tournaments/human-tournament.mjs";
 import type { Allocation } from "./ott-lobby-server.js";
+import { cleanDisplayName } from "../../../../packages/game-core/src/names.js";
+
+/** Tournament titles may be longer than player names; both are cleaned the same way. */
+const TOURNAMENT_NAME_MAX = 32;
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, { status });
 }
 
-function cleanName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const name = value.replace(/<[^>]*>/g, "").trim().slice(0, 32);
-  return name || null;
+function cleanName(value: unknown, max?: number): string | null {
+  return cleanDisplayName(value, max) || null;
 }
 
 export class TournamentCoordinator {
@@ -45,7 +47,7 @@ export class TournamentCoordinator {
     const normAction = action.replace(":", "-");
 
     if (normAction === "tournament-create") {
-      const name = typeof body.name === "string" ? cleanName(body.name) : null;
+      const name = typeof body.name === "string" ? cleanName(body.name, TOURNAMENT_NAME_MAX) : null;
       const organizerName = typeof body.organizerName === "string" ? cleanName(body.organizerName) : null;
       const formatId = typeof body.formatId === "string" ? body.formatId.trim() : "swiss";
       const mapId = typeof body.mapId === "string" ? body.mapId.trim() : "classic";
