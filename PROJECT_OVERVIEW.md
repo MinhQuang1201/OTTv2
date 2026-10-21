@@ -1,24 +1,30 @@
 # PROJECT_OVERVIEW — OTTv2
 
-> Tài liệu rà soát toàn dự án, mô tả **trạng thái code hiện tại** trên nhánh `feat/ai-minimax`
-> (commit `7181c92`, ngày rà soát 2026-10-21). Mọi kết luận đều dựa trên việc đọc code và
-> chạy lệnh trong máy local. Mức tin cậy được ghi rõ: **Confirmed** (có bằng chứng),
-> **Potential** (có nguy cơ, chưa đủ bằng chứng), **Not verified** (chưa kiểm tra được).
-> Các mục §1–§15 mô tả trạng thái **lúc rà soát**; xem bảng ngay dưới cho những gì đã sửa sau đó.
+> Tài liệu rà soát toàn dự án. Lần rà soát chạy trên commit `7181c92` (2026-10-21); các lỗi ưu tiên
+> cao đã được sửa và merge vào `main` qua PR #18 (merge commit `f61c910`). Tài liệu này mô tả
+> **trạng thái của `main` sau PR #18**. Mọi kết luận dựa trên việc đọc code và chạy lệnh local hoặc trên CI.
+> Mức tin cậy: **Confirmed** (có bằng chứng), **Potential** (có nguy cơ, chưa đủ bằng chứng),
+> **Not verified** (chưa kiểm tra được).
 
-### Cập nhật sau rà soát
+## Trạng thái xử lý (cập nhật 2026-10-21)
 
-| Mục | Thay đổi | Kiểm chứng |
-|---|---|---|
-| H1 | `draft/run` trả 403 `SOURCE_SUBMISSION_DISABLED` cho non-admin khi draft service chạy `trusted-process` (`bots.mjs`, `draftService.trustedLocalMode`) | Test mới: author → 403, admin → 200 |
-| M1, M2 | `Room.resumePlayer`/`addPlayer` và `restoreLiveConnection` không chạy đồng hồ của ghế tới lượt khi ghế đó đang mất kết nối | 2 test mới trong `tests/room.test.js`; script tái hiện không còn lỗi |
-| M3 | `publishPublicSummary` chiếu đồng hồ tới `now` mà không gọi `settleClock` trên Room | typecheck worker + unit pass |
-| M5 | Gỡ `partykit`, `playhtml` khỏi `dependencies` | `npm audit --omit=dev`: 0 lỗ hổng (trước: 5); toàn bộ: 10 (trước: 12) |
-| L3, L4 | README: Node 22, cổng Vite 5173; `$schema` của wrangler test configs | — |
+| Mục | Mức | Trạng thái | Commit / ghi chú |
+|---|---|---|---|
+| H1 — `draft/run` cho author chạy mã trên host | High | ✅ Đã sửa | `41b89e0`: non-admin nhận 403 `SOURCE_SUBMISSION_DISABLED` khi draft chạy `trusted-process`; test author → 403, admin → 200 |
+| M1 — resume chạy đồng hồ của ghế còn mất kết nối | Medium | ✅ Đã sửa | `5afc9b2` (`Room.resumePlayer`, `restoreLiveConnection`) + test |
+| M2 — ván bắt đầu khi A đang mất kết nối vẫn chạy đồng hồ A | Medium | ✅ Đã sửa | `5afc9b2` (`Room.addPlayer`) + test |
+| M3 — summary công khai mutate Room | Medium | ✅ Đã sửa | `2bc9989`: chiếu đồng hồ từ `clockAnchorMs`, không gọi `settleClock` |
+| M4 — tài liệu rollout/origin mâu thuẫn | Medium | ⏳ Mở — cần chủ dự án quyết định | Xem §12-M4 |
+| M5 — dependency không dùng + lỗ hổng | Medium | 🟡 Một phần | `95bbb76`: gỡ `partykit`/`playhtml`, `npm audit --omit=dev` 5 → 0; còn 10 lỗ hổng ở gói dev |
+| L3 — README sai Node/cổng | Low | ✅ Đã sửa | `95bbb76` |
+| L4 — `$schema` hỏng | Low | ✅ Đã sửa | `95bbb76` |
+| L1, L2, L5–L8 | Low | ⏳ Mở | Xem §12 |
 
-Sau khi sửa: build ✅, typecheck web/worker ✅, unit 1007/1007 ✅, web 710/710 ✅, arena 428/428 ✅,
-integration 6 pass / 7 skipped (như trước). Còn mở: M4 (cần chủ dự án chốt trạng thái rollout và origin),
-L1, L2, L5–L8, nâng cấp `vitest`/`vite`/`wrangler`.
+Kiểm chứng sau khi sửa: local — build, typecheck web/worker, unit 1007/1007, web 710/710, arena 428/428;
+CI của PR #18 — job "Install, build, typecheck, unit and web tests" và "Worker integration (wrangler dev --local)"
+đều **SUCCESS** (CI tự tạo `.dev.vars`, nên các test integration bị skip ở local đã chạy trên CI).
+Deploy staging tự động cho `f61c910` (workflow Deploy run `39637054259`): verify, deploy Worker + Vercel và smoke test đều **success**.
+Production chưa deploy (cần tag `v*`).
 
 ---
 
@@ -70,7 +76,7 @@ không có đăng nhập).
 | Static server | `server.js` — `node:http` thuần, `dotenv` |
 | CI/CD | GitHub Actions (`ci.yml`, `deploy.yml`), Cloudflare (Worker), Vercel (frontend) |
 
-Dependency khai báo nhưng **không có source nào import**: `partykit` 0.0.115, `playhtml` 2.15.0 (Confirmed bằng `git grep`; xem §12-M5).
+Lúc rà soát, `partykit` 0.0.115 và `playhtml` 2.15.0 được khai báo nhưng không có source nào import; cả hai đã được gỡ ở `95bbb76` (xem §12-M5).
 
 ## 4. Project Structure
 
@@ -239,21 +245,24 @@ tunnel trycloudflare theo thiết kế của `arena-discovery`).
 
 - **Đã triển khai & có test pass**: game-core, web (local/AI/demo/replay/spectator UI/arena UI), Worker
   (lobby/game/stream/tournament), Arena (API, persistence, queue, build, execution, Elo, giải, competition).
-- **Triển khai một phần**: chat (chưa có code); Arena chỉ cho admin nộp source khi `trustedMode` (chờ
-  "Task 19 isolation verification") — nhưng xem §12-H1.
+- **Triển khai một phần**: chat (chưa có code); Arena ở `trustedMode` chỉ cho admin nộp source **và** chạy
+  draft trên host (chờ "Task 19 isolation verification"); non-admin chỉ chạy draft khi có container isolation
+  (đã sửa ở `41b89e0`, xem §12-H1).
 - **Trạng thái rollout online — tài liệu mâu thuẫn (Confirmed)**:
   `CLAUDE.md` và `README.md` ghi "rollout BLOCKED, online unavailable"; trong khi `HANDOFF.md` (mục
   2026-09-30) ghi Worker và Vercel production đã deploy, spectator production **ENABLED**, và code/CI hiện
   có pipeline deploy production đầy đủ. Lần rà soát này **không truy cập** môi trường deploy nên không xác
   nhận được trạng thái production thực tế (**Not verified**).
-- `HANDOFF.md` ghi "Tám test Node vẫn skip"; lần chạy này `npm run test:unit` báo 0 skipped, còn
-  `npm run test:integration` báo 7 skipped (6 do thiếu `.dev.vars`, 1 manual) — các test skip nằm ở suite integration.
+- `HANDOFF.md` ghi "Tám test Node vẫn skip"; ở local `npm run test:unit` báo 0 skipped, còn
+  `npm run test:integration` báo 7 skipped (6 do thiếu `.dev.vars`, 1 manual). Trên CI các test cần
+  `.dev.vars` đã chạy và job integration pass.
+- Các sửa đổi sau rà soát (H1, M1, M2, M3, M5 một phần, L3, L4) đã nằm trong `main` (PR #18).
 
 ## 12. Known Issues & Risks
 
 Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
 
-### H1 — High — Confirmed: `draft/run` của Arena bỏ qua chặn `trustedMode`, cho tài khoản `author` chạy mã tuỳ ý trên host
+### H1 — High — Confirmed — ✅ Đã sửa (`41b89e0`): `draft/run` của Arena bỏ qua chặn `trustedMode`, cho tài khoản `author` chạy mã tuỳ ý trên host
 - **Vị trí**: `apps/arena-api/src/routes/bots.mjs:190-201` (chặn chỉ ở `POST /bots/:id/versions`),
   `apps/arena-api/src/routes/bots.mjs:354-420` (`POST /bots/:id/draft/run` không có chặn tương tự),
   `packages/arena-node/src/execution/draft-service.mjs:163-164` (`trustedLocalMode` ⇒ `isolation = "trusted-process"`).
@@ -271,7 +280,7 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
 - **Khắc phục**: áp dụng cùng điều kiện `if (trustedMode && user.role !== "admin") → 403` cho `draft/run`
   (hoặc buộc `isolation = "container"` cho non-admin), và sửa test để khẳng định 403 cho author.
 
-### M1 — Medium — Confirmed (mức Room): resume chạy đồng hồ của ghế vẫn đang mất kết nối
+### M1 — Medium — Confirmed (mức Room) — ✅ Đã sửa (`5afc9b2`): resume chạy đồng hồ của ghế vẫn đang mất kết nối
 - **Vị trí**: `packages/game-core/src/room.js:358-362` (`resumePlayer` đặt `runningSeat = state.turn`
   không kiểm tra ghế đó có `connected`); mẫu tương tự ở `apps/worker/src/persistence/room-storage.ts:155-158`
   (`restoreLiveConnection`).
@@ -283,7 +292,7 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
 - **Khắc phục**: chỉ đặt `runningSeat` khi `this.players[this.state.turn]?.connected`; áp dụng tương tự
   trong `restoreLiveConnection`; thêm test tại `Room` cho kịch bản này.
 
-### M2 — Medium — Confirmed (mức Room) / Potential (Worker): ván bắt đầu với đồng hồ của A chạy khi A đang mất kết nối
+### M2 — Medium — Confirmed (mức Room) — ✅ Đã sửa (`5afc9b2`): ván bắt đầu với đồng hồ của A chạy khi A đang mất kết nối
 - **Vị trí**: `room.js:112-118` (`addPlayer` bật `playing` và chạy đồng hồ A mà không xét `players.A.connected`).
 - **Bằng chứng**: tái hiện: A tạo phòng, mất kết nối (trong grace), B vào ⇒ `status=playing`,
   `A.connected=false`, `runningSeat=A`.
@@ -291,7 +300,7 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
   có ngăn join trong tình huống này hay không **chưa được xác minh**.
 - **Khắc phục**: khi đủ hai ghế, chỉ chạy đồng hồ nếu ghế tới lượt đang kết nối.
 
-### M3 — Medium — Potential: đường đọc `publishPublicSummary` làm biến đổi Room trong bộ nhớ
+### M3 — Medium — Potential — ✅ Đã sửa (`2bc9989`): đường đọc `publishPublicSummary` làm biến đổi Room trong bộ nhớ
 - **Vị trí**: `apps/worker/src/game/ott-game-server.ts:705-711` gọi `room.settleClock(now, { commit: false })`.
 - **Mô tả**: `settleClock` vẫn gán `this.state`, `clockAnchorMs` và, nếu hết giờ, gọi `finishTerminal()`
   (status `done`) — nhưng đường này không `persist()` và không broadcast. Room trong bộ nhớ có thể lệch
@@ -300,7 +309,7 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
   `room` có thể vẫn là `playing` sau terminal. **Chưa tái hiện được** trong lần rà soát này.
 - **Khắc phục**: tính summary từ bản sao (`rules.elapseClock` trên `cloneState`) thay vì mutate Room.
 
-### M4 — Medium — Confirmed: tài liệu trạng thái/cấu hình mâu thuẫn
+### M4 — Medium — Confirmed — ⏳ Mở: tài liệu trạng thái/cấu hình mâu thuẫn
 - `CLAUDE.md`, `README.md`: online "BLOCKED/unavailable"; `HANDOFF.md`: production đã deploy, spectator ENABLED;
   `deploy.yml` deploy production từ tag `v*`.
 - `apps/worker/wrangler.jsonc` có `OTT_BROWSER_ORIGIN = https://ottv2-psi.vercel.app`, còn `HANDOFF.md`
@@ -309,7 +318,7 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
 - **Ảnh hưởng**: người/agent bảo trì làm theo ràng buộc sai; deploy thủ công có thể làm hỏng CORS.
 - **Khắc phục**: chọn một nguồn sự thật cho trạng thái rollout, cập nhật `CLAUDE.md`/`README.md`, đồng bộ origin.
 
-### M5 — Medium — Confirmed: dependency không dùng kéo theo lỗ hổng; dev toolchain có advisory nghiêm trọng
+### M5 — Medium — Confirmed — 🟡 Một phần (`95bbb76`): dependency không dùng kéo theo lỗ hổng; dev toolchain có advisory nghiêm trọng
 - `partykit@0.0.115` và `playhtml@2.15.0` nằm trong `dependencies` nhưng không có import nào trong source/test
   (`git grep`). `npm audit --omit=dev`: **5** lỗ hổng (2 high: `undici`/`@fastify/busboy` qua `miniflare`;
   3 moderate: `esbuild`) — tất cả qua chuỗi `partykit`.
@@ -328,12 +337,12 @@ React escape output nên **không** phát hiện XSS. Khắc phục: một hàm 
 < 40 ms bị bỏ toàn bộ; client hợp lệ gửi 2 lệnh sát nhau sẽ không nhận phản hồi cho lệnh thứ hai.
 Khắc phục: chỉ cập nhật mốc khi gói được nhận, trả `ott:error rate_limited`.
 
-### L3 — Low — Confirmed: README sai so với code
+### L3 — Low — Confirmed — ✅ Đã sửa (`95bbb76`): README sai so với code
 README "Cần Node.js 18 trở lên" (engines `>=22`); `npm run dev:web` rồi "mở http://localhost:3000"
 trong khi `vite.config.ts` không đặt `server.port` (Vite mặc định 5173). Arena mặc định chỉ cho CORS
 `:3000`, nên frontend chạy bằng `dev:web` (5173) gọi Arena sẽ bị chặn CORS (**Potential**, chưa thử).
 
-### L4 — Low — Confirmed: `$schema` trỏ tới đường dẫn không tồn tại
+### L4 — Low — Confirmed — ✅ Đã sửa (`95bbb76`): `$schema` trỏ tới đường dẫn không tồn tại
 `apps/worker/wrangler.test.jsonc:2`, `wrangler.spectator-test.jsonc:2` → `node_modules/playhtml/node_modules/wrangler/...` (không có). Chỉ ảnh hưởng gợi ý editor.
 
 ### L5 — Low — Confirmed: bundle lớn
@@ -354,7 +363,7 @@ chiếm ghế hay không (invite/claim) **chưa được xác minh**.
 
 ## 13. Testing Status
 
-Kết quả thực tế trong lần rà soát (Windows 11, Node 22.14.0):
+Kết quả thực tế **lúc rà soát**, trước khi sửa (Windows 11, Node 22.14.0):
 
 | Lệnh | Kết quả |
 |---|---|
@@ -376,8 +385,21 @@ không bắt buộc cho kết luận); `npm run test:arena:isolation` (chạy co
 cấp phát RAM — không chạy trên máy cá nhân khi chưa được đồng ý); smoke test production (không truy cập
 môi trường deploy). Không có lint/format script trong dự án.
 
-Khoảng trống test đáng chú ý: không có test `Room` cho resume khi ghế tới lượt còn mất kết nối (M1) hay
-B vào khi A đang mất kết nối (M2); test `draft/run` hiện **khẳng định** hành vi của H1 thay vì chặn nó.
+### Sau khi sửa (PR #18)
+
+| Lệnh | Local | CI (PR #18) |
+|---|---|---|
+| `npm run build:web`, `typecheck:web`, `typecheck:worker` | ✅ | ✅ |
+| `npm run test:unit` | ✅ 1007/1007 (thêm 3 test: 2 cho `Room`, 1 cho `draft/run`) | ✅ |
+| `npm run test:web` | ✅ 710/710 | ✅ |
+| `npm run test:arena` | ✅ 428/428 | ✅ (các file `tests/arena-*.test.js` nằm trong `test:unit`) |
+| `npm run test:integration` | 6 pass, 7 skipped (thiếu `.dev.vars`) | ✅ (CI tạo `.dev.vars`) |
+| `npm audit --omit=dev` | 0 lỗ hổng | — |
+| `npm audit` (toàn bộ) | 10 (2 critical, 6 high, 2 moderate), đều ở gói dev | — |
+
+Ghi chú: `test:arena` chỉ là một tập con của `test:unit` (runner lấy mọi `tests/*.test.js`), nên Arena đã
+được CI kiểm tra. Khoảng trống test còn lại: `test:arena:isolation` và `test:arena:profiles` không chạy trên CI; e2e
+Playwright và manual acceptance chưa có kết quả mới; chưa có test cho L1/L2.
 
 ## 14. Limitations & Technical Debt
 
@@ -394,11 +416,20 @@ B vào khi A đang mất kết nối (M2); test `draft/run` hiện **khẳng đ�
 
 ## 15. Recommended Next Steps
 
-1. **Sửa H1** (chặn `draft/run` cho non-admin khi `trustedMode`), cập nhật test tương ứng; không công bố Arena qua tunnel trước khi sửa.
-2. **Sửa M1/M2** trong `Room` (+ `restoreLiveConnection`) và thêm test tại `Room.handleMove`/`resumePlayer`/`addPlayer`.
-3. **Thống nhất trạng thái rollout** trong `CLAUDE.md`, `README.md`, `HANDOFF.md`; đồng bộ `OTT_BROWSER_ORIGIN` trong `wrangler.jsonc`.
-4. Gỡ `partykit`/`playhtml` khỏi `dependencies`, nâng `vitest`/`vite`, chạy lại `npm audit`.
-5. Sửa M3 (summary không mutate Room) và L2 (throttle trả lỗi).
-6. Hợp nhất hàm sanitize tên; sửa README (Node 22, cổng Vite); sửa `$schema`.
-7. Chạy e2e/isolation suite trong môi trường phù hợp và thu evidence hibernation thực tế.
-8. Dọn tài liệu lịch sử vào `docs/archive/`, tách các file lớn, thêm lint vào CI.
+Đã xong: các bước 1, 2, 5 (phần M3), 6 (phần README/`$schema`) và một phần bước 4 của danh sách ban đầu —
+xem bảng "Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
+
+1. **Thử tay trên staging rồi mới lên production**: deploy staging của `f61c910` và smoke test tự động đã pass;
+   còn cần thử tạo/vào phòng, mất kết nối cả hai ghế rồi kết nối lại (kiểm M1/M2 trên Worker thật). Sau đó
+   tạo tag `v*` để deploy production.
+2. **Chốt M4 (cần chủ dự án)**: trạng thái rollout online thực tế là gì, origin frontend production là
+   `ottv2-psi` hay `ottv2-two`; sau đó sửa `CLAUDE.md`, `README.md`, `HANDOFF.md`, `apps/worker/wrangler.jsonc`.
+3. **Thêm test M1/M2 ở mức Worker** (`DurableRoomAdapter` + `restoreLiveConnection`) — hiện chỉ có test ở mức `Room`.
+4. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
+   chạy lại toàn bộ test; không dùng `npm audit fix --force`.
+5. **Sửa L2** (throttle 40 ms: chỉ cập nhật mốc khi gói được nhận, trả `ott:error rate_limited`) và **L1**
+   (một hàm sanitize tên dùng chung, thống nhất `NAME_MAX`).
+6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
+   `npm run test:arena:isolation`; thu evidence hibernation/eviction Durable Object.
+7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
+   dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI.
