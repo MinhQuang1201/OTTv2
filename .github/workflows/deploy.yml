@@ -95,7 +95,9 @@ jobs:
         env:
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         run: |
-          npx --no-install wrangler deploy --config apps/worker/wrangler.jsonc ${WRANGLER_ENV:+--env "$WRANGLER_ENV"}
+          # The allowed browser origin comes from the GitHub Environment, not from wrangler.jsonc, so it always
+          # matches the frontend that this same run deploys and the smoke test checks.
+          npx --no-install wrangler deploy --config apps/worker/wrangler.jsonc ${WRANGLER_ENV:+--env "$WRANGLER_ENV"} --var "OTT_BROWSER_ORIGIN:$FRONTEND_URL"
           version_id="$(node -e '
             const lines = require("fs").readFileSync(process.argv[1], "utf8").trim().split("\n").map((line) => JSON.parse(line));
             const deploy = lines.reverse().find((entry) => entry.type === "deploy");

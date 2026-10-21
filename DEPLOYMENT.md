@@ -75,13 +75,17 @@ Smoke test kiem tra `POST /control/list` voi Origin frontend tra 200, co CORS du
    | `WORKER_URL` | `https://ottv2-staging.<cloudflare-account>.workers.dev` | `https://ottv2-minimal.haixcxt.workers.dev` |
    | `FRONTEND_URL` | `https://ottv2-staging.vercel.app` | `https://ottv2-two.vercel.app` |
 
-   `FRONTEND_URL` phai trung dung `OTT_BROWSER_ORIGIN` cua env tuong ung trong `apps/worker/wrangler.jsonc`, neu khong smoke test se fail o buoc CORS.
+   `deploy.yml` truyen `FRONTEND_URL` vao Worker thanh `OTT_BROWSER_ORIGIN` luc deploy, nen khong can sua `wrangler.jsonc` khi doi domain. Gia tri trong `wrangler.jsonc` chi con la mac dinh cho deploy tay.
+
+   Neu dung tai khoan Cloudflare/Vercel moi: tao Worker URL cua tai khoan do truoc (xem muc duoi), roi moi dien `WORKER_URL`.
 3. Secrets cho moi environment: `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers", chi account chua Worker), `CLOUDFLARE_ACCOUNT_ID`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (lay tu `.vercel/project.json` sau `vercel link`). Khong dat `OTT_INTERNAL_SECRET` vao GitHub.
 4. Dat secret server-only cho Worker staging mot lan (deploy staging dau tien se fail o buoc kiem tra secret cho toi khi lam buoc nay):
 
    ```bash
    npx --no-install wrangler secret put OTT_INTERNAL_SECRET --config apps/worker/wrangler.jsonc --env staging
    ```
+
+   Tai khoan Cloudflare moi: vao dashboard -> Workers & Pages va dat ten subdomain `workers.dev` truoc (Wrangler trong CI khong hoi duoc), roi lay Account ID. Cung lam voi `--env` production: `wrangler secret put OTT_INTERNAL_SECRET --config apps/worker/wrangler.jsonc` (khong them `--env`).
 
 5. Bao ve nhanh `main`: bat buoc pull request va hai check `Install, build, typecheck, unit and web tests` va `Worker integration (wrangler dev --local)` xanh truoc khi merge.
 
