@@ -322,6 +322,21 @@ describe("room", () => {
     assert.equal(JSON.stringify(room.state), before);
   });
 
+  it("resolves both seats expiring grace on the same instant by clock, then by turn", () => {
+    // Equal clocks: the seat on turn (A) loses. Otherwise the seat with less clock left loses.
+    for (const [spentB, expectedWinner] of [[0, "B"], [5000, "A"]]) {
+      const clock = fakeClock(0);
+      const { room, a, b } = roomWithPlayers(clock);
+      room.state.clock.remainingMs.B -= spentB;
+      room.removePlayer(a);
+      room.removePlayer(b);
+      clock.advance(config.TIME_CONTROL.reconnectGraceMs);
+      assert.equal(room.status, "done");
+      assert.equal(room.state.reason, "disconnect_timeout");
+      assert.equal(room.state.winner, expectedWinner);
+    }
+  });
+
   it("treats explicit leave as immediate loss", () => {
     const clock = fakeClock(0);
     const { room, b } = roomWithPlayers(clock);

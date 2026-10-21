@@ -300,6 +300,10 @@ Nếu tới lượt đối phương mà đối phương không thể thực hi�
 
 Nếu đồng hồ của một người chơi về 0, người đó thua ngay và người còn lại thắng. Cách vận hành đồng hồ được quy định tại mục 14.1.
 
+### 10.5. Hai ghế cùng hết thời gian chờ kết nối lại
+
+Nếu cả hai ghế mất kết nối và thời gian chờ 60 giây của hai bên kết thúc đúng cùng một thời điểm, ghế còn ít thời gian trên đồng hồ hơn thua. Nếu đồng hồ bằng nhau, ghế đang tới lượt thua. Kết quả ghi `reason: "disconnect_timeout"`; ván không hòa và không bị treo.
+
 ---
 
 ## 11. Thứ tự kiểm tra kết thúc ván

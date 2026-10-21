@@ -373,11 +373,7 @@ class Room {
     const expired = onlySeat ? expiredAll.filter((seat) => seat === onlySeat) : expiredAll;
     if (!expired.length) return { ok: true, state: this.state, events: [] };
     const simultaneous = expiredAll.length === 2 && this.players.A.reconnectDeadlineMs === this.players.B.reconnectDeadlineMs;
-    if (simultaneous) {
-      // Rule.md does not define a winner when both grace deadlines tie.
-      return { ok: true, state: this.state, events: [] };
-    }
-    const loser = expired[0];
+    const loser = simultaneous ? this.tieBreakGraceLoser(now) : expired[0];
     const winner = loser === "A" ? "B" : "A";
     const settled = this.settleClock(now);
     if (this.state.winner) return settled;
@@ -387,6 +383,14 @@ class Room {
     this.commitStateChange([{ type: "win", winner, reason: "disconnect_timeout", eliminatedPlayer: null }]);
     this.finishTerminal();
     return { ok: true, state: this.state, events: this.lastEvents };
+  }
+
+  // Rule.md: when both seats' grace ends on the same instant, the seat with less
+  // clock left loses; an exact tie goes against the seat that is on turn.
+  tieBreakGraceLoser(now) {
+    const clock = this.state.clock.remainingMs;
+    if (clock.A !== clock.B) return clock.A < clock.B ? "A" : "B";
+    return this.state.turn;
   }
 
   payload() {

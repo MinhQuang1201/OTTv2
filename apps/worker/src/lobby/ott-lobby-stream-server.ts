@@ -1,6 +1,6 @@
 import { YServer } from "y-partyserver";
 import type { Connection } from "partyserver";
-import { internalRequest } from "../auth/internal-auth.js";
+import { internalRequest, internalSecretMatches } from "../auth/internal-auth.js";
 import { MAX_OTT_PAYLOAD_BYTES, validatePublicMatchCatalog, type PublicMatchView } from "../../../../packages/protocol/src/index.js";
 
 const STREAM_RESEND_KEY = "lobby-stream-resend";
@@ -392,7 +392,7 @@ export class OttLobbyStreamServer extends YServer {
     }
     const pathname = new URL(request.url).pathname;
     if (pathname === "/internal/active-update" && request.method === "POST") {
-      if (!this.ottEnv.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.ottEnv.OTT_INTERNAL_SECRET) {
+      if (!internalSecretMatches(request, this.ottEnv.OTT_INTERNAL_SECRET)) {
         return new Response("Forbidden", { status: 403 });
       }
       const text = await readCappedUtf8Body(request, MAX_OTT_PAYLOAD_BYTES);

@@ -15,9 +15,13 @@ export type StorageLike = {
   delete?(key: string): Promise<boolean | void>;
   setAlarm?(deadline: number): Promise<void>;
   deleteAlarm?(): Promise<void>;
+  deleteAll?(): Promise<void>;
 };
 
-export type RoomTiming = { initialClockMs?: number; reconnectGraceMs?: number; alarmRetryMs?: number };
+export type RoomTiming = { initialClockMs?: number; reconnectGraceMs?: number; alarmRetryMs?: number; retentionMs?: number };
+
+export const DEFAULT_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
+export const TERMINAL_GC_KEY = "terminalGcAt";
 export type RoomConnection = { id?: string; send?: (value: string) => void; readyState?: number; open?: boolean };
 export type RoomViewer =
   | { readonly role: "player"; readonly seat: "A" | "B" }
@@ -202,7 +206,9 @@ export class DurableRoomAdapter {
 
   async scheduleAlarm(storage: StorageLike = this.storage): Promise<void> {
     if (await storage.get("allocationTerminalReason")) {
-      await storage.deleteAlarm?.();
+      const gcAt = await storage.get<number>(TERMINAL_GC_KEY);
+      if (typeof gcAt === "number" && storage.setAlarm) await storage.setAlarm(Math.max(this.now(), gcAt));
+      else await storage.deleteAlarm?.();
       return;
     }
     if (!storage.setAlarm || !this.room) return;
@@ -271,7 +277,11 @@ export class DurableRoomAdapter {
     await storage.put("allocationTerminalReason", reason);
     await storage.delete?.("terminalRetryReason");
     this.unavailable = true;
-    await storage.deleteAlarm?.();
+    // Keep the finished Room readable for a while, then the alarm wipes the whole Game DO storage.
+    const gcAt = this.now() + (this.timing.retentionMs ?? DEFAULT_TERMINAL_RETENTION_MS);
+    await storage.put(TERMINAL_GC_KEY, gcAt);
+    if (storage.setAlarm) await storage.setAlarm(gcAt);
+    else await storage.deleteAlarm?.();
   }
 
   async scheduleTerminalRetry(reason: string, storage: StorageLike = this.storage): Promise<void> {

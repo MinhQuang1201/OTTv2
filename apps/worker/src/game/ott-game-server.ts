@@ -8,8 +8,9 @@ import {
   parseOttMessage,
   type OttCommand,
 } from "../../../../packages/protocol/src/index.js";
-import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
-import { DurableRoomAdapter, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
+import { applyInitializationReceipt, applySeatUpdateReceipt, attachWithCapabilityRecovery, initializationPayloadHash, internalRequest, internalSecretMatches, purgeExpiredNonces, verifyCapability, verifyCapabilityTransaction } from "../auth/internal-auth.js";
+import { logEvent } from "../observability/log.js";
+import { DurableRoomAdapter, TERMINAL_GC_KEY, projectRoomPayload, ROOM_UNAVAILABLE, type CommittedRoomOutcome, type RoomViewer } from "../persistence/room-storage.js";
 
 export interface OttCommandHandler {
   handle(connection: Connection, command: OttCommand): OttHandlerResult | void | Promise<OttHandlerResult | void>;
@@ -104,7 +105,7 @@ export class OttGameServer extends YServer {
       console.warn("OTT game initialization rejected: missing Game DO secret binding");
       return new Response("Forbidden", { status: 403 });
     }
-    if (request.headers.get("x-ott-internal-secret") !== this.ottEnv.OTT_INTERNAL_SECRET) {
+    if (!internalSecretMatches(request, this.ottEnv.OTT_INTERNAL_SECRET)) {
       console.warn("OTT game initialization rejected: internal secret mismatch");
       return new Response("Forbidden", { status: 403 });
     }
@@ -155,7 +156,7 @@ export class OttGameServer extends YServer {
   }
 
   private async updateSeat(request: Request): Promise<Response> {
-    if (!this.ottEnv.OTT_INTERNAL_SECRET || request.headers.get("x-ott-internal-secret") !== this.ottEnv.OTT_INTERNAL_SECRET) {
+    if (!internalSecretMatches(request, this.ottEnv.OTT_INTERNAL_SECRET)) {
       return new Response("Forbidden", { status: 403 });
     }
     let body: { allocationId?: string; roomId?: string; name?: string; capability?: string };
@@ -407,6 +408,7 @@ export class OttGameServer extends YServer {
     return {
       initialClockMs: configuredDuration(this.ottEnv.OTT_TEST_CLOCK_MS),
       reconnectGraceMs: configuredDuration(this.ottEnv.OTT_TEST_RECONNECT_GRACE_MS),
+      retentionMs: configuredDuration(this.ottEnv.OTT_TERMINAL_RETENTION_MS),
     };
   }
 
@@ -838,6 +840,7 @@ export class OttGameServer extends YServer {
   }
 
   async alarm(): Promise<void> {
+    if (await this.wipeIfRetentionElapsed()) return;
     await this.purgeExpiredNonces();
     const adapter = await this.loadRoom();
     if (adapter && !adapter.unavailable) {
@@ -849,6 +852,17 @@ export class OttGameServer extends YServer {
     if (typeof superAlarm === "function") {
       await superAlarm.call(this);
     }
+  }
+
+  /** A finished game keeps its storage for the retention window, then the DO forgets everything. */
+  private async wipeIfRetentionElapsed(): Promise<boolean> {
+    const gcAt = await this.ctx.storage.get<number>(TERMINAL_GC_KEY);
+    if (typeof gcAt !== "number" || !(await this.ctx.storage.get("allocationTerminalReason"))) return false;
+    if (Date.now() < gcAt) return false;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    logEvent("info", "game_storage_wiped");
+    return true;
   }
 
   protected async consumeAttachCapabilityForTest(ticket: string): Promise<boolean> {
