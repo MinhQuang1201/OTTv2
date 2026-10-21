@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 
-const { parseArgs, checkControlList, checkFrontend } = require("../scripts/smoke-deploy");
+const { parseArgs, checkControlList, checkSpectatorCatalog, checkFrontend } = require("../scripts/smoke-deploy");
 
 const FRONTEND = "https://ottv2-staging.vercel.app";
 
@@ -77,4 +77,23 @@ test("smoke frontend requires a bundle that targets the Worker without secret ma
   const leaky = await fakeFrontend(`const host="${worker}";const k="OTT_INTERNAL_SECRET";`);
   t.after(() => leaky.server.close());
   await assert.rejects(checkFrontend(worker, leaky.origin), /contains OTT_INTERNAL_SECRET/);
+});
+
+test("smoke spectator catalog requires /control/active to answer 200 with a matches array", async (t) => {
+  for (const [status, body, expected] of [
+    [200, { matches: [{ roomId: "ott-1" }] }, 1],
+    [404, { error: "not_found" }, /HTTP 200, got 404/],
+    [200, { ok: true }, /no matches array/],
+  ]) {
+    const { server, origin } = await listen((request, response) => {
+      if (request.method !== "POST" || request.url !== "/control/active" || request.headers.origin !== FRONTEND) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+    });
+    t.after(() => server.close());
+    if (typeof expected === "number") assert.equal(await checkSpectatorCatalog(origin, FRONTEND), expected);
+    else await assert.rejects(checkSpectatorCatalog(origin, FRONTEND), expected);
+  }
 });

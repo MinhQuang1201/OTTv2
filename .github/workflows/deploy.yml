@@ -122,6 +122,8 @@ jobs:
         env:
           VITE_OTT_PLAYHTML_HOST: ${{ vars.WORKER_URL }}
           VITE_OTT_PLAYHTML_CONTROL_ENDPOINT: ${{ vars.WORKER_URL }}
+          # Must match OTT_SPECTATOR_ENABLED in apps/worker/wrangler.jsonc; without it the lobby hides live matches.
+          VITE_OTT_SPECTATOR_ENABLED: "true"
         run: npm run build:web
 
       - name: Deploy frontend to Vercel
@@ -145,7 +147,7 @@ jobs:
           fi
 
       - name: Smoke test
-        run: node scripts/smoke-deploy.js --worker "$WORKER_URL" --frontend "$FRONTEND_URL"
+        run: node scripts/smoke-deploy.js --worker "$WORKER_URL" --frontend "$FRONTEND_URL" --spectator
 
       - name: Record deployment
         env:
