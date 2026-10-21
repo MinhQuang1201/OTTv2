@@ -1,12 +1,13 @@
 # PROJECT_OVERVIEW — OTTv2
 
-> Tài liệu rà soát toàn dự án. Lần rà soát chạy trên commit `7181c92` (2026-10-21); các lỗi ưu tiên
-> cao đã được sửa và merge vào `main` qua PR #18 (merge commit `f61c910`). Tài liệu này mô tả
-> **trạng thái của `main` sau PR #18**. Mọi kết luận dựa trên việc đọc code và chạy lệnh local hoặc trên CI.
+> Tài liệu rà soát toàn dự án. Lần rà soát chạy trên commit `7181c92` (2026-10-21); các lỗi đã sửa
+> được merge qua PR #18 và #20. Ngày 2026-10-22 có thêm rà soát online bằng trình duyệt thật và
+> giai đoạn 1 của kế hoạch `docs/superpowers/plans/2026-10-22-online-reliability-and-capture-feedback.md`
+> (nhánh `fix/online-reliability`). Mọi kết luận dựa trên việc đọc code và chạy lệnh local, trên CI hoặc trên staging.
 > Mức tin cậy: **Confirmed** (có bằng chứng), **Potential** (có nguy cơ, chưa đủ bằng chứng),
 > **Not verified** (chưa kiểm tra được).
 
-## Trạng thái xử lý (cập nhật 2026-10-21)
+## Trạng thái xử lý (cập nhật 2026-10-22)
 
 | Mục | Mức | Trạng thái | Commit / ghi chú |
 |---|---|---|---|
@@ -23,8 +24,24 @@
 | L2 — throttle 40 ms bỏ gói im lặng | Low | ✅ Đã sửa | `dad7b2e`: chỉ gói được nhận mới dời mốc; lệnh `ott:*` bị chặn nhận `ott:error rate_limited`; `OnlineSession` coi như `stale_revision` (bỏ trạng thái chờ, giữ phiên) |
 | L5–L8 | Low | ⏳ Mở | Xem §12 |
 
-Đợt 2 (L1, L2, test Worker M1/M2) nằm trên nhánh `fix/worker-clock-tests-throttle-names`, **chưa merge**. Kiểm chứng local:
-build, typecheck web/worker, unit 1014/1014, web 712/712, integration 6 pass / 7 skipped, `wrangler deploy --dry-run` bundle được.
+Đợt 2 (L1, L2, test Worker M1/M2) đã merge qua PR #20 (`fbf26a5`).
+
+### Lỗi online tìm bằng trình duyệt thật (2026-10-22) — giai đoạn 1, nhánh `fix/online-reliability`
+
+| Mục | Mức | Lỗi | Trạng thái |
+|---|---|---|---|
+| O1 | Critical | Tải lại trang / đóng tab giữa ván là mất ghế | ✅ Sảnh hiện "Bạn đang có ván dở — Vào lại / Bỏ"; vào lại bằng `intent: "resume"` |
+| O2 | High | Kẹt "Đang kết nối online…" vĩnh viễn (production 2/8 lần) | ✅ Timeout 8 s + thử lại 2 lần bằng ticket mới, rồi báo lỗi có "Thử lại"; nút "Huỷ kết nối"; server trả `ott:error` và log `attach_rejected`/`attach_failed`. Nguyên nhân gốc phía server vẫn chờ log |
+| O3 | High | Không chia sẻ được mã phòng; gõ `ott-<uuid>` bị `not_found` | ✅ Khung mời có mã ngắn + sao chép mã/link `?join=`; Lobby nhận `ott-<uuid>`, alias, link |
+| O4 | Medium | Mã lỗi thô (`not_found`…) hiện cho người dùng | ✅ Bảng dịch lỗi tiếng Việt |
+| O5 | Medium | Khán giả luôn "không khả dụng" trên staging/production | ✅ `deploy.yml` build với `VITE_OTT_SPECTATOR_ENABLED`; smoke test kiểm `/control/active` |
+| O6 | Low | Đang chờ người thứ hai mà thẻ đối thủ ghi "Đã kết nối" | ✅ Hiện "Đang chờ người chơi…", không ai có lượt |
+| O7 | High | **"Rời bàn" không tới server**: đối thủ chỉ thấy "Mất kết nối" + 60 s chờ thay vì thắng ngay (tìm ra khi kiểm tra staging) | ✅ Client chờ lệnh `ott:leave` gửi xong (`flush`, tối đa 1 s) rồi mới đóng kết nối |
+
+Kiểm chứng giai đoạn 1: local — build, typecheck web/worker, unit, web, integration đều pass; staging (deploy nhánh bằng
+`workflow_dispatch`) — kịch bản Playwright hai/ba/bốn profile: tạo phòng → mã ngắn → B gõ mã → đi quân → khán giả xem
+read-only → A tải lại trang → "Vào lại" đúng ghế và thế cờ → link mời → A rời bàn → B thấy "Bạn thắng · Đối thủ đã rời bàn":
+**9/9 bước × 2 lần**; luồng cơ bản 3/3; chơi cùng máy, AI 3 mức, replay, giải đấu, giao diện tối, điện thoại không hồi quy.
 
 Kiểm chứng đợt 1 (PR #18): local — build, typecheck web/worker, unit 1007/1007, web 710/710, arena 428/428;
 CI của PR #18 — job "Install, build, typecheck, unit and web tests" và "Worker integration (wrangler dev --local)"
@@ -422,18 +439,21 @@ Playwright và manual acceptance chưa có kết quả mới.
 
 ## 15. Recommended Next Steps
 
-Đã xong: H1, M1, M2 (kèm test mức `Room` và Worker), M3, L1, L2, L3, L4 và phần production của M5 — xem bảng
-"Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
+Đã xong: H1, M1, M2 (kèm test mức `Room` và Worker), M3, L1, L2, L3, L4, phần production của M5 và giai đoạn 1
+online (O1–O7) — xem bảng "Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
 
-1. **Review và merge đợt 2** (nhánh `fix/worker-clock-tests-throttle-names`), để CI chạy integration với `.dev.vars`.
-2. **Thử tay trên staging rồi mới lên production**: tạo/vào phòng; mất kết nối cả hai ghế rồi kết nối lại (M1/M2);
-   bấm đi nhanh liên tiếp để thấy nước bị chặn được nhả ra thay vì treo (L2). Sau đó tạo tag `v*` để deploy production.
-3. **Chốt M4 (cần chủ dự án)**: trạng thái rollout online thực tế là gì, origin frontend production là
-   `ottv2-psi` hay `ottv2-two`; sau đó sửa `CLAUDE.md`, `README.md`, `HANDOFF.md`, `apps/worker/wrangler.jsonc`.
-4. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
+1. **Review và merge giai đoạn 1** (nhánh `fix/online-reliability`), rồi tạo tag `v*` để production nhận các bản sửa
+   online (production vẫn chạy `v1.2.0`).
+2. **Theo dõi log `attach_rejected`/`attach_failed`** trên production (Workers Observability / `wrangler tail`) để tìm
+   nguyên nhân gốc của O2; nghi vấn cần kiểm chứng: lệch đồng hồ giữa Lobby DO và Game DO (`issuedAt > now`) khi DO khởi động lạnh.
+3. **Giai đoạn 2 — cảm giác ăn quân** theo kế hoạch đã chốt (đầy đủ 2.1–2.7).
+4. **Chốt M4**: GitHub Environment `production` dùng `FRONTEND_URL=https://ottv2-psi.vercel.app` (khớp
+   `wrangler.jsonc`), nên `ottv2-two` trong `HANDOFF.md` đã lỗi thời; còn cần chủ dự án xác nhận trạng thái rollout để sửa
+   `CLAUDE.md`/`README.md` (online đang chạy production, không còn "BLOCKED").
+5. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
    chạy lại toàn bộ test; không dùng `npm audit fix --force`.
-5. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
+6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
    `npm run test:arena:isolation`; thu evidence hibernation/eviction Durable Object.
-6. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
+7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
    dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI; cân nhắc giới hạn độ dài tên ngay trên ô nhập
    ở giao diện (hiện chỉ server cắt).

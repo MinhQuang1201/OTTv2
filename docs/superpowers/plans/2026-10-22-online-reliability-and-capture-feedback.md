@@ -103,3 +103,18 @@ Vitest cho thứ tự/hàng đợi hiệu ứng và trạng thái reduced-motion
    đã ăn, lịch sử rõ nghĩa, âm thanh/rung, giải thích nước bị chặn, dọn `strike_loss`).
 2. **Vào lại sau tải trang**: hiện thẻ **"Bạn đang có ván dở — Vào lại / Bỏ"** ở sảnh, không tự động vào.
 3. **Thứ tự**: làm **giai đoạn 1 trước**, kiểm tra staging và gắn tag production, rồi mới tới giai đoạn 2.
+
+## 7. Kết quả giai đoạn 1 (2026-10-22, nhánh `fix/online-reliability`)
+
+| Việc | Kết quả |
+|---|---|
+| 1.1 Vào lại sau tải trang | Xong. `resumeStore` (localStorage, TTL 30 phút) lưu allocation + credential xoay vòng (cập nhật cả khi client tự resume) + alias; thẻ "Vào lại / Bỏ" ở đầu sảnh; xoá khi ván kết thúc, rời bàn hoặc server từ chối. |
+| 1.2 Timeout, thử lại, lối thoát | Xong. 8 s không có snapshot → thử lại 2 lần bằng ticket mới (`resume`) → lỗi có "Thử lại"; nút "Huỷ kết nối" ở sảnh. |
+| 1.3 Server không im lặng + log | Xong. Attach bị từ chối nhận `ott:error attach_rejected`/`room_unavailable`; log `attach_rejected` (kèm lý do capability) và `attach_failed`. Nguyên nhân gốc O2 còn chờ log production. |
+| 1.4 Mã phòng chia sẻ được | Xong. Khung mời (mã ngắn, sao chép mã, sao chép link `?join=`); join nhận alias / `ott-<uuid>` / uuid / link; Lobby trả alias trong `join` và `resume`; dịch mã lỗi. |
+| 1.5 Bật khán giả khi deploy | Xong. `VITE_OTT_SPECTATOR_ENABLED` trong `deploy.yml`; smoke test kiểm `/control/active`. |
+| 1.6 Trạng thái chờ rõ ràng | Xong. Ghế trống hiện "Đang chờ người chơi…", không ai có lượt, đồng hồ không chạy khi chờ. |
+| Phát sinh: "Rời bàn" bị nuốt (O7) | Xong. `PlayhtmlGameClient.flush()`; `OnlineSession.leave()` chờ gửi xong (≤ 1 s) rồi mới đóng. |
+
+Kiểm chứng: toàn bộ test local pass; CI (kể cả integration) pass trên nhánh; staging chạy code nhánh và kịch bản
+Playwright 9/9 bước × 2 lần, luồng cơ bản 3/3, không hồi quy ở các chế độ khác. Production chưa được cập nhật.
