@@ -182,6 +182,21 @@ describe("OnlineSession", () => {
     expect(session.getSnapshot().events.filter((event) => event.id === 7)).toHaveLength(1);
   });
 
+  it.each(["rate_limited", "stale_revision"])("clears a pending move on a recoverable %s rejection without failing the session", async (code) => {
+    const client = new FakeClient();
+    const session = sessionWith(client);
+    await session.start({ mode: "online", intent: "join", playerName: "An", roomId: "room-a" });
+    client.emit("state", state(2));
+    expect((await session.move({ x: 0, y: 2 }, { x: 0, y: 1 })).accepted).toBe(true);
+    expect(session.getSnapshot().pendingMove).toBe(true);
+
+    client.emit("error", { __ott: true, roomId: "room-a", revision: 0, type: "ott:error", error: code });
+
+    expect(session.getSnapshot()).toMatchObject({ phase: "playing", pendingMove: false, error: null });
+    expect((await session.move({ x: 0, y: 2 }, { x: 0, y: 1 })).accepted).toBe(true);
+    expect(client.move).toHaveBeenCalledTimes(2);
+  });
+
   it("publishes display-only clock ticks, delegates leave, and disposes listeners and timers", async () => {
     let current = 0;
     let performanceCurrent = 0;
