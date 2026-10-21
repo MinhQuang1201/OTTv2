@@ -18,9 +18,15 @@
 | M5 — dependency không dùng + lỗ hổng | Medium | 🟡 Một phần | `95bbb76`: gỡ `partykit`/`playhtml`, `npm audit --omit=dev` 5 → 0; còn 10 lỗ hổng ở gói dev |
 | L3 — README sai Node/cổng | Low | ✅ Đã sửa | `95bbb76` |
 | L4 — `$schema` hỏng | Low | ✅ Đã sửa | `95bbb76` |
-| L1, L2, L5–L8 | Low | ⏳ Mở | Xem §12 |
+| M1, M2 — test mức Worker | — | ✅ Đã thêm | `7bbce41`: 3 test `DurableRoomAdapter` (reattach, `restoreLiveConnection`, B vào khi A trong grace); cả 3 fail trên code cũ |
+| L1 — làm sạch tên không nhất quán | Low | ✅ Đã sửa | `0b860e0`: `cleanDisplayName` trong `packages/game-core/src/names.js` dùng chung cho Room, Lobby, Game DO, tournament; tên người ≤ 20, tên giải ≤ 32 |
+| L2 — throttle 40 ms bỏ gói im lặng | Low | ✅ Đã sửa | `dad7b2e`: chỉ gói được nhận mới dời mốc; lệnh `ott:*` bị chặn nhận `ott:error rate_limited`; `OnlineSession` coi như `stale_revision` (bỏ trạng thái chờ, giữ phiên) |
+| L5–L8 | Low | ⏳ Mở | Xem §12 |
 
-Kiểm chứng sau khi sửa: local — build, typecheck web/worker, unit 1007/1007, web 710/710, arena 428/428;
+Đợt 2 (L1, L2, test Worker M1/M2) nằm trên nhánh `fix/worker-clock-tests-throttle-names`, **chưa merge**. Kiểm chứng local:
+build, typecheck web/worker, unit 1014/1014, web 712/712, integration 6 pass / 7 skipped, `wrangler deploy --dry-run` bundle được.
+
+Kiểm chứng đợt 1 (PR #18): local — build, typecheck web/worker, unit 1007/1007, web 710/710, arena 428/428;
 CI của PR #18 — job "Install, build, typecheck, unit and web tests" và "Worker integration (wrangler dev --local)"
 đều **SUCCESS** (CI tự tạo `.dev.vars`, nên các test integration bị skip ở local đã chạy trên CI).
 Deploy staging tự động cho `f61c910` (workflow Deploy run `39637054259`): verify, deploy Worker + Vercel và smoke test đều **success**.
@@ -327,12 +333,12 @@ Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
 - **Khắc phục**: gỡ `partykit`/`playhtml` (sau khi chạy lại toàn bộ test), nâng `vitest`/`vite` theo advisory;
   không dùng `npm audit fix --force` mù quáng vì sẽ hạ `partykit` về `0.0.0`.
 
-### L1 — Low — Confirmed: giới hạn/làm sạch tên người chơi không nhất quán
+### L1 — Low — Confirmed — ✅ Đã sửa (`0b860e0`): giới hạn/làm sạch tên người chơi không nhất quán
 `room.js:5-13` cắt `NAME_MAX = 20` và bỏ `<`/`>` lẻ; `ott-lobby-server.ts:123-127` cắt 32 và chỉ bỏ thẻ
 `<...>`; `ott-game-server.ts:168` cắt 32. Tên trong danh sách phòng chờ (≤32) khác tên trong ván (≤20).
 React escape output nên **không** phát hiện XSS. Khắc phục: một hàm sanitize dùng chung.
 
-### L2 — Low — Confirmed: throttle 40 ms bỏ gói im lặng và tự gia hạn
+### L2 — Low — Confirmed — ✅ Đã sửa (`dad7b2e`): throttle 40 ms bỏ gói im lặng và tự gia hạn
 `ott-game-server.ts:224-227` cập nhật `lastOttPacketMs` cả khi gói bị bỏ, không gửi lỗi. Client gửi đều
 < 40 ms bị bỏ toàn bộ; client hợp lệ gửi 2 lệnh sát nhau sẽ không nhận phản hồi cho lệnh thứ hai.
 Khắc phục: chỉ cập nhật mốc khi gói được nhận, trả `ott:error rate_limited`.
@@ -390,8 +396,8 @@ môi trường deploy). Không có lint/format script trong dự án.
 | Lệnh | Local | CI (PR #18) |
 |---|---|---|
 | `npm run build:web`, `typecheck:web`, `typecheck:worker` | ✅ | ✅ |
-| `npm run test:unit` | ✅ 1007/1007 (thêm 3 test: 2 cho `Room`, 1 cho `draft/run`) | ✅ |
-| `npm run test:web` | ✅ 710/710 | ✅ |
+| `npm run test:unit` | ✅ 1007/1007 sau PR #18; 1014/1014 sau đợt 2 (thêm test Worker M1/M2, throttle, `names`) | ✅ (PR #18) |
+| `npm run test:web` | ✅ 710/710 sau PR #18; 712/712 sau đợt 2 | ✅ (PR #18) |
 | `npm run test:arena` | ✅ 428/428 | ✅ (các file `tests/arena-*.test.js` nằm trong `test:unit`) |
 | `npm run test:integration` | 6 pass, 7 skipped (thiếu `.dev.vars`) | ✅ (CI tạo `.dev.vars`) |
 | `npm audit --omit=dev` | 0 lỗ hổng | — |
@@ -399,7 +405,7 @@ môi trường deploy). Không có lint/format script trong dự án.
 
 Ghi chú: `test:arena` chỉ là một tập con của `test:unit` (runner lấy mọi `tests/*.test.js`), nên Arena đã
 được CI kiểm tra. Khoảng trống test còn lại: `test:arena:isolation` và `test:arena:profiles` không chạy trên CI; e2e
-Playwright và manual acceptance chưa có kết quả mới; chưa có test cho L1/L2.
+Playwright và manual acceptance chưa có kết quả mới.
 
 ## 14. Limitations & Technical Debt
 
@@ -416,20 +422,18 @@ Playwright và manual acceptance chưa có kết quả mới; chưa có test cho
 
 ## 15. Recommended Next Steps
 
-Đã xong: các bước 1, 2, 5 (phần M3), 6 (phần README/`$schema`) và một phần bước 4 của danh sách ban đầu —
-xem bảng "Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
+Đã xong: H1, M1, M2 (kèm test mức `Room` và Worker), M3, L1, L2, L3, L4 và phần production của M5 — xem bảng
+"Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
 
-1. **Thử tay trên staging rồi mới lên production**: deploy staging của `f61c910` và smoke test tự động đã pass;
-   còn cần thử tạo/vào phòng, mất kết nối cả hai ghế rồi kết nối lại (kiểm M1/M2 trên Worker thật). Sau đó
-   tạo tag `v*` để deploy production.
-2. **Chốt M4 (cần chủ dự án)**: trạng thái rollout online thực tế là gì, origin frontend production là
+1. **Review và merge đợt 2** (nhánh `fix/worker-clock-tests-throttle-names`), để CI chạy integration với `.dev.vars`.
+2. **Thử tay trên staging rồi mới lên production**: tạo/vào phòng; mất kết nối cả hai ghế rồi kết nối lại (M1/M2);
+   bấm đi nhanh liên tiếp để thấy nước bị chặn được nhả ra thay vì treo (L2). Sau đó tạo tag `v*` để deploy production.
+3. **Chốt M4 (cần chủ dự án)**: trạng thái rollout online thực tế là gì, origin frontend production là
    `ottv2-psi` hay `ottv2-two`; sau đó sửa `CLAUDE.md`, `README.md`, `HANDOFF.md`, `apps/worker/wrangler.jsonc`.
-3. **Thêm test M1/M2 ở mức Worker** (`DurableRoomAdapter` + `restoreLiveConnection`) — hiện chỉ có test ở mức `Room`.
 4. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
    chạy lại toàn bộ test; không dùng `npm audit fix --force`.
-5. **Sửa L2** (throttle 40 ms: chỉ cập nhật mốc khi gói được nhận, trả `ott:error rate_limited`) và **L1**
-   (một hàm sanitize tên dùng chung, thống nhất `NAME_MAX`).
-6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
+5. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
    `npm run test:arena:isolation`; thu evidence hibernation/eviction Durable Object.
-7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
-   dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI.
+6. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
+   dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI; cân nhắc giới hạn độ dài tên ngay trên ô nhập
+   ở giao diện (hiện chỉ server cắt).
