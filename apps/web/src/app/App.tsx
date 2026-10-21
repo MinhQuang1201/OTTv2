@@ -11,6 +11,7 @@ import { LobbyScreen } from "../features/lobby/LobbyScreen";
 import { GameScreen } from "../features/game/GameScreen";
 import { LocalSession } from "../sessions/local/LocalSession";
 import { AiSession } from "../sessions/ai/AiSession";
+import type { AiLevel } from "../shared/model/aiLevel";
 import { OnlineSession } from "../sessions/online/OnlineSession";
 import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
 import { ReplaySession } from "../sessions/replay/ReplaySession";
@@ -306,8 +307,8 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const onStartLocal = (names: [string, string]) => {
     transitionTo(() => new LocalSession(), { mode: "local", playerNames: names }, "game-active-a");
   };
-  const onStartAi = (playerName: string) => {
-    transitionTo(() => new AiSession(), { mode: "ai", playerName }, "game-ai-thinking");
+  const onStartAi = (playerName: string, level: AiLevel) => {
+    transitionTo(() => new AiSession(), { mode: "ai", playerName, level }, "game-ai-thinking");
   };
   const startOnline = (options: Extract<StartGameOptions, { mode: "online" }>) => {
     transitionTo(createOnlineSession, options, "game-waiting");
@@ -401,7 +402,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
-  readonly onStartAi: (name: string) => void;
+  readonly onStartAi: (name: string, level: AiLevel) => void;
   readonly onStartReplay: (document: ReplayDocument) => void;
   readonly onForkPractice: (mode: "local" | "ai", practice: PracticeStart) => void;
   readonly onCreateOnline: (name: string) => void;

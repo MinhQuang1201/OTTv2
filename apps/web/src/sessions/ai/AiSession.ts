@@ -2,6 +2,8 @@ import type { GameSession, MoveResult, StartGameOptions } from "../contract";
 import type { GameEventView, GameSnapshot, Position, Seat } from "../../shared/model/game";
 import { LocalSession, type LocalSessionDependencies } from "../local/LocalSession";
 import type { CoreMoveChooser } from "../core/gameCoreBridge";
+import { DEFAULT_AI_LEVEL, type AiLevel } from "../../shared/model/aiLevel";
+import { createAiEngine, type AiEngine } from "./aiEngine";
 
 export interface AiScheduler {
   readonly setTimeout: (handler: () => void, timeout: number) => ReturnType<typeof globalThis.setTimeout>;
@@ -12,6 +14,7 @@ export interface AiSessionDependencies {
   readonly local?: LocalSessionDependencies;
   readonly scheduler?: AiScheduler;
   readonly chooseMove?: CoreMoveChooser;
+  readonly engine?: AiEngine;
   readonly delayMs?: number;
 }
 
@@ -30,6 +33,8 @@ export class AiSession implements GameSession {
   private readonly scheduler: AiScheduler;
   private readonly chooseMove?: CoreMoveChooser;
   private readonly delayMs: number;
+  private engine: AiEngine | null;
+  private level: AiLevel = DEFAULT_AI_LEVEL;
   private readonly listeners = new Set<() => void>();
   private snapshot: GameSnapshot;
   private humanSeat: Seat = "A";
@@ -37,6 +42,7 @@ export class AiSession implements GameSession {
   private aiThinking = false;
   private timer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private disposed = false;
+  private runId = 0;
   private unsubscribeLocal: (() => void) | null = null;
 
   constructor(deps: AiSessionDependencies = {}) {
@@ -44,6 +50,7 @@ export class AiSession implements GameSession {
     this.scheduler = deps.scheduler ?? schedulerDefaults;
     this.chooseMove = deps.chooseMove;
     this.delayMs = deps.delayMs ?? 320;
+    this.engine = deps.engine ?? null;
     this.snapshot = this.decorate(this.local.getSnapshot());
     this.unsubscribeLocal = this.local.subscribe(() => {
       this.snapshot = this.decorate(this.local.getSnapshot());
@@ -62,6 +69,7 @@ export class AiSession implements GameSession {
   async start(options: StartGameOptions): Promise<void> {
     if (this.disposed || options.mode !== "ai") return;
     this.cancelAi();
+    this.level = options.level ?? DEFAULT_AI_LEVEL;
     const currentTurn = options.practice?.coreState.turn ?? "A";
     this.humanSeat = options.humanSeat ?? currentTurn;
     this.aiSeat = this.humanSeat === "A" ? "B" : "A";
@@ -110,6 +118,8 @@ export class AiSession implements GameSession {
     if (this.disposed) return;
     this.cancelAi();
     this.disposed = true;
+    this.engine?.dispose();
+    this.engine = null;
     this.unsubscribeLocal?.();
     this.unsubscribeLocal = null;
     this.local.dispose();
@@ -138,13 +148,23 @@ export class AiSession implements GameSession {
   }
 
   private async runAiMove(): Promise<void> {
+    const run = this.runId;
     if (this.disposed || !this.aiThinking || this.snapshot.phase !== "playing" || this.snapshot.turn !== this.aiSeat) {
       this.aiThinking = false;
       this.snapshot = this.decorate(this.local.getSnapshot());
       if (!this.disposed) this.publish();
       return;
     }
-    const move = this.local.chooseMove(this.aiSeat, this.chooseMove);
+    let move;
+    if (this.chooseMove) {
+      move = this.local.chooseMove(this.aiSeat, this.chooseMove);
+    } else {
+      this.engine ??= createAiEngine();
+      const engine = this.engine;
+      const level = this.level;
+      move = await this.local.chooseMoveAsync(this.aiSeat, (state, seat) => engine.choose(state, seat, level));
+    }
+    if (this.disposed || run !== this.runId) return;
     if (!move) {
       this.aiThinking = false;
       this.snapshot = this.decorate(this.local.getSnapshot());
@@ -159,6 +179,7 @@ export class AiSession implements GameSession {
   }
 
   private cancelAi(): void {
+    this.runId += 1;
     if (this.timer !== null) {
       this.scheduler.clearTimeout(this.timer);
       this.timer = null;

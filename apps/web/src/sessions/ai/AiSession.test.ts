@@ -54,6 +54,43 @@ describe("AiSession", () => {
     expect((await session.move({ x: 4, y: 7 }, { x: 3, y: 6 })).accepted).toBe(true);
   });
 
+  it("asks the engine for the chosen level and plays its answer", async () => {
+    const timer = scheduler();
+    const choose = vi.fn(async () => ({ from: { x: 4, y: 1 }, to: { x: 5, y: 2 } }));
+    const engine = { choose, dispose: vi.fn() };
+    const session = new AiSession({ scheduler: timer, engine, local: { bridge: getGameCoreBridge() } });
+    await session.start({ mode: "ai", playerName: "An", level: "hard" });
+    await session.move({ x: 4, y: 7 }, { x: 3, y: 6 });
+
+    timer.runNext();
+    await vi.waitFor(() => expect(choose).toHaveBeenCalledTimes(1));
+    expect(choose).toHaveBeenCalledWith(expect.anything(), "B", "hard");
+    await vi.waitFor(() => expect(session.getSnapshot().aiThinking).toBe(false));
+    expect(session.getSnapshot().turn).toBe("A");
+    session.dispose();
+    expect(engine.dispose).toHaveBeenCalled();
+  });
+
+  it("ignores an engine answer that arrives after a new game started", async () => {
+    const timer = scheduler();
+    let resolveStale!: (move: { from: { x: number; y: number }; to: { x: number; y: number } }) => void;
+    const choose = vi.fn(() => new Promise<{ from: { x: number; y: number }; to: { x: number; y: number } }>((resolve) => { resolveStale = resolve; }));
+    const session = new AiSession({ scheduler: timer, engine: { choose, dispose: vi.fn() }, local: { bridge: getGameCoreBridge() } });
+    await session.start({ mode: "ai", playerName: "An" });
+    await session.move({ x: 4, y: 7 }, { x: 3, y: 6 });
+    timer.runNext();
+    await vi.waitFor(() => expect(choose).toHaveBeenCalled());
+
+    await session.start({ mode: "ai", playerName: "An" });
+    resolveStale({ from: { x: 4, y: 1 }, to: { x: 5, y: 2 } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(session.getSnapshot().turn).toBe("A");
+    expect(session.getSnapshot().events).toHaveLength(0);
+    session.dispose();
+  });
+
   it("schedules exactly one AI decision and disables input while thinking", async () => {
     const { deps, timer, chooseMove } = dependencies();
     const session = new AiSession(deps);

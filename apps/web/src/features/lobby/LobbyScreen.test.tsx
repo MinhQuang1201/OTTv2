@@ -33,7 +33,17 @@ describe("LobbyScreen", () => {
     expect(screen.getByRole("button", { name: /Tạo phòng/i })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /Đánh với AI/i }));
-    expect(props.onStartAi).toHaveBeenCalledWith("");
+    expect(props.onStartAi).toHaveBeenCalledWith("", "medium");
+  });
+
+  it("passes the chosen AI level to onStartAi", async () => {
+    const user = userEvent.setup();
+    const { props } = renderLobby();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Mức AI" }), "hard");
+    await user.click(screen.getByRole("button", { name: /Đánh với AI/i }));
+
+    expect(props.onStartAi).toHaveBeenCalledWith("", "hard");
   });
 
   it("sends trimmed player names for quick play", async () => {
@@ -43,7 +53,7 @@ describe("LobbyScreen", () => {
     await user.type(name, "  An  ");
 
     await user.click(screen.getByRole("button", { name: /Đánh với AI/i }));
-    expect(props.onStartAi).toHaveBeenCalledWith("An");
+    expect(props.onStartAi).toHaveBeenCalledWith("An", "medium");
 
     await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
     expect(props.onStartLocal).toHaveBeenCalledWith(["An", "Đối thủ"]);

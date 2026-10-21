@@ -50,3 +50,64 @@ test('AI avoids a capture that immediately loses its moved piece when a safe ste
     return response.events.some(event => event.type === 'capture' && event.capturedId === 'mover');
   }), false);
 });
+
+function seeded(seed) {
+  return () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+}
+
+test('every level returns only moves the rules accept, across a whole game', () => {
+  for (const level of ['easy', 'medium', 'hard']) {
+    const rng = seeded(7);
+    let state = rules.createInitialState();
+    for (let ply = 0; ply < 40 && !state.winner; ply++) {
+      const move = chooseMove(state, state.turn, { level, rng, maxNodes: 5000 });
+      const result = rules.applyMove(state, state.turn, move.from, move.to);
+      assert.equal(result.ok, true, `${level} ply ${ply}: ${result.error}`);
+      state = result.state;
+    }
+  }
+});
+
+test('every level takes a win in one and refuses a move that hands the opponent a win', () => {
+  const winning = position([
+    { id: 'goal', player: 'A', type: 'dam', x: 1, y: 1 },
+    { id: 'enemy', player: 'B', type: 'la', x: 5, y: 5 }
+  ]);
+  for (const level of ['easy', 'medium', 'hard']) {
+    const move = chooseMove(winning, 'A', { level, rng: () => 0.99 });
+    assert.equal(rules.applyMove(winning, 'A', move.from, move.to).state.winner, 'A', level);
+  }
+  const defend = position([
+    { id: 'guard', player: 'A', type: 'dam', x: 7, y: 7 },
+    { id: 'runner', player: 'B', type: 'keo', x: 8, y: 7 },
+    { id: 'far', player: 'A', type: 'la', x: 2, y: 5 }
+  ]);
+  for (const level of ['medium', 'hard']) {
+    const move = chooseMove(defend, 'A', { level });
+    const next = rules.applyMove(defend, 'A', move.from, move.to).state;
+    assert.equal(rules.allMoves(next, 'B').some((reply) =>
+      rules.applyMove(next, 'B', reply.from, reply.to).state?.winner === 'B'), false, level);
+  }
+});
+
+test('medium and hard are deterministic, easy varies with its random source', () => {
+  const state = rules.createInitialState();
+  for (const level of ['medium', 'hard']) {
+    assert.deepEqual(chooseMove(state, 'A', { level, rng: () => 0.1 }), chooseMove(state, 'A', { level, rng: () => 0.9 }));
+  }
+  const seen = new Set();
+  for (let i = 0; i < 20; i++) {
+    const move = chooseMove(state, 'A', { level: 'easy', rng: seeded(i + 1) });
+    seen.add(JSON.stringify(move));
+  }
+  assert.ok(seen.size > 1);
+});
+
+test('hard stays inside its node budget so a move costs bounded time', () => {
+  const started = Date.now();
+  chooseMove(rules.createInitialState(), 'A', { level: 'hard' });
+  assert.ok(Date.now() - started < 5000);
+});

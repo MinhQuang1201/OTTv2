@@ -93,6 +93,15 @@ export class LocalSession implements GameSession {
     try { return chooser(this.state, player); } catch { return null; }
   }
 
+  /** Async variant for engines that search off the main thread. Drops the answer if the position moved on. */
+  async chooseMoveAsync(player: Seat, chooser: (state: CoreState, player: Seat) => Promise<CoreMove | null>): Promise<CoreMove | null> {
+    if (this.disposed || !this.state || this.snapshot.phase !== "playing" || this.state.turn !== player || this.state.winner) return null;
+    const asked = this.state;
+    let move: CoreMove | null;
+    try { move = await chooser(asked, player); } catch { return null; }
+    return !this.disposed && this.state === asked ? move : null;
+  }
+
   async move(from: Position, to: Position): Promise<MoveResult> {
     if (this.disposed || !this.state || this.snapshot.phase !== "playing") return { accepted: false, error: failed("Ván đấu không còn hoạt động.") };
     this.tick(false);

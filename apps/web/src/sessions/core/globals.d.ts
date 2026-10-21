@@ -54,7 +54,7 @@ declare global {
   }
 
   interface OttCoreAi {
-    chooseMove(state: OttCoreState, player: "A" | "B"): { readonly from: { readonly x: number; readonly y: number }; readonly to: { readonly x: number; readonly y: number } } | null;
+    chooseMove(state: OttCoreState, player: "A" | "B", options?: { readonly level?: "easy" | "medium" | "hard" }): { readonly from: { readonly x: number; readonly y: number }; readonly to: { readonly x: number; readonly y: number } } | null;
   }
 
   var OTT_CONFIG: OttCoreConfig | undefined;
