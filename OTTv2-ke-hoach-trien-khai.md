@@ -120,7 +120,13 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 - [x] Hai ghế cùng hết grace: ghế còn ít thời gian hơn thua, bằng nhau thì ghế đang tới lượt thua (`Rule.md` mục 10.5, `room.js`). `reconnectGraceMs` đã đúng từ trước.
 - [x] So sánh secret nội bộ bằng `internalSecretMatches` (thời gian hằng) ở cả bốn DO handler.
 
-*Chưa kiểm chứng trên Cloudflare thật:* deploy staging, rồi tạo/kết thúc vài ván để xem key Lobby ổn định, và tạo dashboard/saved query trong Workers Logs lọc `event` theo ba lỗi trên. Hai việc này là điều kiện của tiêu chí bên dưới.
+*Trạng thái 21/10/2026:* PR #15 đã merge; Deploy staging chạy tay (merge không tự kích hoạt run, như PR #13) và xanh. Workers Logs đã bật và ghi log JSON.
+
+*Còn mở, chưa tính đạt tiêu chí giai đoạn 3:*
+
+- Saved query trong Workers Logs cho `authority_unavailable`, `transaction-failed`, `rate_limited` chưa tạo. Key `event` chỉ xuất hiện trong bộ lọc sau khi có ít nhất một dòng log tương ứng; trước đó lọc theo `$metadata.message` includes tên sự kiện.
+- Chưa theo dõi số key Lobby DO theo thời gian: cần chơi vài ván trên staging, đợi quá 24 giờ và xem log `allocation_gc` có `removed` lớn hơn 0.
+- Chưa deploy lên production; cần tag `v1.2.0` trước khi nghiệm thu giai đoạn 4 để production khớp với bản đã kiểm thử.
 
 **Tiêu chí xong:** số key trong Lobby DO ổn định theo thời gian thay vì tăng mãi; có dashboard lỗi.
 
