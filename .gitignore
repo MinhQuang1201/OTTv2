@@ -9,3 +9,4 @@ Thumbs.db
 .wrangler/
 apps/web/dist/
 var/arena/
+.vercel/
