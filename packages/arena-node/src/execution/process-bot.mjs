@@ -9,7 +9,13 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { createNdjsonChannel } from "./ndjson-channel.mjs";
-import { killProcessTree, isProcessAlive } from "./process-tree.mjs";
+import {
+  killProcessTree,
+  isProcessAlive,
+  createProcessTreeMarker,
+  waitForProcessesExit,
+  PROCESS_TREE_MARKER_ENV
+} from "./process-tree.mjs";
 
 const DEFAULT_GRACE_MS = 250;
 
@@ -99,6 +105,8 @@ export function createProcessBot(options) {
   let spawnPid = null;
 
   const actionReceiptTimes = new WeakMap();
+  // Inherited by descendants so stop() can find ones that left the process group (see process-tree.mjs).
+  const treeMarker = createProcessTreeMarker();
 
   return {
     get botId() {
@@ -170,7 +178,8 @@ export function createProcessBot(options) {
       // Prepare sanitized environment: safe baseline merged with provided variables
       const processEnv = {
         ...getDefaultSanitizedEnv(),
-        ...env
+        ...env,
+        [PROCESS_TREE_MARKER_ENV]: treeMarker
       };
 
       await new Promise((resolve, reject) => {
@@ -188,7 +197,7 @@ export function createProcessBot(options) {
           if (!settled) {
             settled = true;
             try {
-              if (child?.pid) killProcessTree(child.pid);
+              if (child?.pid) killProcessTree(child.pid, { marker: treeMarker });
               else child?.kill();
             } catch (_) {}
             if (stopped) {
@@ -264,7 +273,7 @@ export function createProcessBot(options) {
             if (stopped) {
               started = false;
               try {
-                if (spawnPid) killProcessTree(spawnPid);
+                if (spawnPid) killProcessTree(spawnPid, { marker: treeMarker });
               } catch (_) {}
               resolve();
               return;
@@ -345,9 +354,11 @@ export function createProcessBot(options) {
         }
 
         // 3. Forceful termination: kill root process and all descendant processes
+        let markedPids = [];
         try {
-          killProcessTree(spawnPid);
+          markedPids = killProcessTree(spawnPid, { marker: treeMarker });
         } catch (_) {}
+        await waitForProcessesExit(markedPids);
 
         // 4. Await process exit
         if (!hasExited && exitPromise) {

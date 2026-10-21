@@ -3,7 +3,14 @@ const https = require("node:https");
 const net = require("node:net");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { availablePort, readWorkerHost, workerOrigin, wranglerLauncher } = require("../../config/local-runtime");
+const {
+  availablePort,
+  readWorkerHost,
+  workerOrigin,
+  wranglerLauncher,
+  PROCESS_GROUP_SPAWN_OPTIONS,
+  stopProcessTree,
+} = require("../../config/local-runtime");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const APP_PORT = 3000;
@@ -43,12 +50,7 @@ function waitFor(operation, label, timeoutMs = 30_000) {
 
 async function stopProcess(processInfo) {
   if (!processInfo || processInfo.child.exitCode !== null || processInfo.child.signalCode !== null) return;
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(processInfo.child.pid), "/t", "/f"], { stdio: "ignore" });
-    await new Promise((resolve) => killer.once("exit", resolve));
-  } else {
-    processInfo.child.kill("SIGTERM");
-  }
+  await stopProcessTree(processInfo.child);
   await Promise.race([
     processInfo.exited,
     new Promise((resolve) => setTimeout(resolve, 5_000)),
@@ -62,7 +64,7 @@ function startProcess(command, args, env) {
   };
   const child = process.platform === "win32" && (command === "npx" || command === "npx.cmd")
     ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ")], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] })
-    : spawn(command, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    : spawn(command, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], ...PROCESS_GROUP_SPAWN_OPTIONS });
   const logs = { stdout: "", stderr: "" };
   child.stdout.on("data", (chunk) => { logs.stdout = appendLog(logs.stdout, chunk); });
   child.stderr.on("data", (chunk) => { logs.stderr = appendLog(logs.stderr, chunk); });

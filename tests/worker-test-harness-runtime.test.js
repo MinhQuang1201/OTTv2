@@ -10,7 +10,10 @@ const {
   readWorkerHost,
   workerOrigin,
   wranglerLauncher,
+  PROCESS_GROUP_SPAWN_OPTIONS,
+  stopProcessTree,
 } = require("../config/local-runtime");
+const { spawnLocalCommand: spawnShellSafe } = require("../scripts/worker-dev");
 
 const root = path.resolve(__dirname, "..");
 // workerd on Windows releases its SQLite handles shortly after taskkill; async rm retries EBUSY (rmSync does not).
@@ -24,13 +27,7 @@ function appendLog(current, chunk) {
 }
 
 function spawnLocalCommand(command, args, options) {
-  if (process.platform !== "win32") return spawn(command, args, options);
-  const quote = (value) => {
-    const text = String(value);
-    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
-  };
-  const commandLine = [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ");
-  return spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], options);
+  return spawnShellSafe(command, args, { ...options, ...PROCESS_GROUP_SPAWN_OPTIONS }, spawn);
 }
 
 function spawnHarness({ host, port, persistTo }) {
@@ -55,11 +52,7 @@ async function stopHarness(harness) {
   if (!harness) return;
   const { child } = harness;
   if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32") {
-      await new Promise((resolve) => spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).once("exit", resolve));
-    } else {
-      child.kill("SIGTERM");
-    }
+    await stopProcessTree(child);
   }
   await harness.exited.catch(() => {});
   if (child.exitCode === null && child.signalCode === null) throw new Error(`Worker harness process ${child.pid} did not stop`);

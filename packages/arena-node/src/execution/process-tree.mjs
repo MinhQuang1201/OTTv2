@@ -5,6 +5,45 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+
+/**
+ * Environment variable carrying a per-bot random marker. Descendants inherit it, which lets Linux
+ * find processes that left the bot's process group (setsid / detached) after their parent exited.
+ * Best effort for trusted profiles only: a process that scrubs its environment is not found.
+ */
+export const PROCESS_TREE_MARKER_ENV = "OTT_ARENA_PROCESS_TREE";
+
+export function createProcessTreeMarker() {
+  return randomUUID();
+}
+
+/**
+ * Lists PIDs whose environment carries `marker`, by scanning /proc. Returns [] where /proc is absent.
+ * @param {string} marker
+ * @returns {number[]}
+ */
+export function findMarkedPids(marker) {
+  if (typeof marker !== "string" || marker.length === 0) return [];
+  let entries;
+  try {
+    entries = fs.readdirSync("/proc");
+  } catch (_) {
+    return [];
+  }
+  const needle = `${PROCESS_TREE_MARKER_ENV}=${marker}`;
+  const found = [];
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    const pid = Number(entry);
+    if (pid === process.pid) continue;
+    try {
+      if (fs.readFileSync(`/proc/${entry}/environ`, "utf8").split("\0").includes(needle)) found.push(pid);
+    } catch (_) {}
+  }
+  return found;
+}
 
 /**
  * Checks whether a process with the given PID is currently alive.
@@ -92,12 +131,17 @@ export function getWindowsDescendantPids(parentPid) {
 /**
  * Forcefully terminates the process tree rooted at `pid`.
  * Windows: uses taskkill /pid <PID> /T /F, and handles orphaned descendants if root has already exited.
- * POSIX: uses process group kill SIGKILL (-pid).
+ * POSIX: uses process group kill SIGKILL (-pid); with `marker`, also kills processes carrying it (Linux /proc),
+ * including descendants that started their own session.
+ *
+ * SIGKILL is delivered asynchronously, so callers that must observe the tree gone should wait on the
+ * returned marked PIDs (see waitForProcessesExit).
  *
  * @param {number} pid - Positive integer PID from child_process.spawn
- * @returns {void}
+ * @param {{ marker?: string }} [options]
+ * @returns {number[]} PIDs found via `marker` and signalled (always [] on Windows)
  */
-export function killProcessTree(pid) {
+export function killProcessTree(pid, { marker } = {}) {
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new TypeError("PID must be a positive integer");
   }
@@ -136,5 +180,29 @@ export function killProcessTree(pid) {
         process.kill(pid, "SIGKILL");
       } catch (_) {}
     }
+    const markedPids = findMarkedPids(marker);
+    for (const markedPid of markedPids) {
+      try {
+        process.kill(-markedPid, "SIGKILL");
+      } catch (_) {}
+      try {
+        process.kill(markedPid, "SIGKILL");
+      } catch (_) {}
+    }
+    return markedPids;
+  }
+  return [];
+}
+
+/**
+ * Resolves once none of `pids` is alive, or after `timeoutMs`.
+ * @param {number[]} pids
+ * @param {number} [timeoutMs=500]
+ * @returns {Promise<void>}
+ */
+export async function waitForProcessesExit(pids, timeoutMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (pids.some(isProcessAlive) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
