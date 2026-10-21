@@ -95,13 +95,21 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 
 **Tiêu chí xong:** production được deploy lại từ một tag, không có thao tác CLI trên máy cá nhân; rollback bằng cách deploy lại tag trước.
 
-*Tiến độ 21/10/2026 — phần trong repo đã xong, phần cần quyền tài khoản còn chờ:*
+*Đạt 21/10/2026. Hạ tầng chuyển sang tài khoản Cloudflare và Vercel mới (Worker `*.opticsquang.workers.dev`, frontend `ottv2-psi.vercel.app`); production cũ trên `haixcxt` / `lap-trinh-mang` không còn là nguồn sự thật.*
 
-- [x] Bước 1: `.github/workflows/ci.yml` (job `verify` + job `integration` với secret ngẫu nhiên). Đã kiểm bằng actionlint; chưa chạy trên GitHub.
-- [ ] Bước 2: bảo vệ `main` — cần admin repo bật trên GitHub (xem `DEPLOYMENT.md`).
-- [x] Bước 3 (phần repo): env `staging` trong `apps/worker/wrangler.jsonc` (Worker `ottv2-staging`, DO riêng, origin `https://ottv2-staging.vercel.app`); `wrangler deploy --dry-run --env staging` pass. Còn chờ: tạo GitHub Environment, đặt `OTT_INTERNAL_SECRET` cho Worker staging.
-- [x] Bước 4–6: `.github/workflows/deploy.yml` (main → staging, tag `v*` → production, chạy tay để rollback), ghi Worker version ID và URL Vercel vào GitHub Release, smoke test `scripts/smoke-deploy.js` (đã chạy pass trên production hiện tại).
-- [ ] Cổng: deploy thật lần đầu từ tag — chờ trả lời câu hỏi mở về quyền tài khoản Cloudflare `haixcxt` và team Vercel `lap-trinh-mang`.
+- [x] Bước 1: `.github/workflows/ci.yml` — job `verify` và job `integration` (secret ngẫu nhiên) chạy xanh trên GitHub cho mọi pull request. Lần chạy đầu fail trên Linux và được sửa (dọn cây tiến trình wrangler/ProcessBot, JDK 21, test flaky).
+- [x] Bước 2: `main` được bảo vệ — bắt buộc pull request và hai check CI xanh.
+- [x] Bước 3: Worker `ottv2-staging` (Durable Objects riêng) và frontend `ottv2-staging.vercel.app`; deploy staging chạy xanh toàn bộ (run 39608459646).
+- [x] Bước 4: `.github/workflows/deploy.yml` — `main` → staging, tag `v*` → production (cần người duyệt, chỉ nhận tag `v*`), chạy tay để rollback. Alias staging gọi thẳng API Vercel kèm `teamId` vì `vercel alias set` lỗi `User not found` với token theo team.
+- [x] Bước 5: Release `v1.1.0` ghi Worker version ID `73a141f4-08f3-444d-9172-475873eedb43` và URL Vercel của lần deploy.
+- [x] Bước 6: `scripts/smoke-deploy.js` chạy trong workflow; kiểm `POST /control/list` trả 200, CORS đúng origin, có `rooms`, bundle trỏ đúng Worker và không chứa tên secret.
+- [x] **Cổng:** production deploy từ tag `v1.1.0` (run 39610056735), không dùng CLI trên máy cá nhân; smoke test pass.
+
+*Còn lại và lưu ý:*
+
+- Rollback bằng cách chạy tay Deploy trên tag `v*` trước chưa được thử. Tag `v1.0.0` (29/09) có trước CI nên không có workflow và không dùng được; rollback bằng tag chỉ có từ release thứ hai. Trong lúc đó dùng `wrangler rollback <version-id>`.
+- Merge PR #13 không tự kích hoạt deploy staging (GitHub không tạo run, chưa rõ nguyên do); đã chạy tay bằng `workflow_dispatch`. Theo dõi nếu lặp lại.
+- Chưa thực hiện nghiệm thu hai profile trên production; production vẫn ở trạng thái chờ giai đoạn 4.
 
 ### Giai đoạn 3 — Vận hành Worker an toàn
 
@@ -187,4 +195,4 @@ Rủi ro lớn nhất là mất phần code chưa commit trên máy local, vì �
 | Vượt free tier Durable Objects khi bị spam tạo phòng | Thấp | Phát sinh chi phí hoặc bị chặn | Rate limit theo IP, giới hạn số phòng đang chờ, dọn allocation cũ |
 | AI mạnh hơn làm chậm thiết bị yếu | Trung bình | Giao diện giật | Chạy trong Web Worker, giới hạn thời gian mỗi nước (ví dụ 500 ms) bằng iterative deepening |
 
-**Câu hỏi mở:** ai giữ quyền tài khoản Cloudflare `haixcxt` và team Vercel `lap-trinh-mang`, để cấp token cho CI?
+**Đã giải quyết (21/10/2026):** thay vì xin quyền tài khoản cũ (`haixcxt`, `lap-trinh-mang`), nhóm tạo tài khoản Cloudflare và Vercel mới và cấp token cho CI. Token theo tài khoản của một thành viên; cần quyết định ai giữ lâu dài, vì token hết hạn hoặc bị xoá sẽ làm deploy dừng.

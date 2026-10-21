@@ -20,16 +20,15 @@ Luong online:
 
 ## Trang thai hien tai
 
-- Vercel project: `lap-trinh-mang/ottv2`.
-- Frontend production: <https://ottv2-two.vercel.app>.
-- Deployment gan nhat da o trang thai `Ready`: `https://ottv2-ixbkhp8k6-lap-trinh-mang.vercel.app`.
-- Production alias van giu nguyen: `https://ottv2-two.vercel.app`.
-- Vercel Deployment Protection da tat de URL co the truy cap cong khai.
-- Cloudflare Worker production da deploy: `https://ottv2-minimal.haixcxt.workers.dev`.
-- Worker version hien tai: `d1d44b8e-9fd0-4cc8-a3cd-cec43ba0047d`.
-- Frontend production da build voi `VITE_OTT_PLAYHTML_HOST` va `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT` tro toi Worker production.
-- `OTT_SPECTATOR_ENABLED` da bat trong production sau production browser smoke test.
-- Ban deploy Vercel hien tai duoc build tu worktree dang co thay doi chua commit.
+Cap nhat 21/10/2026: ha tang da chuyen sang tai khoan Cloudflare va Vercel moi, deploy tu CI. Production cu (`ottv2-two.vercel.app`, `ottv2-minimal.haixcxt.workers.dev`) khong con duoc cap nhat.
+
+- Vercel project: `iamnmquang/ottv2`.
+- Frontend production: <https://ottv2-psi.vercel.app>. Staging: <https://ottv2-staging.vercel.app>.
+- Cloudflare Worker production: `https://ottv2-minimal.opticsquang.workers.dev`. Staging: `https://ottv2-staging.opticsquang.workers.dev`.
+- Lan deploy production gan nhat: tag `v1.1.0`, Worker version `73a141f4-08f3-444d-9172-475873eedb43`. Cac lan sau xem GitHub Release cua tag.
+- Vercel Deployment Protection da tat.
+- `OTT_SPECTATOR_ENABLED` dat `"true"` trong `apps/worker/wrangler.jsonc`. Production moi chua qua nghiem thu hai profile (giai doan 4).
+- Deploy duoc build tu commit cua tag, khong con tu worktree cuc bo.
 
 ## Deploy bang GitHub Actions
 
