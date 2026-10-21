@@ -93,6 +93,14 @@ export type StartGameOptions =
       readonly roomId: string;
     }
   | {
+      /** Re-enter an unfinished game saved by the previous page load. */
+      readonly mode: "online";
+      readonly intent: "resume";
+      readonly playerName: string;
+      readonly allocationId: string;
+      readonly resumeCredential: string;
+    }
+  | {
       readonly mode: "spectator";
       readonly allocation: PlayhtmlSpectatorAllocation;
     }

@@ -2,6 +2,7 @@ import type { PublicMatchView, WaitingRoomView } from "../../shared/model/game";
 import type { HumanTournamentSummary } from "../../features/tournaments/types";
 import { createControlRequest, type ControlRequestOptions } from "./controlRequest";
 import type { PlayhtmlAllocation, PlayhtmlSpectatorAllocation } from "./globals";
+import { normalizeRoomCode } from "./roomCode";
 
 export type OnlineGatewayError = Error & { readonly code?: string; readonly status?: number };
 
@@ -122,7 +123,7 @@ export class OnlineLobbyGateway {
 
   async joinRoom(playerName: string, roomId: string): Promise<PlayhtmlAllocation> {
     if (!this.control) throw unavailableError();
-    return validateAllocation(await this.control("join", { name: playerName.trim(), allocationId: roomId.trim() }));
+    return validateAllocation(await this.control("join", { name: playerName.trim(), allocationId: normalizeRoomCode(roomId) }));
   }
 
   async resumeRoom(allocationId: string, resumeCredential: string): Promise<PlayhtmlAllocation> {

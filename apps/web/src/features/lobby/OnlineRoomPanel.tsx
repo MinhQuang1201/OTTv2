@@ -8,6 +8,12 @@ import { PublicMatchList, type PublicMatchIdentity, type PublicMatchListState } 
 
 export type OnlineAvailability = "online" | "connecting" | "unavailable";
 
+/** An unfinished online game this browser can re-enter. */
+export interface PendingGameView {
+  readonly alias: string | null;
+  readonly seat: "A" | "B";
+}
+
 export interface OnlineRoomPanelProps {
   readonly availability: OnlineAvailability;
   readonly waitingRooms?: WaitingRoomState;
@@ -20,6 +26,13 @@ export interface OnlineRoomPanelProps {
   readonly onWatch?: (identity: PublicMatchIdentity) => void;
   readonly onRetryRooms?: () => void;
   readonly allowDemoWatch?: boolean;
+  readonly pendingGame?: PendingGameView | null;
+  readonly onResume?: () => void;
+  readonly onDiscardResume?: () => void;
+  /** Room code from an invite link (`?join=`), pre-filled into the join field. */
+  readonly initialRoomCode?: string;
+  /** Lets the player abandon a connection attempt instead of waiting on it. */
+  readonly onCancelConnecting?: () => void;
 }
 
 export function OnlineRoomPanel({
@@ -34,9 +47,14 @@ export function OnlineRoomPanel({
   onWatch = () => undefined,
   onRetryRooms,
   allowDemoWatch = false,
+  pendingGame = null,
+  onResume,
+  onDiscardResume,
+  initialRoomCode,
+  onCancelConnecting,
 }: OnlineRoomPanelProps) {
   const [uncontrolledName, setUncontrolledName] = useState(controlledName ?? "");
-  const [roomId, setRoomId] = useState("");
+  const [roomId, setRoomId] = useState(initialRoomCode ?? "");
   const [roomError, setRoomError] = useState<string | null>(null);
   const name = controlledName ?? uncontrolledName;
   const isReady = availability === "online";
@@ -45,6 +63,10 @@ export function OnlineRoomPanel({
   useEffect(() => {
     if (controlledName !== undefined) setUncontrolledName(controlledName);
   }, [controlledName]);
+
+  useEffect(() => {
+    if (initialRoomCode) setRoomId(initialRoomCode);
+  }, [initialRoomCode]);
 
   const updateName = (value: string) => {
     if (controlledName === undefined) setUncontrolledName(value);
@@ -69,15 +91,30 @@ export function OnlineRoomPanel({
         <span className={[styles.statusDot, styles[`status${availability}`]].join(" ")} aria-hidden="true" />
         {availability === "online" ? "Online sẵn sàng" : availability === "connecting" ? "Đang kết nối online…" : "Online hiện không khả dụng"}
       </div>
+      {availability === "connecting" && onCancelConnecting ? (
+        <Button variant="quiet" onClick={onCancelConnecting}>Huỷ kết nối</Button>
+      ) : null}
+      {pendingGame && onResume ? (
+        <div className={styles.resumeCard} role="region" aria-label="Ván online đang dở">
+          <div>
+            <strong>Bạn đang có ván dở</strong>
+            <p>{pendingGame.alias ? `Phòng ${pendingGame.alias} · ` : ""}bạn là {pendingGame.seat === "A" ? "Đỏ (A)" : "Xanh (B)"}</p>
+          </div>
+          <div className={styles.resumeActions}>
+            <Button disabled={!isReady} onClick={onResume}>Vào lại</Button>
+            {onDiscardResume ? <Button variant="quiet" onClick={onDiscardResume}>Bỏ</Button> : null}
+          </div>
+        </div>
+      ) : null}
       {availability === "unavailable" ? <p className={styles.unavailableCopy}>Bạn có thể bắt đầu ván local hoặc đấu với AI ngay.</p> : null}
       <div className={styles.onlineActions}>
         <Button disabled={!isReady} onClick={create}>Tạo phòng</Button>
         <div className={styles.joinRow}>
-          <TextField label="Mã phòng" value={roomId} onChange={(event) => { setRoomId(event.currentTarget.value); if (roomError) setRoomError(null); }} error={roomError ?? undefined} placeholder="Ví dụ: room-7, K7N-M4P hoặc inv_..." autoComplete="off" />
+          <TextField label="Mã phòng" value={roomId} onChange={(event) => { setRoomId(event.currentTarget.value); if (roomError) setRoomError(null); }} error={roomError ?? undefined} placeholder="Ví dụ: K7N-M4P hoặc link mời" autoComplete="off" />
           <Button variant="secondary" disabled={!isReady} onClick={join}>Vào phòng</Button>
         </div>
         <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--ui-text-muted, #888)" }}>
-          Hỗ trợ mã phòng, bí danh ngắn (như K7N-M4P) hoặc mã lời mời giải đấu (inv_...).
+          Nhập mã phòng ngắn (như K7N-M4P), dán link mời, hoặc mã lời mời giải đấu (inv_...).
         </p>
       </div>
       <WaitingRoomList

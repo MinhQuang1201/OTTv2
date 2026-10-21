@@ -20,6 +20,8 @@ import type { ReplayDocument } from "../../../../packages/arena/src/contracts/in
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/online/OnlineLobbyStream";
 import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runtimeBridge";
+import { resumeStore as defaultResumeStore, type PendingOnlineGame, type ResumeStore } from "../sessions/online/resumeStore";
+import { joinCodeFromUrl } from "../sessions/online/roomCode";
 import { ArenaApiGateway } from "../features/arena/ArenaApiGateway";
 import { ArenaScreen } from "../features/arena/ArenaScreen";
 import { isArenaAvailable, isSpectatorEnabled, resolveArenaDiscoveryEndpoint, resolveArenaEndpoint } from "../runtime-config";
@@ -123,9 +125,23 @@ export interface AppProps {
   readonly demoEnabled?: boolean;
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
+  readonly resumeStore?: ResumeStore;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, spectatorEnabled, demoEnabled, onStateChange, onWatchMatch = () => undefined }: AppProps) {
+/** Reads `?join=` once and drops it from the address bar so a reload does not re-join. */
+function takeJoinCodeFromLocation(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const code = joinCodeFromUrl(window.location.search);
+  if (!code) return undefined;
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("join");
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch { /* keep the code even if the URL cannot be rewritten */ }
+  return code;
+}
+
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, spectatorEnabled, demoEnabled, onStateChange, onWatchMatch = () => undefined, resumeStore = defaultResumeStore }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const isDemo = demoEnabled ?? demo.enabled;
   const effectiveSpectatorEnabled = spectatorEnabled ?? isSpectatorEnabled();
@@ -156,6 +172,13 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const createSpectatorSession = spectatorSessionFactory ?? (() => new SpectatorSession({ gateway: onlineGateway, runtime: runtimeOwnerRef.current, disposeRuntime: false }));
   const createReplaySession = replaySessionFactory ?? (() => new ReplaySession());
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
+  const [pendingGame, setPendingGame] = useState<PendingOnlineGame | null>(() => resumeStore.read());
+  const [initialRoomCode] = useState(takeJoinCodeFromLocation);
+
+  // Re-read on every return to the lobby: a game may have finished, been left or been saved meanwhile.
+  useEffect(() => {
+    if (appState.status === "lobby") setPendingGame(resumeStore.read());
+  }, [appState.status, resumeStore]);
 
   useEffect(() => {
     sessionFactoryRef.current = sessionFactory;
@@ -315,6 +338,16 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const startOnline = (options: Extract<StartGameOptions, { mode: "online" }>) => {
     transitionTo(createOnlineSession, options, "game-waiting");
   };
+  const onResumeOnline = () => {
+    const game = resumeStore.read();
+    setPendingGame(game);
+    if (!game) return;
+    startOnline({ mode: "online", intent: "resume", playerName: game.playerName, allocationId: game.allocationId, resumeCredential: game.resumeCredential });
+  };
+  const onDiscardResume = () => {
+    resumeStore.clear();
+    setPendingGame(null);
+  };
   const startSpectator = (identity: PublicMatchIdentity) => {
     onWatchMatch(identity);
     if (isDemo || !effectiveSpectatorEnabled) return;
@@ -391,6 +424,10 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 arenaAvailable={effectiveArenaAvailable}
                 onOpenArena={onOpenArena}
                 onlineGateway={onlineGateway}
+                pendingGame={isDemo || !onlineGateway.available ? null : pendingGame}
+                onResumeOnline={onResumeOnline}
+                onDiscardResume={onDiscardResume}
+                initialRoomCode={initialRoomCode}
               />
             </ScreenBoundary>
           </div>
@@ -400,7 +437,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway, pendingGame, onResumeOnline, onDiscardResume, initialRoomCode }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -419,7 +456,17 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly arenaAvailable: boolean;
   readonly onOpenArena: () => void;
   readonly onlineGateway?: OnlineLobbyGateway;
+  readonly pendingGame: PendingOnlineGame | null;
+  readonly onResumeOnline: () => void;
+  readonly onDiscardResume: () => void;
+  readonly initialRoomCode?: string;
 }) {
+  const resumeProps = {
+    pendingGame: pendingGame ? { alias: pendingGame.alias, seat: pendingGame.seat } : null,
+    onResumeOnline,
+    onDiscardResume,
+    initialRoomCode,
+  };
   if (state.status === "boot") return <Panel className={styles.screen}><Spinner label="Đang khởi động" /></Panel>;
   if (state.status === "error" && state.error.code === "room_unavailable" && state.snapshot?.viewer?.role === "spectator") return (
     <Panel className={styles.screen} role="alert">
@@ -453,6 +500,8 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onOpenArena={onOpenArena}
     arenaAvailable={arenaAvailable}
     onlineGateway={onlineGateway}
+    {...resumeProps}
+    onCancelConnecting={onLobby}
   />;
   if (state.status === "lobby") return <LobbyScreen
     onlineAvailability={!onlineAvailable ? "unavailable" : state.snapshot.connection === "connecting" ? "connecting" : "online"}
@@ -468,6 +517,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     onOpenArena={onOpenArena}
     arenaAvailable={arenaAvailable}
     onlineGateway={onlineGateway}
+    {...resumeProps}
   />;
   if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;

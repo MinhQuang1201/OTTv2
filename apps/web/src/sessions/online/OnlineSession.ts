@@ -5,6 +5,9 @@ import { OnlineLobbyGateway } from "./OnlineLobbyGateway";
 import type { PlayhtmlAllocation, PlayhtmlGameClientLike } from "./globals";
 import { normalizeOnlineState, type OnlineRawState, type OnlineStateMessage, type NormalizedOnlineState } from "./normalizeOnlineState";
 import { createRuntimeBridge, type RuntimeBridge } from "./runtimeBridge";
+import { isPermanentRoomError, onlineErrorMessage } from "./onlineErrors";
+import { normalizeRoomCode } from "./roomCode";
+import { resumeStore as defaultResumeStore, type ResumeStore } from "./resumeStore";
 
 export interface OnlineSessionDependencies {
   readonly gateway?: OnlineLobbyGateway;
@@ -16,6 +19,13 @@ export interface OnlineSessionDependencies {
   readonly setInterval?: (handler: () => void, timeout: number) => ReturnType<typeof globalThis.setInterval>;
   readonly clearInterval?: (handle: ReturnType<typeof globalThis.setInterval>) => void;
   readonly tickMs?: number;
+  readonly setTimeout?: (handler: () => void, timeout: number) => ReturnType<typeof globalThis.setTimeout>;
+  readonly clearTimeout?: (handle: ReturnType<typeof globalThis.setTimeout>) => void;
+  /** How long to wait for the first authoritative snapshot after an attach before retrying. */
+  readonly attachTimeoutMs?: number;
+  /** Fresh-ticket retries after an unanswered attach before the session fails with a retryable error. */
+  readonly maxAttachRetries?: number;
+  readonly resumeStore?: ResumeStore;
   readonly host?: string;
   /** App-managed sessions leave shared runtime disposal to their lifecycle owner. */
   readonly disposeRuntime?: boolean;
@@ -27,9 +37,8 @@ const initialSnapshot: GameSnapshot = Object.freeze({
 
 const error = (code: SessionErrorView["code"], message: string, retryable = false): SessionErrorView => ({ code, message, retryable });
 
-function clientMessage(payload: unknown, fallback: string): string {
-  return payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string" ? (payload as Record<string, string>).message : fallback;
-}
+export const DEFAULT_ATTACH_TIMEOUT_MS = 8_000;
+export const DEFAULT_MAX_ATTACH_RETRIES = 2;
 
 function rawCoreState(state: OnlineRawState): CoreState {
   return { turn: state.turn, winner: state.winner, reason: state.reason, eliminatedPlayer: null, clock: state.clock, pieces: state.pieces };
@@ -45,6 +54,11 @@ export class OnlineSession implements GameSession {
   private readonly setIntervalFn: NonNullable<OnlineSessionDependencies["setInterval"]>;
   private readonly clearIntervalFn: NonNullable<OnlineSessionDependencies["clearInterval"]>;
   private readonly tickMs: number;
+  private readonly setTimeoutFn: NonNullable<OnlineSessionDependencies["setTimeout"]>;
+  private readonly clearTimeoutFn: NonNullable<OnlineSessionDependencies["clearTimeout"]>;
+  private readonly attachTimeoutMs: number;
+  private readonly maxAttachRetries: number;
+  private readonly resumeStore: ResumeStore;
   private readonly host: string;
   private readonly disposeRuntime: boolean;
   private readonly listeners = new Set<() => void>();
@@ -59,6 +73,11 @@ export class OnlineSession implements GameSession {
   private eventIds = new Set<number>();
   private receivedAt = 0;
   private clockTimer: ReturnType<typeof globalThis.setInterval> | null = null;
+  private attachTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private attachRetries = 0;
+  private receivedState = false;
+  private playerName = "";
+  private roomAlias: string | null = null;
   private clientUnsubscribers: Array<() => void> = [];
   private lifecycleGeneration = 0;
   private clientBindingGeneration = 0;
@@ -78,7 +97,10 @@ export class OnlineSession implements GameSession {
             if (action === "resume") {
               const candidate = body as { allocationId?: string; resumeCredential?: string } | undefined;
               if (typeof candidate?.allocationId === "string" && typeof candidate?.resumeCredential === "string") {
-                return this.gateway.resumeRoom(candidate.allocationId, candidate.resumeCredential);
+                // The server rotates the credential on every resume; keep the saved game in step.
+                const resumed = await this.gateway.resumeRoom(candidate.allocationId, candidate.resumeCredential);
+                this.rememberAllocation(resumed);
+                return resumed;
               }
             }
             if (typeof (this.gateway as any).controlRequest === "function") {
@@ -93,6 +115,11 @@ export class OnlineSession implements GameSession {
     this.setIntervalFn = deps.setInterval ?? ((handler, timeout) => globalThis.setInterval(handler, timeout));
     this.clearIntervalFn = deps.clearInterval ?? ((handle) => globalThis.clearInterval(handle));
     this.tickMs = deps.tickMs ?? 250;
+    this.setTimeoutFn = deps.setTimeout ?? ((handler, timeout) => globalThis.setTimeout(handler, timeout));
+    this.clearTimeoutFn = deps.clearTimeout ?? ((handle) => globalThis.clearTimeout(handle));
+    this.attachTimeoutMs = deps.attachTimeoutMs ?? DEFAULT_ATTACH_TIMEOUT_MS;
+    this.maxAttachRetries = deps.maxAttachRetries ?? DEFAULT_MAX_ATTACH_RETRIES;
+    this.resumeStore = deps.resumeStore ?? defaultResumeStore;
     this.host = deps.host ?? globalThis.OTT_PLAYHTML_HOST ?? globalThis.OTT_PLAYHTML_CONTROL_ENDPOINT ?? "";
     this.disposeRuntime = deps.disposeRuntime ?? true;
   }
@@ -116,35 +143,97 @@ export class OnlineSession implements GameSession {
     }
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "preparing", connection: "connecting", error: null });
     this.publish();
+    this.playerName = options.playerName;
+    const previousAlias = options.intent === "resume" ? this.resumeStore.read()?.alias ?? null : null;
     try {
       const rawOptions = options as any;
       const isExplicitInvite = rawOptions.intent === "invite" && typeof rawOptions.inviteToken === "string";
-      const isRoomIdInvite = options.intent === "join" && options.roomId.trim().startsWith("inv_");
+      const isRoomIdInvite = options.intent === "join" && normalizeRoomCode(options.roomId).startsWith("inv_");
       const allocation = options.intent === "create"
         ? await this.gateway.createRoom(options.playerName)
-        : isExplicitInvite
-          ? await this.gateway.claimSeatInvite(rawOptions.inviteToken, rawOptions.playerName)
-          : isRoomIdInvite
-            ? await this.gateway.claimSeatInvite(options.roomId, options.playerName)
-            : await this.gateway.joinRoom(options.playerName, options.roomId);
+        : options.intent === "resume"
+          ? await this.gateway.resumeRoom(options.allocationId, options.resumeCredential)
+          : isExplicitInvite
+            ? await this.gateway.claimSeatInvite(rawOptions.inviteToken, rawOptions.playerName)
+            : isRoomIdInvite
+              ? await this.gateway.claimSeatInvite(normalizeRoomCode(options.roomId), options.playerName)
+              : await this.gateway.joinRoom(options.playerName, options.roomId);
       if (!this.isCurrentGeneration(generation)) return;
-      this.allocation = allocation;
-      if (!this.host) throw new Error("PlayHTML host is unavailable");
-      const client = this.clientFactory({
-        connectionFactory: () => this.runtime.connectionFactory(),
-        playhtmlBootstrap: (config: { host: string; room: string }) => this.runtime.bootstrap(config),
-        playhtmlHost: this.host,
-        ...(this.controlRequestFn ? { controlRequest: this.controlRequestFn } : {}),
-      });
-      if (!this.isCurrentGeneration(generation)) return;
-      this.client = client;
-      this.bindClient(client, generation);
-      if (await client.attachAllocation(allocation) !== true) throw new Error("Online attach was not accepted");
-      if (!this.isCurrentGeneration(generation)) return;
+      this.roomAlias = allocation.alias ?? previousAlias;
+      await this.attach(allocation, generation);
     } catch (cause) {
       if (!this.isCurrentGeneration(generation)) return;
-      this.fail(error("connection_failed", clientMessage(cause, "Không thể kết nối phòng online."), true));
+      if (options.intent === "resume" && isPermanentRoomError(cause)) this.resumeStore.clear();
+      this.fail(error("connection_failed", onlineErrorMessage(cause, "Không thể kết nối phòng online."), true));
     }
+  }
+
+  /** Opens a fresh client for `allocation` and arms the watchdog that waits for the first snapshot. */
+  private async attach(allocation: PlayhtmlAllocation, generation: number): Promise<void> {
+    this.allocation = allocation;
+    this.rememberAllocation(allocation);
+    if (!this.host) throw new Error("PlayHTML host is unavailable");
+    const client = this.clientFactory({
+      connectionFactory: () => this.runtime.connectionFactory(),
+      playhtmlBootstrap: (config: { host: string; room: string }) => this.runtime.bootstrap(config),
+      playhtmlHost: this.host,
+      ...(this.controlRequestFn ? { controlRequest: this.controlRequestFn } : {}),
+    });
+    if (!this.isCurrentGeneration(generation)) return;
+    this.client = client;
+    this.bindClient(client, generation);
+    if (await client.attachAllocation(allocation) !== true) throw new Error("Online attach was not accepted");
+    if (!this.isCurrentGeneration(generation) || this.receivedState) return;
+    this.armAttachWatchdog(generation);
+  }
+
+  private armAttachWatchdog(generation: number): void {
+    this.clearAttachWatchdog();
+    this.attachTimer = this.setTimeoutFn(() => {
+      this.attachTimer = null;
+      void this.retryUnansweredAttach(generation);
+    }, this.attachTimeoutMs);
+  }
+
+  private clearAttachWatchdog(): void {
+    if (this.attachTimer === null) return;
+    try { this.clearTimeoutFn(this.attachTimer); } catch { /* the timer is already gone */ }
+    this.attachTimer = null;
+  }
+
+  /** An attach that never gets a snapshot must not leave the player stuck: retry with a fresh ticket, then fail visibly. */
+  private async retryUnansweredAttach(generation: number): Promise<void> {
+    if (!this.isCurrentGeneration(generation) || this.receivedState) return;
+    const current = this.allocation;
+    if (!current || this.attachRetries >= this.maxAttachRetries) {
+      this.fail(error("connection_failed", onlineErrorMessage("attach_timeout", "Không kết nối được vào phòng."), true));
+      return;
+    }
+    this.attachRetries += 1;
+    this.detachClient();
+    try {
+      const fresh = await this.gateway.resumeRoom(current.allocationId, current.resumeCredential);
+      if (!this.isCurrentGeneration(generation) || this.receivedState) return;
+      await this.attach(fresh, generation);
+    } catch (cause) {
+      if (!this.isCurrentGeneration(generation)) return;
+      if (isPermanentRoomError(cause)) this.resumeStore.clear();
+      this.fail(error("connection_failed", onlineErrorMessage(cause, "Không kết nối được vào phòng."), true));
+    }
+  }
+
+  /** Saves what a later page load needs to offer "Vào lại" for this game. */
+  private rememberAllocation(allocation: PlayhtmlAllocation): void {
+    if (allocation.alias) this.roomAlias = allocation.alias;
+    this.resumeStore.write({
+      allocationId: allocation.allocationId,
+      room: allocation.room,
+      seat: allocation.seat,
+      resumeCredential: allocation.resumeCredential,
+      alias: this.roomAlias,
+      playerName: this.playerName,
+      savedAt: this.now(),
+    });
   }
 
   getLegalMoves(from: Position): readonly Position[] {
@@ -166,6 +255,7 @@ export class OnlineSession implements GameSession {
 
   async leave(): Promise<void> {
     if (this.disposed) return;
+    this.resumeStore.clear();
     try { this.client?.leave(); } catch { /* a closed transport is already left */ }
     this.cleanupTransport();
     this.stopClockTimer();
@@ -219,7 +309,7 @@ export class OnlineSession implements GameSession {
         }
         return;
       }
-      this.fail(error(this.snapshot.phase === "playing" ? "connection_failed" : "room_unavailable", clientMessage(payload, "Kết nối online gặp lỗi."), true));
+      this.fail(error(this.snapshot.phase === "playing" ? "connection_failed" : "room_unavailable", onlineErrorMessage(payload, "Kết nối online gặp lỗi."), true));
     });
   }
 
@@ -242,6 +332,8 @@ export class OnlineSession implements GameSession {
     }
     const normalized = normalizeOnlineState(message, this.performanceNow(), this.boardRevision);
     if (!normalized) return;
+    this.receivedState = true;
+    this.clearAttachWatchdog();
     if (normalized.boardFingerprint !== this.lastFingerprint) this.boardRevision = Math.max(this.boardRevision + 1, normalized.serverRevision);
     this.lastFingerprint = normalized.boardFingerprint;
     this.serverRevision = normalized.serverRevision;
@@ -253,8 +345,9 @@ export class OnlineSession implements GameSession {
       return item;
     });
     const resultEvents = [...this.snapshot.events, ...newEvents];
-    this.snapshot = Object.freeze({ ...normalized.snapshot, boardRevision: this.boardRevision, events: resultEvents, pendingMove: false, connection: "online" });
+    this.snapshot = Object.freeze({ ...normalized.snapshot, roomAlias: this.roomAlias, boardRevision: this.boardRevision, events: resultEvents, pendingMove: false, connection: "online" });
     if (this.snapshot.phase === "finished") {
+      this.resumeStore.clear();
       this.cleanupTransport();
       this.snapshot = Object.freeze({ ...this.snapshot, connection: "offline" });
     } else {
@@ -272,6 +365,7 @@ export class OnlineSession implements GameSession {
     if (reason !== "goal" && reason !== "elimination" && reason !== "no_moves" && reason !== "timeout" && reason !== "disconnect_timeout" && reason !== "leave") return;
     const event: GameEventView = { id: this.nextEventId++, type: "win", winner: winner ?? "A", reason };
     this.snapshot = Object.freeze({ ...this.snapshot, phase: "finished", turn: null, result: { winner, reason }, events: [...this.snapshot.events, event], pendingMove: false });
+    this.resumeStore.clear();
     this.cleanupTransport();
     this.snapshot = Object.freeze({ ...this.snapshot, connection: "offline" });
     this.publish();
@@ -283,7 +377,7 @@ export class OnlineSession implements GameSession {
   }
 
   private publishDisplayClock(): void {
-    if (!this.rawState || this.snapshot.connection !== "online" || this.snapshot.phase === "finished") return;
+    if (!this.rawState || this.snapshot.connection !== "online" || this.snapshot.phase !== "playing") return;
     const elapsed = Math.max(0, Math.floor(this.performanceNow() - this.receivedAt));
     const runningSeat = this.rawState.clock.runningSeat;
     const remainingMs = { A: this.rawState.clock.remainingMs.A, B: this.rawState.clock.remainingMs.B };
@@ -319,11 +413,17 @@ export class OnlineSession implements GameSession {
 
   private cleanupTransport(): void {
     this.lifecycleGeneration += 1;
-    this.clientBindingGeneration += 1;
     this.stopClockTimer();
     this.allocation = null;
     this.rawState = null;
     this.receivedAt = 0;
+    this.detachClient();
+  }
+
+  /** Drops the current client without ending the session lifecycle (used for attach retries). */
+  private detachClient(): void {
+    this.clientBindingGeneration += 1;
+    this.clearAttachWatchdog();
     const unsubscribers = this.clientUnsubscribers;
     this.clientUnsubscribers = [];
     for (const unsubscribe of unsubscribers) {
@@ -343,6 +443,9 @@ export class OnlineSession implements GameSession {
     this.nextEventId = 1;
     this.eventIds.clear();
     this.receivedAt = 0;
+    this.attachRetries = 0;
+    this.receivedState = false;
+    this.roomAlias = null;
     this.snapshot = initialSnapshot;
   }
 

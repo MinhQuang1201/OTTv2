@@ -526,6 +526,33 @@
   font-weight: 700;
 }
 
+.inviteBanner {
+  display: grid;
+  justify-items: center;
+  gap: var(--ui-space-2);
+  margin: 0 0 var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 2px dashed var(--ui-focus);
+  text-align: center;
+}
+
+.inviteLabel {
+  margin: 0;
+}
+
+.inviteCode {
+  font-family: var(--ui-font-pixel), var(--ui-font-mono);
+  font-size: 1.75rem;
+  letter-spacing: 0.12em;
+}
+
+.inviteActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ui-space-2);
+}
+
 .effects {
   animation: game-pop 200ms var(--ui-ease-standard);
   width: 100%;

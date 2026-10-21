@@ -299,6 +299,26 @@
   gap: var(--ui-space-4);
 }
 
+.resumeCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 2px solid var(--ui-focus);
+  background: var(--ui-surface-raised, transparent);
+}
+
+.resumeCard p {
+  margin: 4px 0 0;
+}
+
+.resumeActions {
+  display: flex;
+  gap: var(--ui-space-2);
+}
+
 .joinRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

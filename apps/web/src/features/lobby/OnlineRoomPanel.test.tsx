@@ -126,4 +126,39 @@ describe("OnlineRoomPanel", () => {
     expect(onWatch).toHaveBeenCalledWith({ allocationId: "allocation-7", roomId: "room-7" });
     expect(onWatch).not.toHaveBeenCalledWith(expect.objectContaining({ playerName: expect.anything() }));
   });
+
+  it("offers a cancel button while connecting so the player is never stuck", async () => {
+    const user = userEvent.setup();
+    const onCancelConnecting = vi.fn();
+    render(<OnlineRoomPanel availability="connecting" onCreate={vi.fn()} onJoin={vi.fn()} onCancelConnecting={onCancelConnecting} />);
+
+    expect(screen.getByRole("button", { name: "Tạo phòng" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Huỷ kết nối" }));
+    expect(onCancelConnecting).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an unfinished game with resume and discard actions, enabled only when online is ready", async () => {
+    const user = userEvent.setup();
+    const onResume = vi.fn();
+    const onDiscardResume = vi.fn();
+    const { rerender } = render(<OnlineRoomPanel availability="connecting" onCreate={vi.fn()} onJoin={vi.fn()} pendingGame={{ alias: "K7N-M4P", seat: "A" }} onResume={onResume} onDiscardResume={onDiscardResume} />);
+    expect(screen.getByRole("button", { name: "Vào lại" })).toBeDisabled();
+
+    rerender(<OnlineRoomPanel availability="online" onCreate={vi.fn()} onJoin={vi.fn()} pendingGame={{ alias: "K7N-M4P", seat: "A" }} onResume={onResume} onDiscardResume={onDiscardResume} />);
+    expect(screen.getByRole("region", { name: "Ván online đang dở" })).toHaveTextContent("Phòng K7N-M4P · bạn là Đỏ (A)");
+    await user.click(screen.getByRole("button", { name: "Vào lại" }));
+    await user.click(screen.getByRole("button", { name: "Bỏ" }));
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(onDiscardResume).toHaveBeenCalledTimes(1);
+  });
+
+  it("pre-fills the room code from an invite link", async () => {
+    const user = userEvent.setup();
+    const onJoin = vi.fn();
+    render(<OnlineRoomPanel availability="online" onCreate={vi.fn()} onJoin={onJoin} playerName="Bình" initialRoomCode="K7N-M4P" />);
+
+    expect(screen.getByRole("textbox", { name: "Mã phòng" })).toHaveValue("K7N-M4P");
+    await user.click(screen.getByRole("button", { name: "Vào phòng" }));
+    expect(onJoin).toHaveBeenCalledWith("Bình", "K7N-M4P");
+  });
 });
