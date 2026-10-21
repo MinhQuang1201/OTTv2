@@ -524,4 +524,43 @@ describe("room", () => {
     assert.equal(resumeResult.ok, true);
     assert.equal(room.state.clock.runningSeat, "B");
   });
+
+  it("keeps the on-turn seat's clock stopped when only the off-turn seat resumes", () => {
+    const clock = fakeClock(0);
+    const { room, a, b } = roomWithPlayers(clock);
+    const tokenA = room.players.A.resumeToken;
+    const tokenB = room.players.B.resumeToken;
+    assert.equal(room.handleMove(a, rules.parseSquare("e8"), rules.parseSquare("d7")).ok, true);
+    room.removePlayer(b);
+    room.removePlayer(a);
+
+    assert.equal(room.resumePlayer(fakeConnection(), tokenA).ok, true);
+    assert.equal(room.state.turn, "B");
+    assert.equal(room.state.clock.runningSeat, null);
+    const remainingB = room.state.clock.remainingMs.B;
+    clock.advance(30_000);
+    room.settleClock(clock.now());
+    assert.equal(room.state.clock.remainingMs.B, remainingB);
+
+    assert.equal(room.resumePlayer(fakeConnection(), tokenB).ok, true);
+    assert.equal(room.state.clock.runningSeat, "B");
+  });
+
+  it("does not run the creator's clock when B joins during the creator's reconnect grace", () => {
+    const clock = fakeClock(0);
+    const room = new Room("TEST", { now: clock.now, schedule: clock.schedule, cancel: clock.cancel });
+    const a = fakeConnection();
+    const tokenA = room.addPlayer(a, "An").resumeToken;
+    room.removePlayer(a);
+    room.addPlayer(fakeConnection(), "Bình");
+
+    assert.equal(room.status, "playing");
+    assert.equal(room.state.clock.runningSeat, null);
+    clock.advance(10_000);
+    room.settleClock(clock.now());
+    assert.equal(room.state.clock.remainingMs.A, config.TIME_CONTROL.initialMs);
+
+    assert.equal(room.resumePlayer(fakeConnection(), tokenA).ok, true);
+    assert.equal(room.state.clock.runningSeat, "A");
+  });
 });
