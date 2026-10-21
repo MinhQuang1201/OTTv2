@@ -26,7 +26,7 @@ Node ≥ 22 (`.nvmrc`). Cổng mặc định 3000 (`PORT`).
 - `apps/web/src/features/` — React lobby, board, result, and shared UI. Không nhét luật vào component.
 - `apps/web/src/sessions/` — local, AI, demo, and online session boundaries. Online chỉ gửi lệnh và vẽ snapshot authoritative.
 - `apps/web/static/playhtml-game.html` — retained adapter diagnostic page; không phải game UI thứ hai.
-- `packages/game-core/src/ai.js` — `chooseMove(state, player)`. Thay file này khi gắn AI khác.
+- `packages/game-core/src/ai.js` — `chooseMove(state, player, { level })` với level `easy`/`medium`/`hard` (mặc định `hard`): minimax cắt tỉa alpha-beta có giới hạn số nút. UI chạy nó trong Web Worker (`apps/web/src/sessions/ai/`). Thay file này khi gắn AI khác.
 
 ## Thuật ngữ
 

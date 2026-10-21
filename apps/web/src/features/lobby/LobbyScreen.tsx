@@ -15,6 +15,7 @@ import { normalizeCoreState } from "../../sessions/core/normalizeCoreState";
 import type { PieceType, Seat } from "../../shared/model/game";
 import { HumanTournamentDialog } from "../tournaments/HumanTournamentDialog";
 import type { OnlineLobbyGateway } from "../../sessions/online/OnlineLobbyGateway";
+import { AI_LEVELS, DEFAULT_AI_LEVEL, isAiLevel, type AiLevel } from "../../shared/model/aiLevel";
 import styles from "./lobby.module.css";
 
 interface MiniBoardState {
@@ -54,7 +55,7 @@ export interface LobbyScreenProps {
   readonly waitingRooms: WaitingRoomState;
   readonly publicMatches?: PublicMatchListState;
   readonly onStartLocal: (names: [string, string]) => void;
-  readonly onStartAi: (playerName: string) => void;
+  readonly onStartAi: (playerName: string, level: AiLevel) => void;
   readonly onCreateOnline: (playerName: string) => void;
   readonly onJoinOnline: (playerName: string, roomId: string) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
@@ -81,6 +82,7 @@ export function LobbyScreen({
   onlineGateway,
 }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
+  const [aiLevel, setAiLevel] = useState<AiLevel>(DEFAULT_AI_LEVEL);
   const [playerNameError, setPlayerNameError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -123,7 +125,7 @@ export function LobbyScreen({
   };
   const handleStartAi = (name: string) => {
     importGenerationRef.current += 1;
-    onStartAi(name);
+    onStartAi(name, aiLevel);
   };
   const handleReplayFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -252,7 +254,16 @@ export function LobbyScreen({
               variant="primary"
               icon={<PixelSprite kind="bot" size={24} decorative />}
               onSelect={() => handleStartAi(normalizedName)}
-            />
+            >
+              <label className={styles.levelField}>
+                <span>Mức AI</span>
+                <select value={aiLevel} onChange={(event) => { if (isAiLevel(event.target.value)) setAiLevel(event.target.value); }}>
+                  {AI_LEVELS.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label} — {item.hint}</option>
+                  ))}
+                </select>
+              </label>
+            </ModeCard>
             {onStartReplay && (
               <ModeCard
                 title="Xem lại trận đấu"

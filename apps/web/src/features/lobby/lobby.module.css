@@ -574,3 +574,24 @@
     grid-template-columns: 1fr;
   }
 }
+
+.levelField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-text-xs);
+  font-weight: 700;
+  color: var(--ui-text);
+}
+
+.levelField select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface, transparent);
+  color: var(--ui-text);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-text-xs);
+}

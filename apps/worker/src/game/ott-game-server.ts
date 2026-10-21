@@ -861,6 +861,8 @@ export class OttGameServer extends YServer {
     if (Date.now() < gcAt) return false;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    // Drop the cached terminal Room so nothing is served or rewritten from memory.
+    this.roomLoad = undefined;
     logEvent("info", "game_storage_wiped");
     return true;
   }

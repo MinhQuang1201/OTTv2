@@ -29,6 +29,7 @@ export class LocalSession implements GameSession {
   private lastNow = 0;
   private nextEventId = 1;
   private boardRevision = 0;
+  private generation = 0;
   private disposed = false;
 
   constructor(deps: LocalSessionDependencies = {}) {
@@ -49,6 +50,7 @@ export class LocalSession implements GameSession {
 
   async start(options: StartGameOptions): Promise<void> {
     if (this.disposed || options.mode !== "local") return;
+    this.generation += 1;
     this.clearTimer();
     this.names = [options.playerNames[0].trim() || "Người chơi Đỏ", options.playerNames[1].trim() || "Người chơi Xanh"];
     try {
@@ -91,6 +93,19 @@ export class LocalSession implements GameSession {
   chooseMove(player: Seat, chooser: CoreMoveChooser = this.bridge.ai.chooseMove): CoreMove | null {
     if (this.disposed || !this.state || this.snapshot.phase !== "playing" || this.state.turn !== player || this.state.winner) return null;
     try { return chooser(this.state, player); } catch { return null; }
+  }
+
+  /** Async variant for engines that search off the main thread. Drops the answer if the position moved on. */
+  async chooseMoveAsync(player: Seat, chooser: (state: CoreState, player: Seat) => Promise<CoreMove | null>): Promise<CoreMove | null> {
+    if (this.disposed || !this.state || this.snapshot.phase !== "playing" || this.state.turn !== player || this.state.winner) return null;
+    // Clock ticks replace the state object, so compare the position, not the reference.
+    const generation = this.generation;
+    const revision = this.boardRevision;
+    let move: CoreMove | null;
+    try { move = await chooser(this.state, player); } catch { return null; }
+    const unchanged = !this.disposed && this.generation === generation && this.boardRevision === revision &&
+      this.state?.turn === player && !this.state.winner;
+    return unchanged ? move : null;
   }
 
   async move(from: Position, to: Position): Promise<MoveResult> {

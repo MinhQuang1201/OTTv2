@@ -13,6 +13,7 @@ export interface ModeCardProps {
   readonly statusTone?: BadgeStatus;
   readonly variant?: ButtonVariant;
   readonly icon?: ReactNode;
+  readonly children?: ReactNode;
 }
 
 export function ModeCard({
@@ -25,6 +26,7 @@ export function ModeCard({
   statusTone = "neutral",
   variant = "secondary",
   icon,
+  children,
 }: ModeCardProps) {
   return (
     <article className={styles.modeCard}>
@@ -33,6 +35,7 @@ export function ModeCard({
         <h3>{title}</h3>
         <p>{description}</p>
         {status ? <Badge status={statusTone}>{status}</Badge> : null}
+        {children}
       </div>
       <Button variant={variant} disabled={disabled} onClick={onSelect}>
         {actionLabel}

@@ -1,3 +1,4 @@
+import type { AiLevel } from "../shared/model/aiLevel";
 import type {
   DemoScenario,
   GameSnapshot,
@@ -83,7 +84,7 @@ export interface ReplayPlaybackFacade {
 export type StartGameOptions =
   | { readonly mode: "demo"; readonly scenario: DemoScenario }
   | { readonly mode: "local"; readonly playerNames: readonly [string, string]; readonly practice?: PracticeStart }
-  | { readonly mode: "ai"; readonly playerName: string; readonly humanSeat?: Seat; readonly practice?: PracticeStart }
+  | { readonly mode: "ai"; readonly playerName: string; readonly humanSeat?: Seat; readonly level?: AiLevel; readonly practice?: PracticeStart }
   | { readonly mode: "online"; readonly intent: "create"; readonly playerName: string }
   | {
       readonly mode: "online";
