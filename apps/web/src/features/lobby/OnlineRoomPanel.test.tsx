@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OnlineRoomPanel } from "./OnlineRoomPanel";
+import { OnlineRoomPanel, PendingGameCard } from "./OnlineRoomPanel";
 import type { WaitingRoomState } from "./WaitingRoomList";
 import type { PublicMatchListState } from "../spectator/PublicMatchList";
 
@@ -141,10 +141,10 @@ describe("OnlineRoomPanel", () => {
     const user = userEvent.setup();
     const onResume = vi.fn();
     const onDiscardResume = vi.fn();
-    const { rerender } = render(<OnlineRoomPanel availability="connecting" onCreate={vi.fn()} onJoin={vi.fn()} pendingGame={{ alias: "K7N-M4P", seat: "A" }} onResume={onResume} onDiscardResume={onDiscardResume} />);
+    const { rerender } = render(<PendingGameCard game={{ alias: "K7N-M4P", seat: "A" }} ready={false} onResume={onResume} onDiscard={onDiscardResume} />);
     expect(screen.getByRole("button", { name: "Vào lại" })).toBeDisabled();
 
-    rerender(<OnlineRoomPanel availability="online" onCreate={vi.fn()} onJoin={vi.fn()} pendingGame={{ alias: "K7N-M4P", seat: "A" }} onResume={onResume} onDiscardResume={onDiscardResume} />);
+    rerender(<PendingGameCard game={{ alias: "K7N-M4P", seat: "A" }} ready onResume={onResume} onDiscard={onDiscardResume} />);
     expect(screen.getByRole("region", { name: "Ván online đang dở" })).toHaveTextContent("Phòng K7N-M4P · bạn là Đỏ (A)");
     await user.click(screen.getByRole("button", { name: "Vào lại" }));
     await user.click(screen.getByRole("button", { name: "Bỏ" }));

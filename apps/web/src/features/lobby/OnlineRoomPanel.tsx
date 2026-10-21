@@ -14,6 +14,27 @@ export interface PendingGameView {
   readonly seat: "A" | "B";
 }
 
+/** Top-of-lobby card offering to re-enter an unfinished online game after a reload or a closed tab. */
+export function PendingGameCard({ game, ready, onResume, onDiscard }: {
+  readonly game: PendingGameView;
+  readonly ready: boolean;
+  readonly onResume: () => void;
+  readonly onDiscard?: () => void;
+}) {
+  return (
+    <div className={styles.resumeCard} role="region" aria-label="Ván online đang dở">
+      <div>
+        <strong>Bạn đang có ván dở</strong>
+        <p>{game.alias ? `Phòng ${game.alias} · ` : ""}bạn là {game.seat === "A" ? "Đỏ (A)" : "Xanh (B)"}</p>
+      </div>
+      <div className={styles.resumeActions}>
+        <Button disabled={!ready} onClick={onResume}>Vào lại</Button>
+        {onDiscard ? <Button variant="quiet" onClick={onDiscard}>Bỏ</Button> : null}
+      </div>
+    </div>
+  );
+}
+
 export interface OnlineRoomPanelProps {
   readonly availability: OnlineAvailability;
   readonly waitingRooms?: WaitingRoomState;
@@ -26,9 +47,6 @@ export interface OnlineRoomPanelProps {
   readonly onWatch?: (identity: PublicMatchIdentity) => void;
   readonly onRetryRooms?: () => void;
   readonly allowDemoWatch?: boolean;
-  readonly pendingGame?: PendingGameView | null;
-  readonly onResume?: () => void;
-  readonly onDiscardResume?: () => void;
   /** Room code from an invite link (`?join=`), pre-filled into the join field. */
   readonly initialRoomCode?: string;
   /** Lets the player abandon a connection attempt instead of waiting on it. */
@@ -47,9 +65,6 @@ export function OnlineRoomPanel({
   onWatch = () => undefined,
   onRetryRooms,
   allowDemoWatch = false,
-  pendingGame = null,
-  onResume,
-  onDiscardResume,
   initialRoomCode,
   onCancelConnecting,
 }: OnlineRoomPanelProps) {
@@ -94,18 +109,7 @@ export function OnlineRoomPanel({
       {availability === "connecting" && onCancelConnecting ? (
         <Button variant="quiet" onClick={onCancelConnecting}>Huỷ kết nối</Button>
       ) : null}
-      {pendingGame && onResume ? (
-        <div className={styles.resumeCard} role="region" aria-label="Ván online đang dở">
-          <div>
-            <strong>Bạn đang có ván dở</strong>
-            <p>{pendingGame.alias ? `Phòng ${pendingGame.alias} · ` : ""}bạn là {pendingGame.seat === "A" ? "Đỏ (A)" : "Xanh (B)"}</p>
-          </div>
-          <div className={styles.resumeActions}>
-            <Button disabled={!isReady} onClick={onResume}>Vào lại</Button>
-            {onDiscardResume ? <Button variant="quiet" onClick={onDiscardResume}>Bỏ</Button> : null}
-          </div>
-        </div>
-      ) : null}
+
       {availability === "unavailable" ? <p className={styles.unavailableCopy}>Bạn có thể bắt đầu ván local hoặc đấu với AI ngay.</p> : null}
       <div className={styles.onlineActions}>
         <Button disabled={!isReady} onClick={create}>Tạo phòng</Button>
