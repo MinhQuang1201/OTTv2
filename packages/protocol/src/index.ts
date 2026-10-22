@@ -8,7 +8,15 @@ export const MAX_PUBLIC_MATCHES = 100;
 export const ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-export function generateRandomAlias(random: () => number = Math.random): string {
+/** A float in [0, 1) from the platform CSPRNG; Workers and Node 22 both expose `crypto`. */
+function secureRandom(): number {
+  const buffer = new Uint32Array(1);
+  crypto.getRandomValues(buffer);
+  return buffer[0]! / 0x1_0000_0000;
+}
+
+/** Room codes are typed by people and resolve to a room, so they must not be predictable. */
+export function generateRandomAlias(random: () => number = secureRandom): string {
   let code = "";
   for (let i = 0; i < 6; i++) {
     code += ALIAS_ALPHABET[Math.floor(random() * ALIAS_ALPHABET.length)];

@@ -212,6 +212,23 @@ describe("Lobby Room Aliases & Seat-Specific Invite Credentials", () => {
     assert.equal(normalizeAlias("TOO-LONG-ALIAS-123"), null);
   });
 
+  it("draws aliases from the platform CSPRNG by default", () => {
+    const original = globalThis.crypto.getRandomValues;
+    let calls = 0;
+    globalThis.crypto.getRandomValues = function (array) {
+      calls += 1;
+      return original.call(globalThis.crypto, array);
+    };
+    try {
+      generateRandomAlias();
+    } finally {
+      globalThis.crypto.getRandomValues = original;
+    }
+    assert.equal(calls, 6);
+    assert.equal(generateRandomAlias(() => 0), "222-222");
+    assert.equal(generateRandomAlias(() => 0.999999), "ZZZ-ZZZ");
+  });
+
   it("generates 6-character hyphenated Crockford Base32 aliases", () => {
     for (let i = 0; i < 20; i++) {
       const alias = generateRandomAlias();
