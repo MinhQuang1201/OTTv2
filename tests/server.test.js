@@ -150,6 +150,15 @@ test("serves a public asset", async () => {
   assert.equal((await request(port, "/playhtml-game.html")).statusCode, 200);
 });
 
+test("serves the favicon linked from the built page", async () => {
+  await requireBuiltApp();
+  const port = server.address().port;
+  assert.match(await fs.readFile(builtIndex, "utf8"), /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg"/);
+  const favicon = await request(port, "/favicon.svg");
+  assert.equal(favicon.statusCode, 200);
+  assert.match(favicon.headers["content-type"], /^image\/svg\+xml/);
+});
+
 test("serves only the built React app", async () => {
   const port = server.address().port;
   assert.equal((await request(port, "/src/main.tsx")).statusCode, 404);

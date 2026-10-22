@@ -42,7 +42,8 @@ Hai người trên cùng máy có thể chơi ngay. Chế độ AI hoạt độn
 
 Tài liệu adapter PlayHTML: [http://localhost:3000/playhtml-game.html](http://localhost:3000/playhtml-game.html)
 
-Demo fixture có thể chọn bằng query key, ví dụ `?demo=result-goal`,
+Demo fixture chỉ chạy khi phát triển bằng `npm run dev:web` (bản build `npm run build:web`, `npm start` và
+Vercel bỏ qua `?demo=`). Chọn kịch bản bằng query key, ví dụ `?demo=game-capture`, `?demo=result-goal`,
 `?demo=result-elimination`, `?demo=result-no-moves`, `?demo=result-timeout`,
 `?demo=result-disconnect-timeout`, `?demo=result-leave`,
 `?demo=game-reconnecting`, hoặc các kịch bản khán giả: `?demo=spectator-list`,

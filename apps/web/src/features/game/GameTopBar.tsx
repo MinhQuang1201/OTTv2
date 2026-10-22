@@ -1,12 +1,21 @@
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
-import type { ConnectionState } from "../../shared/model/game";
+import type { ConnectionState, SessionMode } from "../../shared/model/game";
 import styles from "./game.module.css";
 
-const connectionLabel: Record<ConnectionState, string> = { offline: "Ngoại tuyến", connecting: "Đang kết nối", online: "Đã kết nối", reconnecting: "Đang kết nối lại", unavailable: "Không khả dụng" };
+// "offline" is a game played entirely on this device (two players or AI), not a lost network.
+const connectionLabel: Record<ConnectionState, string> = { offline: "Chơi trên thiết bị", connecting: "Đang kết nối", online: "Đã kết nối", reconnecting: "Đang kết nối lại", unavailable: "Không khả dụng" };
+
+function tableLabel(roomId: string | null, mode: SessionMode | undefined): string {
+  if (roomId) return `Phòng ${roomId}`;
+  if (mode === "local") return "Hai người cùng máy";
+  if (mode === "ai") return "Đấu với AI";
+  return "Chơi trên thiết bị";
+}
 
 export interface GameTopBarProps {
   readonly roomId: string | null;
+  readonly mode?: SessionMode;
   readonly connection: ConnectionState;
   readonly spectatorCount?: number;
   readonly spectator?: boolean;
@@ -19,6 +28,7 @@ export interface GameTopBarProps {
 
 export function GameTopBar({
   roomId,
+  mode,
   connection,
   spectatorCount = 0,
   spectator = false,
@@ -44,11 +54,11 @@ export function GameTopBar({
           {spectator ? "Đang xem trực tiếp" : "OTTv2 · Bàn đấu"}
         </span>
         <strong data-testid="room-label">
-          {roomId ? `Phòng ${roomId}` : "Chơi trên thiết bị"}
+          {tableLabel(roomId, mode)}
         </strong>
       </div>
       <div className={styles.topBarActions}>
-        <Badge status={status}>{connectionLabel[connection]}</Badge>
+        <Badge status={status} className={connection === "offline" ? styles.badgeOnDevice : undefined}>{connectionLabel[connection]}</Badge>
         {spectator ? <span className={styles.spectatorCount}>{spectatorCount} đang xem</span> : null}
         {onFlipPerspective && (
           <Button
@@ -58,7 +68,8 @@ export function GameTopBar({
             aria-pressed={perspective === "B"}
             data-testid="game-flip-btn"
           >
-            Xoay bàn cờ
+            <span aria-hidden="true" className={styles.actionIcon}>↻</span>
+            <span className={styles.actionText}>Xoay bàn cờ</span>
           </Button>
         )}
         {onToggleSound && (
@@ -69,7 +80,8 @@ export function GameTopBar({
             aria-pressed={soundEnabled}
             data-testid="game-sound-toggle-btn"
           >
-            {soundEnabled ? "🔊 Âm thanh" : "🔇 Âm thanh"}
+            <span aria-hidden="true" className={styles.actionIcon}>{soundEnabled ? "🔊" : "🔇"}</span>
+            <span className={styles.actionText}>Âm thanh</span>
           </Button>
         )}
         <Button
@@ -77,7 +89,8 @@ export function GameTopBar({
           onClick={onLeave}
           aria-label={spectator ? "Rời chế độ xem" : "Rời bàn"}
         >
-          {spectator ? "Rời chế độ xem" : "Rời bàn"}
+          <span aria-hidden="true" className={styles.actionIcon}>✕</span>
+          <span className={styles.actionText}>{spectator ? "Rời chế độ xem" : "Rời bàn"}</span>
         </Button>
       </div>
     </div>

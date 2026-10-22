@@ -1,4 +1,5 @@
 import type { GameSnapshot } from "../../shared/model/game";
+import { SEAT_NAME } from "./captureFx";
 import styles from "./game.module.css";
 
 export function TurnStatus({ snapshot }: { readonly snapshot: GameSnapshot }) {
@@ -12,7 +13,11 @@ export function TurnStatus({ snapshot }: { readonly snapshot: GameSnapshot }) {
     else if (snapshot.connection === "reconnecting") message = "Đang kết nối lại…";
     else if (snapshot.aiThinking) message = "AI đang suy nghĩ…";
     else if (snapshot.pendingMove) message = "Đang xử lý nước đi…";
-    else if (snapshot.turn) {
+    else if (snapshot.turn && snapshot.mode === "local") {
+      // Both players share the screen, so "you" would be wrong for one of them.
+      const name = snapshot.players[snapshot.turn]?.name;
+      message = `Lượt của ${SEAT_NAME[snapshot.turn]}${name ? ` (${name})` : ""}`;
+    } else if (snapshot.turn) {
       message = snapshot.turn === snapshot.viewerSeat ? "Đến lượt bạn" : "Đối thủ đang đi";
     }
   }

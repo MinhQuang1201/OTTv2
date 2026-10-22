@@ -210,6 +210,7 @@ export function ReplayScreen({
           <PlayerPanel
             player={activeSnapshot.players.A}
             opponent={activeSnapshot.players.B}
+            mode="replay"
             active={activeSnapshot.turn === "A"}
             viewer={false}
             spectator={true}
@@ -217,6 +218,7 @@ export function ReplayScreen({
           <PlayerPanel
             player={activeSnapshot.players.B}
             opponent={activeSnapshot.players.A}
+            mode="replay"
             active={activeSnapshot.turn === "B"}
             viewer={false}
             spectator={true}
