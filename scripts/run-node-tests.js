@@ -13,6 +13,7 @@ const INTEGRATION_TESTS = [
 // Opt-in browser tests; they need Playwright Chromium and are driven by their own scripts.
 const E2E_TESTS = [
   "tests/browser-worker-runtime.test.js",
+  "tests/browser-online-flow.test.js",
   "tests/browser-arena-registration-demo.test.js",
 ];
 

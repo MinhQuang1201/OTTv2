@@ -53,3 +53,23 @@ jobs:
           echo "::add-mask::$secret"
           printf 'OTT_INTERNAL_SECRET=%s\n' "$secret" > .dev.vars
       - run: npm run test:integration
+
+  e2e:
+    name: Online e2e (two Chromium profiles, wrangler dev --local)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Write .dev.vars with a throwaway secret
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          printf 'OTT_INTERNAL_SECRET=%s\n' "$secret" > .dev.vars
+      # Smoke create/join/move plus the phase 1 flow: invite code, reload + resume, leave.
+      - run: npm run test:e2e
