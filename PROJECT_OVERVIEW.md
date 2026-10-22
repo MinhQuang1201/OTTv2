@@ -448,7 +448,7 @@ online (O1–O7) — xem bảng "Trạng thái xử lý" ở đầu tài liệu.
 1. ~~Review và merge giai đoạn 1, rồi tạo tag `v*`~~ — xong: PR #21, #22, production chạy `v1.3.0`.
 2. **Theo dõi log `attach_rejected`/`attach_failed`** trên production (Workers Observability / `wrangler tail`) để tìm
    nguyên nhân gốc của O2; nghi vấn cần kiểm chứng: lệch đồng hồ giữa Lobby DO và Game DO (`issuedAt > now`) khi DO khởi động lạnh.
-3. **Giai đoạn 2 — cảm giác ăn quân** theo kế hoạch đã chốt (đầy đủ 2.1–2.7).
+3. ~~Giai đoạn 2 — cảm giác ăn quân~~ — đã làm 2.1–2.7 (xem mục 8 của kế hoạch 2026-10-22); chờ review, kiểm tra staging rồi tag.
 4. ~~Chốt M4~~ — xong 2026-10-22. Còn lại: **nghiệm thu thủ công giai đoạn 4** trên production trước khi ghi production-ready.
 5. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
    chạy lại toàn bộ test; không dùng `npm audit fix --force`.

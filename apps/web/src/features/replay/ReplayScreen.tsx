@@ -209,12 +209,14 @@ export function ReplayScreen({
         <div className={styles.playersRail}>
           <PlayerPanel
             player={activeSnapshot.players.A}
+            opponent={activeSnapshot.players.B}
             active={activeSnapshot.turn === "A"}
             viewer={false}
             spectator={true}
           />
           <PlayerPanel
             player={activeSnapshot.players.B}
+            opponent={activeSnapshot.players.A}
             active={activeSnapshot.turn === "B"}
             viewer={false}
             spectator={true}

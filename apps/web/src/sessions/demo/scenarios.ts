@@ -17,7 +17,6 @@ export const DEMO_SCENARIOS = Object.freeze([
   "game-piece-selected",
   "game-move-rejected",
   "game-capture",
-  "game-strike-loss",
   "game-ai-thinking",
   "game-reconnecting",
   "game-clock-warning",
@@ -42,7 +41,7 @@ export function isDemoScenario(value: unknown): value is DemoScenario {
 export interface DemoMove {
   readonly from: Position;
   readonly to: Position;
-  readonly eventType?: "move" | "capture" | "strike_loss";
+  readonly eventType?: "move" | "capture";
 }
 
 export interface DemoScenarioFixture {
@@ -105,18 +104,7 @@ function eventFor(scenario: DemoScenario): GameEventView | null {
       type: "capture",
       pieceId: attacker?.id ?? "A-dam-0",
       capturedId: defender?.id ?? "B-la-1",
-      from: { x: 1, y: 2 },
-      to: { x: 6, y: 5 },
-    });
-  }
-  if (scenario === "game-strike-loss") {
-    const attacker = pieceAt({ x: 1, y: 2 });
-    const defender = pieceAt({ x: 6, y: 5 });
-    return makeEvent({
-      id: 1,
-      type: "strike_loss",
-      pieceId: attacker?.id ?? "A-dam-0",
-      byId: defender?.id ?? "B-la-1",
+      capturedType: defender?.type ?? "la",
       from: { x: 1, y: 2 },
       to: { x: 6, y: 5 },
     });
@@ -126,7 +114,7 @@ function eventFor(scenario: DemoScenario): GameEventView | null {
     "lobby-online-connecting": undefined, "lobby-rooms": undefined,
     "game-waiting": undefined, "game-active-a": undefined,
     "game-piece-selected": undefined, "game-move-rejected": undefined,
-    "game-capture": undefined, "game-strike-loss": undefined,
+    "game-capture": undefined,
     "game-ai-thinking": undefined, "game-reconnecting": undefined,
     "game-clock-warning": undefined, "game-recoverable-error": undefined,
     "result-goal": { winner: "A", reason: "goal" },
@@ -213,9 +201,7 @@ export function createScenarioFixture(scenario: DemoScenario): DemoScenarioFixtu
         ? [REJECTED_MOVE]
         : scenario === "game-capture"
           ? [{ from: { x: 1, y: 2 }, to: { x: 6, y: 5 }, eventType: "capture" }]
-          : scenario === "game-strike-loss"
-            ? [{ from: { x: 1, y: 2 }, to: { x: 6, y: 5 }, eventType: "strike_loss" }]
-            : [MOVE],
+          : [MOVE],
     rejectMoves: scenario === "game-move-rejected" ? [REJECTED_MOVE] : [],
   });
 }

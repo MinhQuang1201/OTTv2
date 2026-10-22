@@ -4,9 +4,14 @@ import "../../../../../packages/game-core/src/ai.js";
 
 import { describe, expect, it } from "vitest";
 import { getGameCoreBridge } from "./gameCoreBridge";
-import { normalizeCoreState } from "./normalizeCoreState";
+import { normalizeCoreEvents, normalizeCoreState } from "./normalizeCoreState";
 
 describe("normalizeCoreState", () => {
+  it("keeps the captured piece kind reported by the rules engine", () => {
+    const [event] = normalizeCoreEvents([{ type: "capture", pieceId: "A-dam-1", capturedId: "B-keo-0", capturedType: "keo", from: { x: 1, y: 1 }, to: { x: 1, y: 0 } }]);
+    expect(event).toEqual({ id: 1, type: "capture", pieceId: "A-dam-1", capturedId: "B-keo-0", capturedType: "keo", from: { x: 1, y: 1 }, to: { x: 1, y: 0 } });
+  });
+
   it("maps the canonical initial state without reimplementing setup", () => {
     const bridge = getGameCoreBridge();
     const state = bridge.createInitialState();

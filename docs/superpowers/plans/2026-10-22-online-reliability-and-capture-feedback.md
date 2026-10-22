@@ -119,3 +119,20 @@ Vitest cho thứ tự/hàng đợi hiệu ứng và trạng thái reduced-motion
 Kiểm chứng: toàn bộ test local pass; CI (kể cả integration) pass trên nhánh; staging chạy code nhánh và kịch bản
 Playwright 9/9 bước × 2 lần, luồng cơ bản 3/3, không hồi quy ở các chế độ khác. Đã merge (PR #21) và deploy
 production bằng tag `v1.3.0` ngày 2026-10-22 (run 39709661899).
+
+## 8. Kết quả giai đoạn 2 (2026-10-23, nhánh `feat/capture-feedback`)
+
+Logic trình bày nằm trong `apps/web/src/features/game/captureFx.ts` (thuần, có test); không đổi luật, không chặn input.
+
+| Việc | Kết quả |
+|---|---|
+| 2.1 Quân trượt khi đi | Xong. `usePieceSlide`: FLIP 180 ms bằng Web Animations cho quân đổi đúng 1 ô; đo ô cũ/ô mới sau layout. Bỏ qua khi lật góc nhìn, khi > 2 quân đổi chỗ (seek replay, snapshot reconnect) và khi `prefers-reduced-motion`. Dùng chung cho local, AI, online, khán giả, replay vì chạy trong `Board`. |
+| 2.2 Khoảnh khắc đối đầu | Xong. Quân tấn công phóng to + rung 320 ms; quân bị ăn vỡ thành 9 mảnh pixel bay ra và mờ đi trong 350 ms; nhãn nổi "✂ Kéo ăn 📄 Lá" 900 ms; câu thông báo `aria-live` cho trình đọc màn hình. |
+| 2.3 Khay quân đã ăn | Xong. Dưới thẻ người chơi (cả replay); tính từ số quân còn lại của đối thủ nên đúng cả sau reload/resume và khi khán giả vào giữa ván. Quân mới nhất nhấp nháy trong lúc hiệu ứng chạy. |
+| 2.4 Lịch sử rõ nghĩa | Xong. `#6 Xanh · Kéo F4→F3 ăn Lá (Đỏ)` kèm biểu tượng; `capturedType` được giữ ở normalizer core và online. |
+| 2.5 Âm thanh & rung | Xong. `captureGain`/`captureLoss` riêng cho ván online và AI (chế độ chung máy, khán giả, demo dùng âm trung tính); `navigator.vibrate(30)` khi bị ăn; cả hai theo nút tắt âm thanh. |
+| 2.6 Giải thích nước bị chặn | Xong. Khi chọn quân, ô kề có quân đối phương mạnh hơn hoặc cùng loại hiện ổ khoá + tooltip ("Lá thua Kéo", "Lá gặp Lá"); nhấn vào hiện toast giải thích và giữ lựa chọn. Chỉ áp dụng cho ô mà session đã không trả về trong nước hợp lệ. |
+| 2.7 Dọn tàn dư | Xong. Bỏ `strike_loss` khỏi model, normalizer, demo (`?demo=game-strike-loss`), lịch sử và GameScreen. |
+
+Hàng đợi hiệu ứng giữ tối đa 3 mục (bỏ mục cũ khi dồn), hẹn giờ theo id của mục đang chạy nên thêm sự kiện mới không
+kéo dài mục hiện tại; reduced motion rút hiệu ứng ăn quân còn 600 ms và tắt chuyển động.

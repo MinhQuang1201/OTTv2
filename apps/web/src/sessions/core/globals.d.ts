@@ -29,7 +29,7 @@ declare global {
     readonly type: string;
     readonly pieceId?: string;
     readonly capturedId?: string;
-    readonly byId?: string;
+    readonly capturedType?: "dam" | "la" | "keo";
     readonly from?: { readonly x: number; readonly y: number };
     readonly to?: { readonly x: number; readonly y: number };
     readonly winner?: "A" | "B";

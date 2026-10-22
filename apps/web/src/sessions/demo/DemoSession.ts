@@ -5,6 +5,7 @@ import type {
   GameSnapshot,
   MoveResult,
   PieceType,
+  PieceView,
   PlayerView,
   Position,
   Seat,
@@ -76,21 +77,16 @@ export class DemoSession implements GameSession {
     const piece = this.snapshot.board.find(({ position }) => samePosition(position, from));
     if (!piece) return { accepted: false, error: { code: "invalid_input", message: "Không tìm thấy quân cờ.", retryable: false } };
     const target = this.snapshot.board.find(({ position }) => samePosition(position, to));
-    const event = this.eventForMove(moveDefinition, piece.id, target?.id);
+    const event = this.eventForMove(moveDefinition, piece.id, target);
     const board = this.snapshot.board.map((candidate) => candidate.id === piece.id
       ? { ...candidate, position: { ...to } }
       : candidate);
     const nextBoard = moveDefinition.eventType === "capture"
       ? board.filter((candidate) => candidate.id !== target?.id)
-      : moveDefinition.eventType === "strike_loss"
-        ? board.filter((candidate) => candidate.id !== piece.id)
-        : board;
+      : board;
     const players = { ...this.snapshot.players };
     if (moveDefinition.eventType === "capture" && target && players[target.seat]) {
       players[target.seat] = this.decrementCount(players[target.seat]!, target.type);
-    }
-    if (moveDefinition.eventType === "strike_loss" && players[piece.seat]) {
-      players[piece.seat] = this.decrementCount(players[piece.seat]!, piece.type);
     }
     const nextTurn: Seat | null = this.snapshot.turn === "A" ? "B" : "A";
     this.snapshot = makeSnapshot({
@@ -126,13 +122,10 @@ export class DemoSession implements GameSession {
     this.listeners.clear();
   }
 
-  private eventForMove(move: DemoMove, pieceId: string, targetId?: string): GameEventView {
+  private eventForMove(move: DemoMove, pieceId: string, target?: PieceView): GameEventView {
     const id = this.nextEventId++;
     if (move.eventType === "capture") {
-      return makeEvent({ id, type: "capture", pieceId, capturedId: targetId ?? "unknown", from: move.from, to: move.to });
-    }
-    if (move.eventType === "strike_loss") {
-      return makeEvent({ id, type: "strike_loss", pieceId, byId: targetId ?? "unknown", from: move.from, to: move.to });
+      return makeEvent({ id, type: "capture", pieceId, capturedId: target?.id ?? "unknown", ...(target ? { capturedType: target.type } : {}), from: move.from, to: move.to });
     }
     return makeEvent({ id, type: "move", pieceId, from: move.from, to: move.to });
   }

@@ -75,36 +75,22 @@ describe("DemoSession fixtures", () => {
     expect(warning.getSnapshot().players.A?.remainingMs).toBeLessThan(60_000);
   });
 
-  it("removes the losing attacker on strike loss without duplicating the defender", async () => {
-    const session = new DemoSession("game-strike-loss");
-    const beforeRevision = session.getSnapshot().boardRevision;
-
-    const result = await session.move({ x: 1, y: 2 }, { x: 6, y: 5 });
-    const snapshot = session.getSnapshot();
-
-    expect(result).toEqual({ accepted: true });
-    expect(snapshot.board.filter(({ position }) => position.x === 6 && position.y === 5)).toHaveLength(1);
-    expect(snapshot.board.find(({ id }) => id === "B-la-1")?.position).toEqual({ x: 6, y: 5 });
-    expect(snapshot.board.some(({ id }) => id === "A-dam-0")).toBe(false);
-    expect(snapshot.boardRevision).toBe(beforeRevision + 1);
-    expect(snapshot.events.at(-1)).toMatchObject({
-      id: 2,
-      type: "strike_loss",
+  it("records the captured piece kind on capture events", async () => {
+    const session = new DemoSession("game-capture");
+    await session.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+    expect(session.getSnapshot().events.at(-1)).toMatchObject({
+      type: "capture",
       pieceId: "A-dam-0",
-      byId: "B-la-1",
+      capturedId: "B-la-1",
+      capturedType: "la",
     });
   });
 
-  it("updates both player counts for capture and strike-loss transitions", async () => {
+  it("updates both player counts for capture transitions", async () => {
     const capture = new DemoSession("game-capture");
     await capture.move({ x: 1, y: 2 }, { x: 6, y: 5 });
     expect(capture.getSnapshot().players.B?.counts.la).toBe(2);
     expect(capture.getSnapshot().players.A?.counts.dam).toBe(3);
-
-    const strike = new DemoSession("game-strike-loss");
-    await strike.move({ x: 1, y: 2 }, { x: 6, y: 5 });
-    expect(strike.getSnapshot().players.A?.counts.dam).toBe(2);
-    expect(strike.getSnapshot().players.B?.counts.la).toBe(3);
   });
 
   it("exposes explicit waiting-room data only for the rooms lobby", () => {

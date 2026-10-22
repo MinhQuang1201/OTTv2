@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GameScreen } from "./GameScreen";
@@ -199,6 +199,65 @@ describe("GameScreen", () => {
     // Press 'f' while dialog is open - must not flip
     fireEvent.keyDown(window, { key: "f" });
     expect(flipBtn).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("presents a new capture with a label, tray blink, announcement and readable history, then clears it", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.setItem("ott:audio-enabled", "true");
+      const playSound = vi.spyOn(soundSynthesis, "playSynthesizedSound");
+      const session = new DemoSession("game-capture");
+      render(<AppProviders><GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} /></AppProviders>);
+      expect(screen.queryByTestId("capture-label")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await session.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+      });
+
+      expect(screen.getByTestId("capture-label")).toHaveTextContent(/ăn 📄 Lá$/);
+      expect(within(screen.getByTestId("board-cell-G6")).getByTestId("capture-shatter")).toBeInTheDocument();
+      expect(screen.getByTestId("capture-announcement")).toHaveTextContent(/Đỏ ăn Lá Xanh tại G6\.$/);
+      expect(within(screen.getByTestId("captured-tray-A")).getByRole("list")).toHaveAccessibleName("Quân đã ăn: 2 Lá");
+      expect(screen.getByTestId("captured-tray-A").querySelector("[data-newest='true']")).not.toBeNull();
+      expect(within(screen.getByRole("complementary", { name: /lịch sử nước đi/i })).getAllByRole("listitem").at(-1)).toHaveAccessibleName(/^#2 Đỏ · .+ B3→G6 ăn Lá \(Xanh\)$/);
+      // Demo sessions are not tied to one seat, so the neutral cue plays.
+      expect(playSound).toHaveBeenCalledWith("capture");
+
+      act(() => {
+        vi.advanceTimersByTime(900);
+      });
+      expect(screen.queryByTestId("capture-label")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("capture-shatter")).not.toBeInTheDocument();
+      expect(screen.getByTestId("captured-tray-A").querySelector("[data-newest='true']")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("plays a loss cue and buzzes when the viewer's piece is captured in an online game", async () => {
+    localStorage.setItem("ott:audio-enabled", "true");
+    const playSound = vi.spyOn(soundSynthesis, "playSynthesizedSound");
+    const vibrate = vi.fn();
+    Object.defineProperty(navigator, "vibrate", { value: vibrate, configurable: true });
+    const session = new DemoSession("game-capture");
+    const demoSnapshot = session.getSnapshot.bind(session);
+    const asOnline = new WeakMap<object, ReturnType<typeof demoSnapshot>>();
+    vi.spyOn(session, "getSnapshot").mockImplementation(() => {
+      const base = demoSnapshot();
+      if (!asOnline.has(base)) asOnline.set(base, { ...base, mode: "online", viewerSeat: "B", viewer: { role: "player", seat: "B" } });
+      return asOnline.get(base)!;
+    });
+    render(<AppProviders><GameScreen session={session} snapshot={session.getSnapshot()} onLobby={vi.fn()} /></AppProviders>);
+
+    try {
+      await act(async () => {
+        await session.move({ x: 1, y: 2 }, { x: 6, y: 5 });
+      });
+      expect(playSound).toHaveBeenCalledWith("captureLoss");
+      expect(vibrate).toHaveBeenCalledWith(30);
+    } finally {
+      Reflect.deleteProperty(navigator, "vibrate");
+    }
   });
 
   it("does not play audio on mount for pre-existing historical events", () => {

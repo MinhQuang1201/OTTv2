@@ -1,4 +1,4 @@
-export type SoundCue = "move" | "capture" | "win" | "step";
+export type SoundCue = "move" | "capture" | "captureGain" | "captureLoss" | "win" | "step";
 
 let audioCtxInstance: AudioContext | null = null;
 
@@ -103,6 +103,44 @@ export function playSynthesizedSound(cue: SoundCue): void {
 
         osc.start(now);
         osc.stop(now + 0.09);
+        break;
+      }
+
+      case "captureGain": {
+        // Bright two-step chirp 520Hz -> 880Hz: the viewer took a piece
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.setValueAtTime(880, now + 0.05);
+
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.14);
+        break;
+      }
+
+      case "captureLoss": {
+        // Low falling sawtooth 260Hz -> 90Hz: the viewer lost a piece
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(260, now);
+        osc.frequency.exponentialRampToValueAtTime(90, now + 0.16);
+
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.17);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.18);
         break;
       }
 
