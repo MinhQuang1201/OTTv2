@@ -1,6 +1,6 @@
 # OTTv2
 
-Cờ chiến thuật realtime 9×9. Luật thuần trong `packages/game-core/src/rules.js`. Phòng và trọng tài trong `packages/game-core/src/room.js`. Online được thiết kế dùng Worker/PlayHTML, nhưng rollout hiện BLOCKED; UI không được tự quyết nước đi.
+Cờ chiến thuật realtime 9×9. Luật thuần trong `packages/game-core/src/rules.js`. Phòng và trọng tài trong `packages/game-core/src/room.js`. Online dùng Worker/PlayHTML, đã deploy production từ tag `v*` qua CI nhưng chưa qua nghiệm thu thủ công (giai đoạn 4 trong `OTTv2-ke-hoach-trien-khai.md`); UI không được tự quyết nước đi.
 
 ## Lệnh
 

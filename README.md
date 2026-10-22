@@ -38,7 +38,7 @@ security và các test boundary ở gốc.
 4. **Hai người một máy** — luân phiên trên cùng trình duyệt.
 5. **Đấu với máy** — bạn là Người A; máy là Người B.
 
-Hai người trên cùng máy có thể chơi ngay. Chế độ AI hoạt động local. Chế độ online là mục tiêu kiến trúc worker-authoritative, nhưng hiện chưa khả dụng khi rollout còn blocked.
+Hai người trên cùng máy có thể chơi ngay. Chế độ AI hoạt động local. Chế độ online (worker-authoritative) đã deploy production từ tag `v1.3.0` qua CI, nhưng chưa qua nghiệm thu thủ công giai đoạn 4 (xem `OTTv2-ke-hoach-trien-khai.md`).
 
 Tài liệu adapter PlayHTML: [http://localhost:3000/playhtml-game.html](http://localhost:3000/playhtml-game.html)
 
@@ -138,6 +138,6 @@ event, presence, cursor hoặc awareness. Không thêm polling, WebSocket thứ 
 fake factory hay fallback transport; `OTT_PLAYHTML_CONNECTION_FACTORY` là seam
 tích hợp duy nhất khi runtime còn blocked.
 
-Trạng thái production rollout: **BLOCKED**. Local demo path có runtime/two-browser evidence, nhưng Task 8 runtime/security matrix, Task 10 manual acceptance và deploy verification còn lại. Không suy rộng local demo thành production readiness. Local và AI modes vẫn hoạt động độc lập.
+Trạng thái production rollout (22/10/2026): online đã deploy production (`v1.3.0`, <https://ottv2-psi.vercel.app>) và có Playwright hai profile trên CI và staging, nhưng **chưa qua nghiệm thu thủ công giai đoạn 4** và chưa có evidence hibernation/eviction Durable Object. Không ghi production-ready khi chưa có evidence đó. Local và AI modes vẫn hoạt động độc lập.
 
 **Còn lại trước production:** hoàn tất runtime/security/lifecycle matrix, manual acceptance (bao gồm timeout/reconnect/expiry và credential isolation), kiểm tra deploy và chỉ cập nhật status theo evidence đã thực sự thu được. Các mục này không cần để chạy demo local hai người.

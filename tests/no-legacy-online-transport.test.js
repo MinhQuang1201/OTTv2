@@ -18,7 +18,7 @@ test("production online configuration uses the Cloudflare Worker route only", ()
   assert.doesNotMatch(scripts, /partykit/i);
   assert.match(readme, /apps[\\/]worker[\\/]wrangler\.jsonc/);
   assert.match(readme, /npx --no-install wrangler (dev|deploy)/);
-  assert.match(readme, /online.*BLOCKED/i);
+  assert.match(readme, /online.*chưa qua nghiệm thu/i);
   assert.match(readme, /PartyKit legacy.*không còn là route deploy hoặc authority online/i);
 });
 

@@ -95,7 +95,7 @@ Vitest cho thứ tự/hàng đợi hiệu ứng và trạng thái reduced-motion
 | 3.1 Bố cục điện thoại | Ở ≤ 600 px: bàn cờ lên đầu; thẻ người chơi thu gọn thành 1 dòng (tên · đồng hồ · số quân) trên/dưới bàn; thanh công cụ gọn thành biểu tượng. |
 | 3.2 Nhãn chế độ chơi cùng máy | Badge "Chơi trên thiết bị" thay cho "Ngoại tuyến"; "Lượt của Đỏ/Xanh" thay cho "Đến lượt bạn"; bỏ "Đã kết nối". |
 | 3.3 Favicon + README demo | Thêm favicon; README ghi rõ `?demo=` chỉ chạy ở `dev:web`. |
-| 3.4 Test e2e online trong CI | Đưa kịch bản Playwright hai profile (tạo, vào bằng alias, đi, reload-resume, rời) vào một job CI chạy với Worker local. |
+| 3.4 Test e2e online trong CI | ✅ Xong (PR #22): job CI "Online e2e (two Chromium profiles, wrangler dev --local)" chạy trên mọi PR và trước deploy. |
 
 ## 6. Quyết định (chốt ngày 2026-10-22)
 
@@ -117,4 +117,5 @@ Vitest cho thứ tự/hàng đợi hiệu ứng và trạng thái reduced-motion
 | Phát sinh: "Rời bàn" bị nuốt (O7) | Xong. `PlayhtmlGameClient.flush()`; `OnlineSession.leave()` chờ gửi xong (≤ 1 s) rồi mới đóng. |
 
 Kiểm chứng: toàn bộ test local pass; CI (kể cả integration) pass trên nhánh; staging chạy code nhánh và kịch bản
-Playwright 9/9 bước × 2 lần, luồng cơ bản 3/3, không hồi quy ở các chế độ khác. Production chưa được cập nhật.
+Playwright 9/9 bước × 2 lần, luồng cơ bản 3/3, không hồi quy ở các chế độ khác. Đã merge (PR #21) và deploy
+production bằng tag `v1.3.0` ngày 2026-10-22 (run 39709661899).

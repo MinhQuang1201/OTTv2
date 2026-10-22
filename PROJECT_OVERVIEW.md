@@ -15,7 +15,7 @@
 | M1 — resume chạy đồng hồ của ghế còn mất kết nối | Medium | ✅ Đã sửa | `5afc9b2` (`Room.resumePlayer`, `restoreLiveConnection`) + test |
 | M2 — ván bắt đầu khi A đang mất kết nối vẫn chạy đồng hồ A | Medium | ✅ Đã sửa | `5afc9b2` (`Room.addPlayer`) + test |
 | M3 — summary công khai mutate Room | Medium | ✅ Đã sửa | `2bc9989`: chiếu đồng hồ từ `clockAnchorMs`, không gọi `settleClock` |
-| M4 — tài liệu rollout/origin mâu thuẫn | Medium | ⏳ Mở — cần chủ dự án quyết định | Xem §12-M4 |
+| M4 — tài liệu rollout/origin mâu thuẫn | Medium | ✅ Đã sửa (2026-10-22) | `CLAUDE.md`/`README.md` ghi online đã deploy nhưng chưa nghiệm thu; `DEPLOYMENT.md`/`HANDOFF.md` dùng `ottv2-psi` |
 | M5 — dependency không dùng + lỗ hổng | Medium | 🟡 Một phần | `95bbb76`: gỡ `partykit`/`playhtml`, `npm audit --omit=dev` 5 → 0; còn 10 lỗ hổng ở gói dev |
 | L3 — README sai Node/cổng | Low | ✅ Đã sửa | `95bbb76` |
 | L4 — `$schema` hỏng | Low | ✅ Đã sửa | `95bbb76` |
@@ -48,6 +48,9 @@ CI của PR #18 — job "Install, build, typecheck, unit and web tests" và "Wor
 đều **SUCCESS** (CI tự tạo `.dev.vars`, nên các test integration bị skip ở local đã chạy trên CI).
 Deploy staging tự động cho `f61c910` (workflow Deploy run `39637054259`): verify, deploy Worker + Vercel và smoke test đều **success**.
 Production chưa deploy (cần tag `v*`).
+
+Giai đoạn 1 online đã merge (PR #21), e2e online chạy trong CI (PR #22) và deploy production bằng tag `v1.3.0`
+ngày 2026-10-22 (Worker version `f7d37002-ca69-4a22-86c6-f1527f0f4953`).
 
 ---
 
@@ -442,14 +445,11 @@ Playwright và manual acceptance chưa có kết quả mới.
 Đã xong: H1, M1, M2 (kèm test mức `Room` và Worker), M3, L1, L2, L3, L4, phần production của M5 và giai đoạn 1
 online (O1–O7) — xem bảng "Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
 
-1. **Review và merge giai đoạn 1** (nhánh `fix/online-reliability`), rồi tạo tag `v*` để production nhận các bản sửa
-   online (production vẫn chạy `v1.2.0`).
+1. ~~Review và merge giai đoạn 1, rồi tạo tag `v*`~~ — xong: PR #21, #22, production chạy `v1.3.0`.
 2. **Theo dõi log `attach_rejected`/`attach_failed`** trên production (Workers Observability / `wrangler tail`) để tìm
    nguyên nhân gốc của O2; nghi vấn cần kiểm chứng: lệch đồng hồ giữa Lobby DO và Game DO (`issuedAt > now`) khi DO khởi động lạnh.
 3. **Giai đoạn 2 — cảm giác ăn quân** theo kế hoạch đã chốt (đầy đủ 2.1–2.7).
-4. **Chốt M4**: GitHub Environment `production` dùng `FRONTEND_URL=https://ottv2-psi.vercel.app` (khớp
-   `wrangler.jsonc`), nên `ottv2-two` trong `HANDOFF.md` đã lỗi thời; còn cần chủ dự án xác nhận trạng thái rollout để sửa
-   `CLAUDE.md`/`README.md` (online đang chạy production, không còn "BLOCKED").
+4. ~~Chốt M4~~ — xong 2026-10-22. Còn lại: **nghiệm thu thủ công giai đoạn 4** trên production trước khi ghi production-ready.
 5. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
    chạy lại toàn bộ test; không dùng `npm audit fix --force`.
 6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,

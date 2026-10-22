@@ -25,7 +25,7 @@ Cap nhat 21/10/2026: ha tang da chuyen sang tai khoan Cloudflare va Vercel moi, 
 - Vercel project: `iamnmquang/ottv2`.
 - Frontend production: <https://ottv2-psi.vercel.app>. Staging: <https://ottv2-staging.vercel.app>.
 - Cloudflare Worker production: `https://ottv2-minimal.opticsquang.workers.dev`. Staging: `https://ottv2-staging.opticsquang.workers.dev`.
-- Lan deploy production gan nhat: tag `v1.1.0`, Worker version `73a141f4-08f3-444d-9172-475873eedb43`. Cac lan sau xem GitHub Release cua tag.
+- Lan deploy production gan nhat: tag `v1.3.0` (22/10/2026), Worker version `f7d37002-ca69-4a22-86c6-f1527f0f4953`. Cac lan sau xem GitHub Release cua tag.
 - Vercel Deployment Protection da tat.
 - `OTT_SPECTATOR_ENABLED` dat `"true"` trong `apps/worker/wrangler.jsonc`. Production moi chua qua nghiem thu hai profile (giai doan 4).
 - Deploy duoc build tu commit cua tag, khong con tu worktree cuc bo.
@@ -59,7 +59,7 @@ Rollback khong khoi phuc state trong Durable Objects.
 Smoke test (`scripts/smoke-deploy.js`) co the chay tay:
 
 ```bash
-node scripts/smoke-deploy.js --worker https://ottv2-minimal.haixcxt.workers.dev --frontend https://ottv2-two.vercel.app
+node scripts/smoke-deploy.js --worker https://ottv2-minimal.opticsquang.workers.dev --frontend https://ottv2-psi.vercel.app
 ```
 
 Smoke test kiem tra `POST /control/list` voi Origin frontend tra 200, co CORS dung origin va truong `rooms`; frontend tra 200, bundle tro toi dung Worker va khong chua `OTT_INTERNAL_SECRET`. Smoke test khong thay the nghiem thu hai profile.
@@ -71,8 +71,8 @@ Smoke test kiem tra `POST /control/list` voi Origin frontend tra 200, co CORS du
 
    | Variable | staging | production |
    | --- | --- | --- |
-   | `WORKER_URL` | `https://ottv2-staging.<cloudflare-account>.workers.dev` | `https://ottv2-minimal.haixcxt.workers.dev` |
-   | `FRONTEND_URL` | `https://ottv2-staging.vercel.app` | `https://ottv2-two.vercel.app` |
+   | `WORKER_URL` | `https://ottv2-staging.opticsquang.workers.dev` | `https://ottv2-minimal.opticsquang.workers.dev` |
+   | `FRONTEND_URL` | `https://ottv2-staging.vercel.app` | `https://ottv2-psi.vercel.app` |
 
    `deploy.yml` truyen `FRONTEND_URL` vao Worker thanh `OTT_BROWSER_ORIGIN` luc deploy, nen khong can sua `wrangler.jsonc` khi doi domain. Gia tri trong `wrangler.jsonc` chi con la mac dinh cho deploy tay.
 
@@ -96,7 +96,7 @@ Staging dung chung Vercel project: deploy preview roi `vercel alias set` sang `o
 - Vercel CLI da cai dat va dang nhap.
 - Wrangler da cai trong repository qua `wrangler` dependency.
 - Mot Cloudflare account co quyen deploy Worker, Durable Objects va secrets.
-- Mot URL frontend HTTPS on dinh. URL hien tai la `https://ottv2-two.vercel.app`.
+- Mot URL frontend HTTPS on dinh. URL hien tai la `https://ottv2-psi.vercel.app`.
 
 Kiem tra CLI:
 
@@ -133,7 +133,7 @@ Kiem tra deployment:
 
 ```powershell
 vercel inspect <deployment-url> --scope lap-trinh-mang --wait
-vercel curl https://ottv2-two.vercel.app --scope lap-trinh-mang
+vercel curl https://ottv2-psi.vercel.app --scope lap-trinh-mang
 ```
 
 Neu muc tieu la website cong khai, kiem tra Deployment Protection. Tat SSO protection khi can:
@@ -180,7 +180,7 @@ Them bien public origin o cap production trong `wrangler.jsonc`. Dung URL fronte
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "OTT_BROWSER_ORIGIN": "https://ottv2-two.vercel.app"
+    "OTT_BROWSER_ORIGIN": "https://ottv2-psi.vercel.app"
   }
 }
 ```
@@ -247,7 +247,7 @@ Kiem tra control endpoint voi origin dung:
 
 ```powershell
 curl.exe -i -X POST "https://<worker-url>/control/list" `
-  -H "Origin: https://ottv2-two.vercel.app" `
+  -H "Origin: https://ottv2-psi.vercel.app" `
   -H "Content-Type: application/json" `
   --data "{}"
 ```
