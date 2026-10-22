@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { DemoScenario, GameSession, GameResultView, GameSnapshot, PracticeStart, SessionErrorView, StartGameOptions } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot";
@@ -15,7 +15,6 @@ import { DEFAULT_AI_LEVEL, type AiLevel } from "../shared/model/aiLevel";
 import { OnlineSession } from "../sessions/online/OnlineSession";
 import { SpectatorSession } from "../sessions/spectator/SpectatorSession";
 import { ReplaySession } from "../sessions/replay/ReplaySession";
-import { ReplayScreen } from "../features/replay/ReplayScreen";
 import type { ReplayDocument } from "../../../../packages/arena/src/contracts/index.d.mts";
 import { OnlineLobbyGateway } from "../sessions/online/OnlineLobbyGateway";
 import { OnlineLobbyStream, type OnlineLobbyStreamSnapshot } from "../sessions/online/OnlineLobbyStream";
@@ -23,7 +22,6 @@ import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runt
 import { resumeStore as defaultResumeStore, type PendingOnlineGame, type ResumeStore } from "../sessions/online/resumeStore";
 import { joinCodeFromUrl } from "../sessions/online/roomCode";
 import { ArenaApiGateway } from "../features/arena/ArenaApiGateway";
-import { ArenaScreen } from "../features/arena/ArenaScreen";
 import { isArenaAvailable, isSpectatorEnabled, resolveArenaDiscoveryEndpoint, resolveArenaEndpoint } from "../runtime-config";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
@@ -33,6 +31,11 @@ import styles from "./app.module.css";
 import type { PublicMatchIdentity, PublicMatchListState } from "../features/spectator/PublicMatchList";
 
 const defaultOnlineGateway = new OnlineLobbyGateway();
+
+// Arena and replay are opened by few players; keep them out of the first download.
+const ArenaScreen = lazy(() => import("../features/arena/ArenaScreen").then((module) => ({ default: module.ArenaScreen })));
+const ReplayScreen = lazy(() => import("../features/replay/ReplayScreen").then((module) => ({ default: module.ReplayScreen })));
+const screenFallback = <Panel className={styles.screen}><Spinner label="Đang tải" /></Panel>;
 
 export type AppState =
   | { readonly status: "boot"; readonly generation: number }
@@ -478,12 +481,12 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   if (state.status === "error") return null;
 
   if (state.status === "arena") {
-    return <ArenaScreen gateway={arenaGateway} onLobby={onLobby} onStartReplay={onStartReplay} />;
+    return <Suspense fallback={screenFallback}><ArenaScreen gateway={arenaGateway} onLobby={onLobby} onStartReplay={onStartReplay} /></Suspense>;
   }
 
   // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
   if (state.snapshot?.mode === "replay" && state.session) {
-    return <ReplayScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} onForkPractice={onForkPractice} />;
+    return <Suspense fallback={screenFallback}><ReplayScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} onForkPractice={onForkPractice} /></Suspense>;
   }
 
   if (state.status === "preparing") return <LobbyScreen

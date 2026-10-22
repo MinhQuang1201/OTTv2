@@ -22,7 +22,10 @@
 | M1, M2 — test mức Worker | — | ✅ Đã thêm | `7bbce41`: 3 test `DurableRoomAdapter` (reattach, `restoreLiveConnection`, B vào khi A trong grace); cả 3 fail trên code cũ |
 | L1 — làm sạch tên không nhất quán | Low | ✅ Đã sửa | `0b860e0`: `cleanDisplayName` trong `packages/game-core/src/names.js` dùng chung cho Room, Lobby, Game DO, tournament; tên người ≤ 20, tên giải ≤ 32 |
 | L2 — throttle 40 ms bỏ gói im lặng | Low | ✅ Đã sửa | `dad7b2e`: chỉ gói được nhận mới dời mốc; lệnh `ott:*` bị chặn nhận `ott:error rate_limited`; `OnlineSession` coi như `stale_revision` (bỏ trạng thái chờ, giữ phiên) |
-| L5–L8 | Low | ⏳ Mở | Xem §12 |
+| L5 — bundle lớn | Low | 🟡 Một phần (2026-10-23) | Arena/Replay tải lười: `index-*.js` 687 → 534 kB (gzip 196 → 161 kB). Phần lớn còn lại là runtime online `vendor/playhtml-minimal` mà sảnh cần cho luồng khán giả |
+| L6, L8 | Low | ⏳ Mở | Xem §12 |
+| L7 — alias bằng `Math.random` | Low | ✅ Đã sửa (2026-10-23) | `generateRandomAlias` mặc định dùng `crypto.getRandomValues` |
+| AI — ngân sách nút | — | ✅ Đã sửa (2026-10-23) | Đo trên self-play: độ sâu 4 chỉ xong 7/50 nước, ~97k nút bỏ phí mỗi nước. Gốc cây dùng alpha từ nước tốt nhất (Vừa/Khó), ngân sách dùng chung cho mọi độ sâu: độ sâu 4 xong 52/53 nước, tối đa 87k nút, ván tự đấu 18,1 s → 5,7 s; cùng độ sâu chọn nước y hệt bản cũ (960/960 thế cờ) |
 
 Đợt 2 (L1, L2, test Worker M1/M2) đã merge qua PR #20 (`fbf26a5`).
 
@@ -371,7 +374,7 @@ trong khi `vite.config.ts` không đặt `server.port` (Vite mặc định 5173)
 ### L4 — Low — Confirmed — ✅ Đã sửa (`95bbb76`): `$schema` trỏ tới đường dẫn không tồn tại
 `apps/worker/wrangler.test.jsonc:2`, `wrangler.spectator-test.jsonc:2` → `node_modules/playhtml/node_modules/wrangler/...` (không có). Chỉ ảnh hưởng gợi ý editor.
 
-### L5 — Low — Confirmed: bundle lớn
+### L5 — Low — Confirmed — 🟡 Một phần: bundle lớn
 `npm run build:web` cảnh báo `index-*.js` 661 kB (gzip 196 kB) > 500 kB; toàn bộ UI Arena được tải cho
 mọi người chơi. Khắc phục: `React.lazy` cho route Arena/Replay.
 
@@ -379,7 +382,7 @@ mọi người chơi. Khắc phục: `React.lazy` cho route Arena/Replay.
 Mọi `/control/*` đi vào `idFromName("lobby")`; mỗi request còn `scheduleAlarm()` liệt kê toàn bộ key
 `rate:last:*` (`ott-lobby-server.ts:262`). Ở tải cao đây là nút thắt. Chưa đo.
 
-### L7 — Low — Potential: alias phòng sinh bằng `Math.random`
+### L7 — Low — Potential — ✅ Đã sửa: alias phòng sinh bằng `Math.random`
 `packages/protocol/src/index.ts` `generateRandomAlias` dùng `Math.random`. Việc alias một mình có đủ để
 chiếm ghế hay không (invite/claim) **chưa được xác minh**.
 
@@ -436,7 +439,6 @@ Playwright và manual acceptance chưa có kết quả mới.
   `container-executor.mjs` (1108), `ott-game-server.ts` (931) — khó review.
 - ~20 file handoff/report ở thư mục gốc, nhiều trạng thái lịch sử mâu thuẫn; `CLAUDE.md` không mô tả Arena.
 - Logging: Worker có `logEvent` tối giản và nhiều `catch {}` nuốt lỗi (có chú thích lý do) — khó chẩn đoán sự cố production.
-- AI: iterative deepening tạo search mới mỗi độ sâu với ngân sách riêng ⇒ tổng nút có thể tới depth × maxNodes (hard: ~400k).
 - Không có lint (ESLint/Prettier) trong scripts/CI.
 - Chưa có evidence hibernation/eviction thực tế của Durable Object (theo `HANDOFF.md`; không kiểm tra lại được ở đây).
 
@@ -454,6 +456,6 @@ online (O1–O7) — xem bảng "Trạng thái xử lý" ở đầu tài liệu.
    chạy lại toàn bộ test; không dùng `npm audit fix --force`.
 6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
    `npm run test:arena:isolation`; thu evidence hibernation/eviction Durable Object.
-7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
+7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`,
    dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI; cân nhắc giới hạn độ dài tên ngay trên ô nhập
    ở giao diện (hiện chỉ server cắt).
