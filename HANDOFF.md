@@ -25,6 +25,12 @@ Người dùng yêu cầu **không tạo worktree riêng**, nên toàn bộ thay
 - **Commit:** mục này ghi nhận trạng thái trước commit; commit cuối được ghi
   nhận trong git history sau bước verification.
 
+> **Cập nhật 2026-10-22:** hạ tầng đã chuyển sang tài khoản Cloudflare/Vercel mới và deploy từ CI.
+> Production hiện tại: frontend `https://ottv2-psi.vercel.app`, Worker `https://ottv2-minimal.opticsquang.workers.dev`,
+> tag `v1.3.0`, Worker version `f7d37002-ca69-4a22-86c6-f1527f0f4953`. Các URL `ottv2-two.vercel.app` và
+> `ottv2-minimal.haixcxt.workers.dev` bên dưới là production cũ, không còn được cập nhật. Nguồn sự thật cho
+> deploy là `DEPLOYMENT.md`; tiến độ là `OTTv2-ke-hoach-trien-khai.md` và `PROJECT_OVERVIEW.md`.
+
 ### Trạng Thái Hiện Tại Và Vấn Đề Còn Lại (2026-09-30)
 
 Đây là trạng thái authoritative mới nhất; các mục review lịch sử ở phía dưới

@@ -75,6 +75,36 @@ describe("soundSynthesis", () => {
     expect(stopSpy).toHaveBeenCalled();
   });
 
+  it("gives own captures and lost pieces distinct waveforms", () => {
+    const types: string[] = [];
+    const makeOsc = () => {
+      const osc = {
+        type: "sine",
+        frequency: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(() => types.push(osc.type)),
+      };
+      return osc;
+    };
+    const mockCtx = {
+      state: "running",
+      currentTime: 0,
+      createOscillator: vi.fn(makeOsc),
+      createGain: vi.fn(() => ({ gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }, connect: vi.fn() })),
+      destination: {},
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    window.AudioContext = vi.fn(() => mockCtx) as unknown as typeof AudioContext;
+
+    playSynthesizedSound("captureGain");
+    playSynthesizedSound("captureLoss");
+    playSynthesizedSound("capture");
+
+    expect(types).toEqual(["square", "sawtooth", "triangle"]);
+  });
+
   it("resumes suspended audio context on play", () => {
     const resumeSpy = vi.fn().mockResolvedValue(undefined);
     const mockCtx = {

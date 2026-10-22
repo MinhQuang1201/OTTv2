@@ -82,14 +82,8 @@ export type GameEventView =
       readonly type: "capture";
       readonly pieceId: string;
       readonly capturedId: string;
-      readonly from: Position;
-      readonly to: Position;
-    }
-  | {
-      readonly id: number;
-      readonly type: "strike_loss";
-      readonly pieceId: string;
-      readonly byId: string;
+      /** Kind of the captured piece when the source reported it. */
+      readonly capturedType?: PieceType;
       readonly from: Position;
       readonly to: Position;
     }
@@ -133,7 +127,6 @@ export type DemoScenario =
   | "game-piece-selected"
   | "game-move-rejected"
   | "game-capture"
-  | "game-strike-loss"
   | "game-ai-thinking"
   | "game-reconnecting"
   | "game-clock-warning"

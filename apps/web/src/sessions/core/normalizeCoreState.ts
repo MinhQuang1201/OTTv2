@@ -34,8 +34,7 @@ export function normalizeCoreEvents(events: readonly CoreEvent[], firstId = 1): 
     const id = firstId + index;
     const from = event.from ?? { x: 0, y: 0 };
     const to = event.to ?? from;
-    if (event.type === "capture") return { id, type: "capture", pieceId: event.pieceId ?? "unknown", capturedId: event.capturedId ?? "unknown", from, to };
-    if (event.type === "strike_loss") return { id, type: "strike_loss", pieceId: event.pieceId ?? "unknown", byId: event.byId ?? "unknown", from, to };
+    if (event.type === "capture") return { id, type: "capture", pieceId: event.pieceId ?? "unknown", capturedId: event.capturedId ?? "unknown", ...(event.capturedType ? { capturedType: event.capturedType } : {}), from, to };
     if (event.type === "win" && event.winner && reason(event.reason)) return { id, type: "win", winner: event.winner, reason: reason(event.reason)! };
     return { id, type: "move", pieceId: event.pieceId ?? "unknown", from, to };
   }).map((event) => deepFreeze(event));

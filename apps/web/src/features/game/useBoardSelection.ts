@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GameSession } from "../../sessions/contract";
 import type { GameSnapshot, Position, SessionErrorView } from "../../shared/model/game";
+import { blockedTargets, type BlockedTarget } from "./captureFx";
 
 export interface BoardSelection {
   readonly from: Position;
   readonly legalMoves: readonly Position[];
+  /** Neighbouring opponent squares the session refused, with a reason to show. */
+  readonly blocked: readonly BlockedTarget[];
 }
 
 export interface UseBoardSelectionOptions {
@@ -12,11 +15,12 @@ export interface UseBoardSelectionOptions {
   readonly snapshot: GameSnapshot;
   readonly onMove?: (from: Position, to: Position) => void;
   readonly onError?: (error: SessionErrorView) => void;
+  readonly onBlocked?: (target: BlockedTarget) => void;
 }
 
 const samePosition = (a: Position, b: Position) => a.x === b.x && a.y === b.y;
 
-export function useBoardSelection({ session, snapshot, onMove, onError }: UseBoardSelectionOptions) {
+export function useBoardSelection({ session, snapshot, onMove, onError, onBlocked }: UseBoardSelectionOptions) {
   const [selection, setSelection] = useState<BoardSelection | null>(null);
   const pieceByPosition = useMemo<Map<string, (typeof snapshot.board)[number]>>(() => new Map(snapshot.board.map((piece) => [`${piece.position.x}:${piece.position.y}`, piece] as const)), [snapshot.board]);
   const canInteract = snapshot.capabilities.canMove
@@ -46,13 +50,18 @@ export function useBoardSelection({ session, snapshot, onMove, onError }: UseBoa
       else onError?.(result.error);
       return;
     }
+    const blocked = selection?.blocked.find((target) => samePosition(target.position, position));
+    if (blocked) {
+      onBlocked?.(blocked);
+      return;
+    }
     if (!piece || viewerRole !== "player" || piece.seat !== viewerSeat) {
       setSelection(null);
       return;
     }
-    const legalMoves = session.getLegalMoves(position);
-    setSelection({ from: { ...position }, legalMoves: legalMoves.map((move) => ({ ...move })) });
-  }, [canInteract, onError, onMove, pieceByPosition, selection, session, viewerRole, viewerSeat]);
+    const legalMoves = session.getLegalMoves(position).map((move) => ({ ...move }));
+    setSelection({ from: { ...position }, legalMoves, blocked: blockedTargets(piece, snapshot.board, legalMoves) });
+  }, [canInteract, onBlocked, onError, onMove, pieceByPosition, selection, session, snapshot.board, viewerRole, viewerSeat]);
 
   return { selection, canInteract, pieceByPosition, select };
 }

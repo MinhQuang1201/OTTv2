@@ -14,12 +14,33 @@ import { ResultDialog } from "../result/ResultDialog";
 import { getSoundEnabled, setSoundEnabled } from "../../shared/audio/soundPreferences";
 import { playSynthesizedSound } from "../../shared/audio/soundSynthesis";
 import { useReplayShortcuts } from "../replay/useReplayShortcuts";
+import { formatSquare } from "../../shared/model/format";
+import { VisuallyHidden } from "../../shared/ui/VisuallyHidden";
+import {
+  captureAnnouncement,
+  captureCue,
+  captureEffectFor,
+  effectDurationMs,
+  effectsForEvents,
+  enqueueEffects,
+  prefersReducedMotion,
+  type BoardEffect,
+} from "./captureFx";
 import styles from "./game.module.css";
 
 export interface GameScreenProps {
   readonly session: GameSession;
   readonly snapshot: GameSnapshot;
   readonly onLobby: () => void;
+}
+
+/** Short buzz on phones; follows the sound toggle and is a no-op where unsupported. */
+function vibrate(ms: number) {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    // Some browsers throw when vibration is blocked by policy.
+  }
 }
 
 export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: GameScreenProps) {
@@ -39,8 +60,9 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
     highestAudioEventId.current = currentMaxEventId;
   }
 
-  const [effectQueue, setEffectQueue] = useState<number[]>([]);
-  const effectEventId = effectQueue[0] ?? null;
+  const [effectQueue, setEffectQueue] = useState<BoardEffect[]>([]);
+  const currentEffect = effectQueue[0] ?? null;
+  const currentCapture = currentEffect?.capture ?? null;
   const spectator = activeSnapshot.viewer?.role === "spectator";
 
   const [perspective, setPerspective] = useState<"A" | "B">(() =>
@@ -86,17 +108,20 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
       .sort((left, right) => left.id - right.id);
     if (unseen.length === 0) return;
     highestEventId.current = unseen[unseen.length - 1]!.id;
-    const visualIds = unseen
-      .filter((event) => event.type === "capture" || event.type === "strike_loss" || event.type === "win")
-      .map((event) => event.id);
-    if (visualIds.length > 0) setEffectQueue((current) => [...current, ...visualIds]);
+    const effects = effectsForEvents(unseen, activeSnapshot.board);
+    if (effects.length > 0) setEffectQueue((current) => enqueueEffects(current, effects));
   }, [activeSnapshot.events]);
 
+  // Keyed on the head id so enqueuing more effects does not restart the one on screen.
+  const currentEffectId = currentEffect?.id ?? null;
   useEffect(() => {
-    if (effectQueue.length === 0) return;
-    const timer = window.setTimeout(() => setEffectQueue((current) => current.slice(1)), 240);
+    if (!currentEffect) return;
+    const timer = window.setTimeout(
+      () => setEffectQueue((current) => (current[0]?.id === currentEffect.id ? current.slice(1) : current)),
+      effectDurationMs(currentEffect, prefersReducedMotion()),
+    );
     return () => window.clearTimeout(timer);
-  }, [effectQueue]);
+  }, [currentEffectId]);
 
   useEffect(() => {
     if (activeSnapshot.result) setResultOpen(true);
@@ -113,8 +138,10 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
     const latest = unseen[unseen.length - 1]!;
     if (latest.type === "win") {
       playSynthesizedSound("win");
-    } else if (latest.type === "capture" || latest.type === "strike_loss") {
-      playSynthesizedSound("capture");
+    } else if (latest.type === "capture") {
+      const cue = captureCue(captureEffectFor(latest, activeSnapshot.board), activeSnapshot.mode, activeSnapshot.viewerSeat);
+      playSynthesizedSound(cue);
+      if (cue === "captureLoss") vibrate(30);
     } else if (latest.type === "move") {
       playSynthesizedSound("move");
     }
@@ -142,15 +169,15 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
 
   const lastMoveEvent = [...activeSnapshot.events]
     .reverse()
-    .find((e) => e.type === "move" || e.type === "capture" || e.type === "strike_loss");
+    .find((e) => e.type === "move" || e.type === "capture");
 
   const highlightMove = lastMoveEvent
     ? { from: lastMoveEvent.from, to: lastMoveEvent.to }
     : null;
 
-  const lastCapture = lastMoveEvent?.type === "capture" || lastMoveEvent?.type === "strike_loss"
-    ? lastMoveEvent.to
-    : null;
+  const lastCapture = lastMoveEvent?.type === "capture" ? lastMoveEvent.to : null;
+  const recentCaptureFor = (seat: Seat) =>
+    currentCapture?.attacker.seat === seat ? { id: currentCapture.id, type: currentCapture.captured.type } : null;
 
   return <section className={styles.gameScreen} aria-labelledby="game-title" data-testid="game-screen">
      <GameTopBar
@@ -166,8 +193,8 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
      />
     <div className={styles.gameLayout}>
       <div className={styles.players}>
-         <PlayerPanel player={activeSnapshot.players.B} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} spectator={spectator} />
-         <PlayerPanel player={activeSnapshot.players.A} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} spectator={spectator} />
+         <PlayerPanel player={activeSnapshot.players.B} opponent={activeSnapshot.players.A} recentCapture={recentCaptureFor("B")} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} spectator={spectator} />
+         <PlayerPanel player={activeSnapshot.players.A} opponent={activeSnapshot.players.B} recentCapture={recentCaptureFor("A")} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} spectator={spectator} />
       </div>
        <main className={styles.boardColumn} aria-labelledby="game-title">
          <h1 id="game-title">Bàn chơi</h1>
@@ -175,7 +202,7 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
         {!spectator && activeSnapshot.phase === "waiting" && activeSnapshot.roomAlias ? (
           <InviteBanner code={activeSnapshot.roomAlias} onCopied={(message, ok) => pushToast(message, ok ? "success" : "warning")} />
         ) : null}
-        <div className={effectEventId !== null ? styles.effects : undefined} data-event-id={effectEventId ?? undefined}>
+        <div className={currentEffect && !currentCapture ? styles.effects : undefined} data-event-id={currentEffect?.id ?? undefined}>
           <Board
             session={session}
             snapshot={activeSnapshot}
@@ -183,10 +210,15 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
             perspective={perspective}
             highlightMove={highlightMove}
             lastCapture={lastCapture}
+            captureEffect={currentCapture}
+            onBlocked={(target) => pushToast(target.message, "info")}
           />
         </div>
+        <VisuallyHidden aria-live="polite" data-testid="capture-announcement">
+          {currentCapture ? captureAnnouncement(currentCapture, formatSquare(currentCapture.at)) : ""}
+        </VisuallyHidden>
       </main>
-      <MoveHistory events={activeSnapshot.events} />
+      <MoveHistory events={activeSnapshot.events} board={activeSnapshot.board} />
     </div>
     <ConfirmLeaveDialog open={confirmLeave} onCancel={() => setConfirmLeave(false)} onConfirm={() => void confirm()} />
     <ResultDialog open={resultOpen && activeSnapshot.phase === "finished"} result={activeSnapshot.result} viewerSeat={activeSnapshot.viewerSeat} playerNames={names} onClose={() => setResultOpen(false)} onLobby={onLobby} />

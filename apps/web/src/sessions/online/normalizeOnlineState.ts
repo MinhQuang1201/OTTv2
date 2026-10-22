@@ -86,8 +86,7 @@ function event(value: unknown): GameEventView | null {
   if (!Number.isInteger(source.id) || (source.id as number) <= 0 || !Number.isInteger((source.from as any)?.x) || !Number.isInteger((source.from as any)?.y) || !Number.isInteger((source.to as any)?.x) || !Number.isInteger((source.to as any)?.y)) return null;
   const from = { x: (source.from as any).x, y: (source.from as any).y };
   const to = { x: (source.to as any).x, y: (source.to as any).y };
-  if (source.type === "capture" && typeof source.pieceId === "string" && typeof source.capturedId === "string") return { id: source.id as number, type: "capture", pieceId: source.pieceId, capturedId: source.capturedId, from, to };
-  if (source.type === "strike_loss" && typeof source.pieceId === "string" && typeof source.byId === "string") return { id: source.id as number, type: "strike_loss", pieceId: source.pieceId, byId: source.byId, from, to };
+  if (source.type === "capture" && typeof source.pieceId === "string" && typeof source.capturedId === "string") return { id: source.id as number, type: "capture", pieceId: source.pieceId, capturedId: source.capturedId, ...(isType(source.capturedType) ? { capturedType: source.capturedType } : {}), from, to };
   if (source.type === "move" && typeof source.pieceId === "string") return { id: source.id as number, type: "move", pieceId: source.pieceId, from, to };
   if (source.type === "win" && isSeat(source.winner) && isReason(source.reason)) return { id: source.id as number, type: "win", winner: source.winner, reason: source.reason };
   return null;

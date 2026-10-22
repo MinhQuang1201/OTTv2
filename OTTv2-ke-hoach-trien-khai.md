@@ -107,8 +107,8 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 
 *Còn lại và lưu ý:*
 
-- Rollback bằng cách chạy tay Deploy trên tag `v*` trước chưa được thử. Tag `v1.0.0` (29/09) có trước CI nên không có workflow và không dùng được; rollback bằng tag chỉ có từ release thứ hai. Trong lúc đó dùng `wrangler rollback <version-id>`.
-- Merge PR #13 không tự kích hoạt deploy staging (GitHub không tạo run, chưa rõ nguyên do); đã chạy tay bằng `workflow_dispatch`. Theo dõi nếu lặp lại.
+- Rollback bằng cách chạy tay Deploy trên tag `v*` trước chưa được thử. Tag `v1.0.0` (29/09) có trước CI nên không có workflow và không dùng được; hiện đã có `v1.1.0`, `v1.2.0`, `v1.3.0` nên có thể thử rollback bằng tag. Trong lúc đó dùng `wrangler rollback <version-id>`.
+- Merge PR #13 không tự kích hoạt deploy staging (GitHub không tạo run, chưa rõ nguyên do); đã chạy tay bằng `workflow_dispatch`. Merge PR #21 và #22 (21–22/10) đã tự kích hoạt deploy staging bình thường.
 - Chưa thực hiện nghiệm thu hai profile trên production; production vẫn ở trạng thái chờ giai đoạn 4.
 
 ### Giai đoạn 3 — Vận hành Worker an toàn
@@ -126,7 +126,7 @@ Triển khai chia 4 giai đoạn; mỗi giai đoạn chỉ xong khi đạt tiêu
 
 - Saved query trong Workers Logs cho `authority_unavailable`, `transaction-failed`, `rate_limited` chưa tạo. Key `event` chỉ xuất hiện trong bộ lọc sau khi có ít nhất một dòng log tương ứng; trước đó lọc theo `$metadata.message` includes tên sự kiện.
 - Chưa theo dõi số key Lobby DO theo thời gian: cần chơi vài ván trên staging, đợi quá 24 giờ và xem log `allocation_gc` có `removed` lớn hơn 0.
-- Chưa deploy lên production; cần tag `v1.2.0` trước khi nghiệm thu giai đoạn 4 để production khớp với bản đã kiểm thử.
+- ~~Chưa deploy lên production~~ — đã deploy: `v1.2.0`, rồi `v1.3.0` (22/10/2026, run 39709661899, Worker version `f7d37002-ca69-4a22-86c6-f1527f0f4953`).
 
 **Tiêu chí xong:** số key trong Lobby DO ổn định theo thời gian thay vì tăng mãi; có dashboard lỗi.
 

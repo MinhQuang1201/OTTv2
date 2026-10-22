@@ -282,7 +282,7 @@ must remain unavailable while local and AI remain usable.
 
 ### Forbidden in FE
 
-- Reimplement movement, capture, strike-loss, goal, elimination, no-moves or
+- Reimplement movement, capture, goal, elimination, no-moves or
   timeout rules in React/CSS/session UI code.
 - Choose or mutate online board state locally.
 - Create a second WebSocket, polling loop or fake transport.
@@ -362,7 +362,6 @@ not production transport. Supported scenario keys are defined in
 ?demo=game-piece-selected
 ?demo=game-move-rejected
 ?demo=game-capture
-?demo=game-strike-loss
 ?demo=game-ai-thinking
 ?demo=game-reconnecting
 ?demo=game-clock-warning
