@@ -112,8 +112,8 @@ test("invite by short code, resume after reload and leave end the online game fo
 
   await step("B leaves and A wins immediately", a, async () => {
     await b.waitForTimeout(300);
-    await b.getByRole("button", { name: "Rời bàn" }).click();
-    await b.getByRole("button", { name: "Xác nhận rời bàn" }).click();
+    await b.getByRole("button", { name: "Rời bàn", exact: true }).click();
+    await b.getByRole("button", { name: "Xác nhận rời bàn", exact: true }).click();
     const outcome = a.locator('[data-testid="result-dialog-outcome"]');
     await outcome.waitFor({ state: "visible", timeout: 10_000 });
     assert.equal(await outcome.getAttribute("data-outcome"), "win");
