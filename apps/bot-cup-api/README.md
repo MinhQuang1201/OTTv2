@@ -40,13 +40,17 @@ npm run test:bot-cup       # core + API on SQLite with the real migrations (part
 npm run test:bot-cup:api   # wrangler dev --local + local D1 (part of test:integration)
 ```
 
-## Staging setup (not done yet; run when the web side needs it)
+## Staging
+
+Deployed by hand on 2026-10-24 at `https://ottv2-bot-cup-api-staging.opticsquang.workers.dev` (no CI workflow yet).
+Secrets were uploaded with `wrangler secret bulk <file.json>` from a temporary file. To rebuild it from scratch:
 
 ```bash
 npx wrangler d1 migrations apply ottv2-bot-cup-staging --remote --env staging --config apps/bot-cup-api/wrangler.jsonc
 npx wrangler d1 execute ottv2-bot-cup-staging --remote --env staging --config apps/bot-cup-api/wrangler.jsonc --file apps/bot-cup-api/seeds/staging-event.sql
 npx wrangler secret put OTP_PEPPER --env staging --config apps/bot-cup-api/wrangler.jsonc
+npx wrangler secret put BREVO_API_KEY --env staging --config apps/bot-cup-api/wrangler.jsonc
+npx wrangler secret put BOT_CUP_EMAIL_SENDER --env staging --config apps/bot-cup-api/wrangler.jsonc   # a sender verified in Brevo
 npx wrangler secret put TURNSTILE_SECRET --env staging --config apps/bot-cup-api/wrangler.jsonc   # 1x0000000000000000000000000000000AA until a real widget exists
-npx wrangler secret put BOT_CUP_DEV_TOKEN --env staging --config apps/bot-cup-api/wrangler.jsonc
 npx wrangler deploy --env staging --config apps/bot-cup-api/wrangler.jsonc
 ```

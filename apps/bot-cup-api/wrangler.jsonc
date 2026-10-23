@@ -32,8 +32,8 @@
       "vars": {
         "BOT_CUP_EVENT_ID": "staging-demo",
         "BOT_CUP_WEB_ORIGIN": "https://ottv2-staging.vercel.app",
-        // Until Brevo is set up (P0), staging mail lands in dev_outbox, readable with the BOT_CUP_DEV_TOKEN secret.
-        "BOT_CUP_EMAIL_MODE": "outbox",
+        // Real mail through Brevo's free plan; the verified sender address is the BOT_CUP_EMAIL_SENDER secret.
+        "BOT_CUP_EMAIL_MODE": "brevo",
         "BOT_CUP_EMAIL_SENDER_NAME": "OTT Bot Cup (staging)",
         // Cloudflare's always-pass test site key; the matching secret is set with `wrangler secret put TURNSTILE_SECRET`.
         "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
