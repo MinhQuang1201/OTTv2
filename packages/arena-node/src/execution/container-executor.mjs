@@ -30,7 +30,7 @@ import { computeSha256 } from "../artifacts/artifact-store.mjs";
 
 export const CONTAINER_EXECUTOR_REVISION = "oci-container-linux-v1";
 export const PINNED_RUNNER_IMAGE = "ottv2-arena-runner:local";
-export const PINNED_RUNNER_IMAGE_ID = "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54";
+export const PINNED_RUNNER_IMAGE_ID = "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5";
 export const PINNED_BASE_IMAGE_DIGEST = "sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c";
 
 export const DEFAULT_CONTAINER_RUN_LIMITS = Object.freeze({
@@ -114,7 +114,7 @@ export function getIsolationProfileCapabilities() {
     },
     node: {
       language: "javascript",
-      version: "22.23.2",
+      version: "22.23.4",
       available: true,
       compiler: "node --check",
       runtime: "node"

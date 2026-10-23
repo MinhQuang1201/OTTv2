@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "image": "ottv2-arena-runner:local",
-  "imageId": "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54",
+  "imageId": "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5",
   "baseImage": "alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c",
   "platform": "linux/amd64",
-  "buildDate": "2026-10-14T00:50:51Z",
+  "buildDate": "2026-10-23T16:55:10Z",
   "executorRevision": "oci-container-linux-v1",
   "apkPackages": {
     "python3": "3.12.15-r0",
-    "nodejs": "22.23.2-r0"
+    "nodejs": "22.23.4-r0"
   },
   "supportedProfiles": {
     "python": {
@@ -19,7 +19,7 @@
     },
     "node": {
       "language": "javascript",
-      "version": "22.23.2",
+      "version": "22.23.4",
       "executable": "node",
       "available": true
     }

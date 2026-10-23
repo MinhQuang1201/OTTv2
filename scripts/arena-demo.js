@@ -10,7 +10,7 @@ const DEFAULT_DB_PATH = path.join(ROOT, "var", "arena-demo", "arena.db");
 const DEFAULT_STORAGE_DIR = path.join(ROOT, "var", "arena-demo", "artifacts");
 const ENTRYPOINT = path.join(ROOT, "apps", "arena-api", "src", "main.mjs");
 const PINNED_RUNNER_IMAGE = "ottv2-arena-runner:local";
-const PINNED_RUNNER_IMAGE_ID = "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54";
+const PINNED_RUNNER_IMAGE_ID = "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5";
 
 function parseOptions(argv = [], env = process.env) {
   if (env.ARENA_EXTERNAL_WORKER === "true" || env.ARENA_EXTERNAL_WORKER === "1") {

@@ -3,7 +3,7 @@
 FROM alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c
 
 # Install scoped runtimes: Python 3 and Node.js with exact pinned apk versions
-RUN apk add --no-cache python3=3.12.15-r0 nodejs=22.23.2-r0
+RUN apk add --no-cache python3=3.12.15-r0 nodejs=22.23.4-r0
 
 # Create non-root unprivileged sandbox user and group (uid 10001, gid 10001)
 RUN addgroup -g 10001 -S sandbox && \
