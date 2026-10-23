@@ -40,6 +40,8 @@ import { createMatchRepository } from "../../../packages/arena-node/src/persiste
 import { createLiveFrameStore } from "../../../packages/arena-node/src/persistence/live-frame-store.mjs";
 import { createDraftService } from "../../../packages/arena-node/src/execution/draft-service.mjs";
 
+const PROFILE_PROBE_CACHE_MS = 5 * 60 * 1000;
+
 /**
  * Sends a structured JSON success response.
  *
@@ -215,6 +217,22 @@ export function createArenaServer(options) {
   const resolvedCompetitionRoundsRepo =
     competitionRoundsRepo || createCompetitionRoundsRepository(db, { tournamentRepo });
 
+  // Probes spawn the toolchains synchronously, so /capabilities reuses one result for a while.
+  let availableProfilesCache = null;
+  function availableProfileIds() {
+    if (!profileRegistry) return ["node", "python", "cpp", "java"];
+    const now = Date.now();
+    if (!availableProfilesCache || now - availableProfilesCache.at > PROFILE_PROBE_CACHE_MS) {
+      const canProbe = typeof profileRegistry.probeProfile === "function";
+      const ids = profileRegistry
+        .listProfiles()
+        .map((p) => p.id)
+        .filter((id) => !canProbe || profileRegistry.probeProfile(id)?.available !== false);
+      availableProfilesCache = { at: now, ids };
+    }
+    return availableProfilesCache.ids;
+  }
+
   const server = http.createServer(async (req, res) => {
     // 1. Assign trace request ID
     req.id = req.headers["x-request-id"] || req.headers["X-Request-Id"] || randomUUID();
@@ -258,16 +276,14 @@ export function createArenaServer(options) {
         const currentExecutionCapabilities = getExecutionCapabilities
           ? getExecutionCapabilities()
           : executionCapabilities;
-        const availableProfiles = profileRegistry
-          ? profileRegistry.listProfiles().map((p) => p.id)
-          : ["node", "python", "cpp", "java"];
+        const containerReady = Boolean(localDemoContainers && currentExecutionCapabilities?.available);
         return sendJson(res, 200, {
           publicRegistration: Boolean(publicRegistration),
           executor: localDemoContainers ? "oci-container-local-demo-v1" : "trusted-local-v1",
           trusted: Boolean(trustedMode),
           untrusted: Boolean(localDemoContainers && currentExecutionCapabilities?.available),
           canSubmitSource: Boolean(localDemoContainers && currentExecutionCapabilities?.available),
-          profiles: localDemoContainers && currentExecutionCapabilities?.available ? ["python", "node"] : availableProfiles,
+          profiles: containerReady ? ["python", "node"] : availableProfileIds(),
           localDemoContainers: Boolean(localDemoContainers),
           localDocker: localDemoContainers ? (currentExecutionCapabilities || { available: false, reason: "not_configured" }) : null
         });
