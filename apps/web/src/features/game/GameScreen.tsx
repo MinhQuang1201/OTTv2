@@ -182,6 +182,7 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
   return <section className={styles.gameScreen} aria-labelledby="game-title" data-testid="game-screen">
      <GameTopBar
        roomId={activeSnapshot.roomId}
+       mode={activeSnapshot.mode}
        connection={activeSnapshot.connection}
        spectator={spectator}
        spectatorCount={activeSnapshot.spectatorCount}
@@ -191,10 +192,10 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
        soundEnabled={soundEnabled}
        onToggleSound={handleToggleSound}
      />
-    <div className={styles.gameLayout}>
+    <div className={styles.gameLayout} data-perspective={perspective}>
       <div className={styles.players}>
-         <PlayerPanel player={activeSnapshot.players.B} opponent={activeSnapshot.players.A} recentCapture={recentCaptureFor("B")} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} spectator={spectator} />
-         <PlayerPanel player={activeSnapshot.players.A} opponent={activeSnapshot.players.B} recentCapture={recentCaptureFor("A")} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} spectator={spectator} />
+         <PlayerPanel player={activeSnapshot.players.B} opponent={activeSnapshot.players.A} recentCapture={recentCaptureFor("B")} mode={activeSnapshot.mode} active={activeSnapshot.turn === "B"} viewer={activeSnapshot.viewerSeat === "B"} spectator={spectator} />
+         <PlayerPanel player={activeSnapshot.players.A} opponent={activeSnapshot.players.B} recentCapture={recentCaptureFor("A")} mode={activeSnapshot.mode} active={activeSnapshot.turn === "A"} viewer={activeSnapshot.viewerSeat === "A"} spectator={spectator} />
       </div>
        <main className={styles.boardColumn} aria-labelledby="game-title">
          <h1 id="game-title">Bàn chơi</h1>

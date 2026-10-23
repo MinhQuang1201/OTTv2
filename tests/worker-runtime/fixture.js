@@ -11,6 +11,7 @@ const {
   PROCESS_GROUP_SPAWN_OPTIONS,
   stopProcessTree,
 } = require("../../config/local-runtime");
+const { spawnLocalCommand } = require("../../scripts/worker-dev");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const APP_PORT = 3000;
@@ -57,13 +58,26 @@ async function stopProcess(processInfo) {
   ]);
 }
 
+// workerd can hold its Miniflare cache open for a moment after the process tree is killed (EBUSY on Windows).
+async function removePersistDir(dir, { attempts = 30, delayMs = 500 } = {}) {
+  for (let attempt = 1; fs.existsSync(dir); attempt += 1) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(error.code) || attempt >= attempts) {
+        console.warn(`Could not remove Wrangler test state ${dir}: ${error.message}`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 function startProcess(command, args, env) {
-  const quote = (value) => {
-    const text = String(value);
-    return /[\s"&|<>^]/.test(text) ? `"${text.replaceAll('"', '\\"')}"` : text;
-  };
+  // On Windows npx is a .cmd shim and must go through cmd.exe; reuse worker:dev's quoting so paths with spaces survive.
   const child = process.platform === "win32" && (command === "npx" || command === "npx.cmd")
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", [command, ...args].map((value, index) => index === 0 ? String(value) : quote(value)).join(" ")], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] })
+    ? spawnLocalCommand(command, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] }, spawn)
     : spawn(command, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], ...PROCESS_GROUP_SPAWN_OPTIONS });
   const logs = { stdout: "", stderr: "" };
   child.stdout.on("data", (chunk) => { logs.stdout = appendLog(logs.stdout, chunk); });
@@ -136,7 +150,7 @@ async function createBrowserDemoFixture(options = {}) {
   } catch (error) {
     await stopProcess(app);
     await stopProcess(worker);
-    if (fs.existsSync(persistTo)) fs.rmSync(persistTo, { recursive: true, force: true });
+    await removePersistDir(persistTo);
     throw new Error(`${error.message}\nWrangler stderr:\n${worker.logs.stderr}\nWrangler stdout:\n${worker.logs.stdout}`);
   }
 
@@ -163,7 +177,7 @@ async function createBrowserDemoFixture(options = {}) {
       stopped = true;
       await stopProcess(app);
       await stopProcess(worker);
-      if (fs.existsSync(persistTo)) fs.rmSync(persistTo, { recursive: true, force: true });
+      await removePersistDir(persistTo);
     },
   };
 }

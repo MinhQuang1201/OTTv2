@@ -24,6 +24,7 @@ import {
 } from "./public-match.js";
 import {
   validatePublicMatchCatalog,
+  fitPublicMatchCatalog,
   MAX_OTT_PAYLOAD_BYTES,
   ALIAS_ALPHABET,
   generateRandomAlias,
@@ -306,9 +307,10 @@ export class OttLobbyServer extends DurableObject<Env> {
         await this.ctx.storage.delete(key);
       }
     }
-    const invites = await this.ctx.storage.list<{ expiresAt?: number; claimed?: boolean; createdAt?: number }>({ prefix: "seat-invite:" });
+    const invites = await this.ctx.storage.list<SeatInviteRecord & { createdAt?: number }>({ prefix: "seat-invite:" });
     for (const [key, inv] of invites) {
       if (!inv || (typeof inv.expiresAt === "number" && inv.expiresAt <= now) || (inv.claimed && typeof inv.createdAt === "number" && now - inv.createdAt > 60_000)) {
+        await this.releaseAbandonedSeatReservation(key.slice("seat-invite:".length), inv);
         await this.ctx.storage.delete(key);
       }
     }
@@ -361,7 +363,7 @@ export class OttLobbyServer extends DurableObject<Env> {
       __ott: true,
       type: "ott:active-matches",
       catalogRevision,
-      matches,
+      matches: fitPublicMatchCatalog(catalogRevision, matches),
     });
     return catalog.ok ? { catalogRevision, matches: [...catalog.value.matches] } : null;
   }
@@ -529,6 +531,24 @@ export class OttLobbyServer extends DurableObject<Env> {
       if (!current.tournamentMatch) await storage.put(`${WAITING_PREFIX}${id}`, publicAllocation(current));
       await storage.delete(`owner-credential:${id}:B`);
       await storage.delete(`owner-ticket:${id}:B`);
+    });
+  }
+
+  /**
+   * A seat B claim that never reached the Game keeps the seat reserved for its claimant to retry.
+   * Once that invite is dropped the claimant can no longer retry, so the reservation is released too.
+   */
+  private async releaseAbandonedSeatReservation(inviteToken: string, invite: SeatInviteRecord | undefined): Promise<void> {
+    if (!invite || invite.claimStatus !== "pending" || typeof invite.allocationId !== "string") return;
+    await this.transaction(async (storage) => {
+      const current = await storage.get<Allocation>(`allocation:${invite.allocationId}`);
+      if (!current || current.tournamentMatch || current.pendingSeatBInvite !== inviteToken) return;
+      delete current.pendingSeatBInvite;
+      await storage.put(`allocation:${current.id}`, current);
+      if (current.status !== "waiting" || current.seats !== 1) return;
+      await storage.delete(`owner-credential:${current.id}:B`);
+      await storage.delete(`owner-ticket:${current.id}:B`);
+      await storage.put(`${WAITING_PREFIX}${current.id}`, publicAllocation(current));
     });
   }
 

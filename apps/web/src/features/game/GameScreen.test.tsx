@@ -260,6 +260,54 @@ describe("GameScreen", () => {
     }
   });
 
+  it("labels a shared-screen game by seat colour instead of you/opponent or connection state", () => {
+    const session = new DemoSession("game-active-a");
+    const demo = session.getSnapshot();
+    const snapshot = {
+      ...demo,
+      mode: "local" as const,
+      connection: "offline" as const,
+      roomId: null,
+      turn: "B" as const,
+      viewerSeat: "B" as const,
+      viewer: { role: "player" as const, seat: "B" as const },
+    };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(<AppProviders><GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} /></AppProviders>);
+
+    expect(screen.getByTestId("room-label")).toHaveTextContent("Hai người cùng máy");
+    expect(screen.getByText("Chơi trên thiết bị")).toBeInTheDocument();
+    expect(screen.queryByText("Ngoại tuyến")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(`Lượt của Xanh (${demo.players.B!.name})`);
+    expect(screen.queryByText(/Đến lượt bạn|Đối thủ đang đi/)).not.toBeInTheDocument();
+    expect(screen.getByText("Quân Đỏ")).toBeInTheDocument();
+    expect(screen.getByText("Quân Xanh")).toBeInTheDocument();
+    expect(screen.queryByText(/Đã kết nối|Mất kết nối/)).not.toBeInTheDocument();
+  });
+
+  it("names AI tables and keeps the viewer's turn wording", () => {
+    const session = new DemoSession("game-active-a");
+    const snapshot = { ...session.getSnapshot(), mode: "ai" as const, connection: "offline" as const, roomId: null };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(<AppProviders><GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} /></AppProviders>);
+
+    expect(screen.getByTestId("room-label")).toHaveTextContent("Đấu với AI");
+    expect(screen.getByRole("status")).toHaveTextContent("Đến lượt bạn");
+    expect(screen.queryByText(/Đã kết nối|Mất kết nối/)).not.toBeInTheDocument();
+  });
+
+  it("flags a disconnected online opponent on its player strip", () => {
+    const session = new DemoSession("game-active-a");
+    const demo = session.getSnapshot();
+    const snapshot = { ...demo, mode: "online" as const, connection: "online" as const, players: { ...demo.players, B: { ...demo.players.B!, connected: false } } };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(<AppProviders><GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} /></AppProviders>);
+
+    const strip = screen.getByRole("region", { name: `Người chơi ${demo.players.B!.name}` });
+    expect(strip).toHaveAttribute("data-connected", "false");
+    expect(within(strip).getByText("Đối thủ · Mất kết nối")).toBeInTheDocument();
+  });
+
   it("does not play audio on mount for pre-existing historical events", () => {
     localStorage.setItem("ott:audio-enabled", "true");
     const playSound = vi.spyOn(soundSynthesis, "playSynthesizedSound");

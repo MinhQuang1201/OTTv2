@@ -11,7 +11,7 @@
     "test:worker:spectator": "node tests/spectator-test-worker.test.js",
     "build:playhtml-browser": "esbuild vendor/playhtml-minimal/browser/runtime-entry.js --bundle --platform=browser --format=iife --global-name=OTTPlayHTMLRuntime --outfile=vendor/playhtml-minimal/browser/runtime.js",
     "test:browser-worker-runtime": "npm run build:playhtml-browser && npm run build:web && node scripts/run-browser-worker-runtime.js",
-    "test:browser-worker:spectator": "npm run build:playhtml-browser && npm run build:web && node scripts/run-browser-worker-runtime.js --spectator",
+    "test:browser-worker:spectator": "npm run build:playhtml-browser && node scripts/run-browser-worker-runtime.js --spectator",
     "test:unit": "node scripts/run-node-tests.js unit",
     "test:integration": "node scripts/run-node-tests.js integration",
     "test:e2e": "npm run test:browser-worker-runtime",

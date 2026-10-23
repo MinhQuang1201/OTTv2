@@ -324,6 +324,28 @@ describe("Arena HTTP API — Task 14 Route Matrix & Integration", () => {
     assert.ok(Array.isArray(res.json.profiles));
   });
 
+  it("GET /capabilities lists only profiles whose runtime probe succeeds, probing once", async () => {
+    let probes = 0;
+    const registry = {
+      listProfiles: () => [{ id: "node" }, { id: "cpp" }],
+      probeProfile: (id) => {
+        probes += 1;
+        return { available: id === "node" };
+      }
+    };
+    const probeServer = createArenaServer({ db: env.db, allowedOrigins: [], trustedMode: true, profileRegistry: registry });
+    await new Promise((resolve) => probeServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const first = await makeRequest(probeServer, { path: "/api/arena/v1/capabilities", method: "GET" });
+      const second = await makeRequest(probeServer, { path: "/api/arena/v1/capabilities", method: "GET" });
+      assert.deepEqual(first.json.profiles, ["node"]);
+      assert.deepEqual(second.json.profiles, ["node"]);
+      assert.equal(probes, 2, "each profile is probed once and then cached");
+    } finally {
+      await new Promise((resolve) => probeServer.close(resolve));
+    }
+  });
+
   // ── 2. Bots CRUD & Idempotency ────────────────────────────────────────────
   it("POST /bots requires Idempotency-Key and creates owned bot", async () => {
     // Missing Idempotency-Key -> 400

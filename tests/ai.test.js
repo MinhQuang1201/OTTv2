@@ -114,3 +114,21 @@ test('hard stays inside its node budget so a move costs bounded time', () => {
   chooseMove(rules.createInitialState(), 'A', { level: 'hard' });
   assert.ok(Date.now() - started < 5000);
 });
+
+test('the node budget covers every deepening step of a move', () => {
+  let state = rules.createInitialState();
+  for (let ply = 0; ply < 12 && !state.winner; ply++) {
+    const stats = {};
+    const move = chooseMove(state, state.turn, { level: 'hard', maxNodes: 3000, stats });
+    // A search notices the budget one node late, then deepening stops.
+    assert.ok(stats.nodes <= 3001, `ply ${ply}: ${stats.nodes} nodes`);
+    state = rules.applyMove(state, state.turn, move.from, move.to).state;
+  }
+});
+
+test('hard completes its full depth from the opening within the default budget', () => {
+  const stats = {};
+  chooseMove(rules.createInitialState(), 'A', { level: 'hard', stats });
+  assert.equal(stats.depth, 4);
+  assert.ok(stats.nodes <= 100001);
+});

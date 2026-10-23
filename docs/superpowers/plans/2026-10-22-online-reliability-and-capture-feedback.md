@@ -136,3 +136,13 @@ Logic trình bày nằm trong `apps/web/src/features/game/captureFx.ts` (thuần
 
 Hàng đợi hiệu ứng giữ tối đa 3 mục (bỏ mục cũ khi dồn), hẹn giờ theo id của mục đang chạy nên thêm sự kiện mới không
 kéo dài mục hiện tại; reduced motion rút hiệu ứng ăn quân còn 600 ms và tắt chuyển động.
+Đã merge (PR #23) và deploy staging.
+
+## 9. Kết quả giai đoạn 3 (2026-10-23, nhánh `feat/phase3-ux`)
+
+| Việc | Kết quả |
+|---|---|
+| 3.1 Bố cục điện thoại | Xong. Ở ≤ 600 px: bàn cờ ngay dưới thanh trên cùng; mỗi người chơi là một dải 1 dòng (ghế · tên · số quân · đồng hồ) phía trên/dưới bàn theo góc nhìn; thanh công cụ chỉ còn biểu tượng (nhãn vẫn đọc được bằng trình đọc màn hình); trạng thái kết nối và số người xem xuống dòng thứ hai khi có. Trên màn 360 px bàn cờ bắt đầu ở ~230 px thay vì ~830 px; không cuộn ngang ở local, AI, online, khán giả, phòng chờ. Khay "Đã ăn" và nhãn "Đang đi" ẩn trên điện thoại (số quân còn lại đã thể hiện). |
+| 3.2 Nhãn chế độ chơi trên thiết bị | Xong. Badge "Chơi trên thiết bị" thay "Ngoại tuyến"; tên bàn "Hai người cùng máy"/"Đấu với AI"; chơi cùng máy hiện "Lượt của Đỏ/Xanh (tên)" và "Quân Đỏ/Xanh" thay "Đến lượt bạn"/"Bạn"/"Đối thủ"; local, AI và replay không còn "Đã kết nối". Người thứ hai khi chơi cùng máy tên mặc định "Người chơi 2". Online vẫn hiện "Mất kết nối" trên dải người chơi kể cả trên điện thoại. |
+| 3.3 Favicon + README demo | Xong. `apps/web/static/favicon.svg` (pixel, màu ghế) và `<link rel="icon">`; `tests/server.test.js` kiểm bản build có link và `/favicon.svg` trả `image/svg+xml`. README ghi `?demo=` chỉ chạy ở `npm run dev:web`. |
+| 3.4 Test e2e online trong CI | Xong từ PR #22. |

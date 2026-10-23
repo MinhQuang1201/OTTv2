@@ -258,7 +258,7 @@ export function LobbyScreen({
               description="Hai người chơi luân phiên trên một thiết bị."
               actionLabel="Chơi cùng máy"
               icon={<PixelSprite kind="dam" size={24} seat="A" decorative />}
-              onSelect={() => handleStartLocal([normalizedName, "Đối thủ"])}
+              onSelect={() => handleStartLocal([normalizedName, "Người chơi 2"])}
             />
             <ModeCard
               title="Đấu với AI"

@@ -191,14 +191,21 @@
       return best;
     }
 
-    function rootScores(side, depth) {
-      const moves = generateMoves(position, side);
+    // `onlyBest`: the caller only needs the top move, so later root moves are searched
+    // against the best score so far and may come back as upper bounds. Searching in
+    // tie-break order (piece index, then generation order; sort is stable) keeps the
+    // chosen move identical to a full-window search at the same depth.
+    function rootScores(side, depth, onlyBest) {
+      const generated = generateMoves(position, side);
+      const moves = onlyBest ? generated.sort((a, b) => a.index - b.index) : generated;
       const scored = [];
+      let alpha = -Infinity;
       for (const move of moves) {
         const undo = makeMove(position, side, move);
         let value;
         if (move.y * SIZE + move.x === GOAL_CELL[side] || position.count[1 - side] === 0) value = WIN;
-        else value = -visit(1 - side, depth - 1, -Infinity, Infinity, 1);
+        else value = -visit(1 - side, depth - 1, -Infinity, onlyBest ? -alpha : Infinity, 1);
+        if (value > alpha) alpha = value;
         unmakeMove(position, side, undo);
         if (aborted) return null;
         scored.push({ move, value });
@@ -218,7 +225,8 @@
       maxNodes: options && Number.isFinite(options.maxNodes) && options.maxNodes > 0 ? options.maxNodes : base.maxNodes,
       randomMoveChance: base.randomMoveChance,
       pickAmongTop: base.pickAmongTop,
-      rng: options && typeof options.rng === "function" ? options.rng : Math.random
+      rng: options && typeof options.rng === "function" ? options.rng : Math.random,
+      stats: options && options.stats && typeof options.stats === "object" ? options.stats : null
     };
   }
 
@@ -229,6 +237,7 @@
   /**
    * Picks a move for `player`. `options.level` is "easy" | "medium" | "hard" (default "hard").
    * Without randomness (medium/hard) the result only depends on the position.
+   * `options.stats`, when given, receives `{ nodes, depth }`: nodes visited and the deepest completed search.
    */
   function chooseMove(state, player, options) {
     if (!state || state.winner || state.turn !== player) return null;
@@ -237,17 +246,32 @@
     const side = seatIndex(player);
     const position = buildPosition(state);
 
-    // Deepen one ply at a time and keep the last fully searched result, so the
-    // node budget bounds the work without making the answer depend on timing.
+    // Deepen one ply at a time and keep the last fully searched result. `maxNodes`
+    // is shared by all depths, so it bounds the whole move without making the
+    // answer depend on timing.
+    const onlyBest = settings.pickAmongTop <= 1 && settings.randomMoveChance === 0;
     let scored = null;
-    for (let depth = 1; depth <= settings.depth; depth++) {
-      const search = createSearch(position, settings.maxNodes);
-      const result = search.rootScores(side, depth);
+    let completedDepth = 0;
+    let remaining = settings.maxNodes;
+    for (let depth = 1; depth <= settings.depth && remaining > 0; depth++) {
+      const search = createSearch(position, remaining);
+      const result = search.rootScores(side, depth, onlyBest);
+      remaining -= search.nodes;
       if (!result) break;
       scored = result;
+      completedDepth = depth;
       if (result.some((entry) => entry.value >= WIN - 1)) break;
     }
-    if (!scored) scored = createSearch(position, Infinity).rootScores(side, 1);
+    if (!scored) {
+      const fallback = createSearch(position, Infinity);
+      scored = fallback.rootScores(side, 1, onlyBest);
+      remaining -= fallback.nodes;
+      completedDepth = 1;
+    }
+    if (settings.stats) {
+      settings.stats.nodes = settings.maxNodes - remaining;
+      settings.stats.depth = completedDepth;
+    }
 
     const piecesOf = position.pieces;
     scored.sort((a, b) => b.value - a.value || a.move.index - b.move.index);

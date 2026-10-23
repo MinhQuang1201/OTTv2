@@ -212,6 +212,23 @@ describe("Lobby Room Aliases & Seat-Specific Invite Credentials", () => {
     assert.equal(normalizeAlias("TOO-LONG-ALIAS-123"), null);
   });
 
+  it("draws aliases from the platform CSPRNG by default", () => {
+    const original = globalThis.crypto.getRandomValues;
+    let calls = 0;
+    globalThis.crypto.getRandomValues = function (array) {
+      calls += 1;
+      return original.call(globalThis.crypto, array);
+    };
+    try {
+      generateRandomAlias();
+    } finally {
+      globalThis.crypto.getRandomValues = original;
+    }
+    assert.equal(calls, 6);
+    assert.equal(generateRandomAlias(() => 0), "222-222");
+    assert.equal(generateRandomAlias(() => 0.999999), "ZZZ-ZZZ");
+  });
+
   it("generates 6-character hyphenated Crockford Base32 aliases", () => {
     for (let i = 0; i < 20; i++) {
       const alias = generateRandomAlias();
@@ -347,6 +364,52 @@ describe("Human Tournament Worker Coordinator End-to-End Authority Flow", () => 
     };
     return { server, storage };
   }
+
+  it("releases an abandoned seat B reservation when its pending invite is dropped", async () => {
+    await getLobbyServerClass();
+    const storageMap = new Map();
+    let failSeatUpdate = true;
+    const { server } = createLobbyServer(storageMap, async (request) => {
+      if (request.url.includes("/internal/seat-update") && failSeatUpdate) return new Response("down", { status: 503 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    let clientCounter = 1;
+    const post = async (pathUrl, body) => {
+      const response = await server.fetch(new Request("https://ott.local" + pathUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": `invite-client-${clientCounter++}` },
+        body: JSON.stringify(body),
+      }));
+      return { status: response.status, data: await response.json() };
+    };
+
+    const created = await post("/control/create", { name: "Alice" });
+    assert.equal(created.status, 200);
+    const invite = await post("/control/create-invite", { allocationId: created.data.allocationId, resumeCredential: created.data.resumeCredential });
+    assert.equal(invite.status, 200);
+
+    const allocationId = created.data.allocationId;
+    const failed = await post("/control/claim-invite", { inviteToken: invite.data.inviteToken, name: "Bob", claimId: "claim-bob-0123456789abcdef" });
+    assert.equal(failed.status, 503);
+    // The failed claim keeps seat B reserved for its claimant.
+    assert.equal(storageMap.get(`allocation:${allocationId}`).pendingSeatBInvite, invite.data.inviteToken);
+    assert.equal((await post("/control/join", { allocationId, name: "Dave" })).status, 409);
+
+    // The claimant never comes back and the invite expires.
+    storageMap.get(`seat-invite:${invite.data.inviteToken}`).expiresAt = 0;
+    await server.alarm();
+    assert.equal(storageMap.has(`seat-invite:${invite.data.inviteToken}`), false);
+    assert.equal(storageMap.get(`allocation:${allocationId}`).pendingSeatBInvite, undefined);
+    assert.equal(storageMap.has(`owner-credential:${allocationId}:B`), false);
+
+    failSeatUpdate = false;
+    const joined = await post("/control/join", { allocationId, name: "Dave" });
+    assert.equal(joined.status, 200);
+    assert.equal(joined.data.seat, "B");
+    const allocation = storageMap.get(`allocation:${allocationId}`);
+    assert.equal(allocation.status, "playing");
+    assert.equal(allocation.names.B, "Dave");
+  });
 
   it("orchestrates authentic tournament lifecycle, enforces DO terminal outcomes, and prevents organizer fabrication", async () => {
     await getLobbyServerClass();

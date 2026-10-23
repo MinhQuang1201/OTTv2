@@ -536,6 +536,35 @@ test("OttLobbyServer retains terminal removal until a recovered notification suc
   assert.equal(fixture.values.has("public-catalog-notify"), false);
 });
 
+test("OttLobbyServer cuts a catalog of many live matches to one valid message instead of dropping it", async () => {
+  const fixture = await lobbyFixture(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  const total = 40;
+  for (let index = 0; index < total; index += 1) {
+    const allocationId = `123e4567-e89b-12d3-a456-${String(index).padStart(12, "0")}`;
+    const summary = validSummary({
+      allocationId,
+      roomId: `ott-${allocationId}`,
+      players: {
+        A: { seat: "A", name: "A".repeat(20), connected: true, remainingMs: 600000 },
+        B: { seat: "B", name: "B".repeat(20), connected: true, remainingMs: 600000 },
+      },
+    });
+    fixture.values.set(`allocation:${allocationId}`, {
+      id: allocationId, roomId: summary.roomId, names: { A: "A", B: "B" }, seats: 2, status: "playing", creatorAttachDeadlineMs: 0, summary,
+    });
+  }
+
+  const response = await fixture.server.fetch(internalRequest("/internal/public-active-snapshot", {}));
+  assert.equal(response.status, 200);
+  const catalog = await response.json();
+  assert.ok(catalog.matches.length > 0 && catalog.matches.length < total, `kept ${catalog.matches.length} of ${total}`);
+  const message = JSON.stringify({ __ott: true, type: "ott:active-matches", catalogRevision: catalog.catalogRevision, matches: catalog.matches });
+  assert.ok(Buffer.byteLength(message) <= 8 * 1024, "catalog message must fit the 8 KB payload limit");
+  const expectedIds = [...fixture.values.keys()].filter((key) => key.startsWith("allocation:")).sort()
+    .map((key) => key.slice("allocation:".length)).filter((id) => id.startsWith("123e4567-e89b-12d3-a456-0"));
+  assert.deepEqual(catalog.matches.map((match) => match.allocationId), expectedIds.slice(0, catalog.matches.length));
+});
+
 test("OttLobbyStreamServer resubscribe obtains the durable latest catalog and ignores stale updates", async () => {
   const summary = validSummary();
   const lobbyFetch = async () => {

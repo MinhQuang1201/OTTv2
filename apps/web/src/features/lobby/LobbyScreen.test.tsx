@@ -56,7 +56,7 @@ describe("LobbyScreen", () => {
     expect(props.onStartAi).toHaveBeenCalledWith("An", "medium");
 
     await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
-    expect(props.onStartLocal).toHaveBeenCalledWith(["An", "Đối thủ"]);
+    expect(props.onStartLocal).toHaveBeenCalledWith(["An", "Người chơi 2"]);
   });
 
   it("does not create an online room without a player name", async () => {

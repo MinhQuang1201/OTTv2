@@ -1,3 +1,4 @@
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const spectator = process.argv.includes("--spectator");
@@ -6,6 +7,21 @@ const spectator = process.argv.includes("--spectator");
 const files = spectator
   ? ["tests/browser-worker-runtime.test.js"]
   : ["tests/browser-worker-runtime.test.js", "tests/browser-online-flow.test.js"];
+
+if (spectator) {
+  // The lobby only shows live matches when the bundle is built with the spectator flag.
+  const vite = path.join(process.cwd(), "node_modules", "vite", "bin", "vite.js");
+  const build = spawnSync(process.execPath, [vite, "build", "--config", "apps/web/vite.config.ts"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: { ...process.env, VITE_OTT_SPECTATOR_ENABLED: "true" },
+  });
+  if (build.error) throw build.error;
+  if (build.status !== 0) {
+    process.exitCode = build.status === null ? 1 : build.status;
+    return;
+  }
+}
 
 const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", ...files], {
   cwd: process.cwd(),

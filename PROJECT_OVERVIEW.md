@@ -1,459 +1,546 @@
-# PROJECT_OVERVIEW — OTTv2
+# OTTv2 — Project Overview (code-first audit)
 
-> Tài liệu rà soát toàn dự án. Lần rà soát chạy trên commit `7181c92` (2026-10-21); các lỗi đã sửa
-> được merge qua PR #18 và #20. Ngày 2026-10-22 có thêm rà soát online bằng trình duyệt thật và
-> giai đoạn 1 của kế hoạch `docs/superpowers/plans/2026-10-22-online-reliability-and-capture-feedback.md`
-> (nhánh `fix/online-reliability`). Mọi kết luận dựa trên việc đọc code và chạy lệnh local, trên CI hoặc trên staging.
-> Mức tin cậy: **Confirmed** (có bằng chứng), **Potential** (có nguy cơ, chưa đủ bằng chứng),
-> **Not verified** (chưa kiểm tra được).
-
-## Trạng thái xử lý (cập nhật 2026-10-22)
-
-| Mục | Mức | Trạng thái | Commit / ghi chú |
-|---|---|---|---|
-| H1 — `draft/run` cho author chạy mã trên host | High | ✅ Đã sửa | `41b89e0`: non-admin nhận 403 `SOURCE_SUBMISSION_DISABLED` khi draft chạy `trusted-process`; test author → 403, admin → 200 |
-| M1 — resume chạy đồng hồ của ghế còn mất kết nối | Medium | ✅ Đã sửa | `5afc9b2` (`Room.resumePlayer`, `restoreLiveConnection`) + test |
-| M2 — ván bắt đầu khi A đang mất kết nối vẫn chạy đồng hồ A | Medium | ✅ Đã sửa | `5afc9b2` (`Room.addPlayer`) + test |
-| M3 — summary công khai mutate Room | Medium | ✅ Đã sửa | `2bc9989`: chiếu đồng hồ từ `clockAnchorMs`, không gọi `settleClock` |
-| M4 — tài liệu rollout/origin mâu thuẫn | Medium | ✅ Đã sửa (2026-10-22) | `CLAUDE.md`/`README.md` ghi online đã deploy nhưng chưa nghiệm thu; `DEPLOYMENT.md`/`HANDOFF.md` dùng `ottv2-psi` |
-| M5 — dependency không dùng + lỗ hổng | Medium | 🟡 Một phần | `95bbb76`: gỡ `partykit`/`playhtml`, `npm audit --omit=dev` 5 → 0; còn 10 lỗ hổng ở gói dev |
-| L3 — README sai Node/cổng | Low | ✅ Đã sửa | `95bbb76` |
-| L4 — `$schema` hỏng | Low | ✅ Đã sửa | `95bbb76` |
-| M1, M2 — test mức Worker | — | ✅ Đã thêm | `7bbce41`: 3 test `DurableRoomAdapter` (reattach, `restoreLiveConnection`, B vào khi A trong grace); cả 3 fail trên code cũ |
-| L1 — làm sạch tên không nhất quán | Low | ✅ Đã sửa | `0b860e0`: `cleanDisplayName` trong `packages/game-core/src/names.js` dùng chung cho Room, Lobby, Game DO, tournament; tên người ≤ 20, tên giải ≤ 32 |
-| L2 — throttle 40 ms bỏ gói im lặng | Low | ✅ Đã sửa | `dad7b2e`: chỉ gói được nhận mới dời mốc; lệnh `ott:*` bị chặn nhận `ott:error rate_limited`; `OnlineSession` coi như `stale_revision` (bỏ trạng thái chờ, giữ phiên) |
-| L5–L8 | Low | ⏳ Mở | Xem §12 |
-
-Đợt 2 (L1, L2, test Worker M1/M2) đã merge qua PR #20 (`fbf26a5`).
-
-### Lỗi online tìm bằng trình duyệt thật (2026-10-22) — giai đoạn 1, nhánh `fix/online-reliability`
-
-| Mục | Mức | Lỗi | Trạng thái |
-|---|---|---|---|
-| O1 | Critical | Tải lại trang / đóng tab giữa ván là mất ghế | ✅ Sảnh hiện "Bạn đang có ván dở — Vào lại / Bỏ"; vào lại bằng `intent: "resume"` |
-| O2 | High | Kẹt "Đang kết nối online…" vĩnh viễn (production 2/8 lần) | ✅ Timeout 8 s + thử lại 2 lần bằng ticket mới, rồi báo lỗi có "Thử lại"; nút "Huỷ kết nối"; server trả `ott:error` và log `attach_rejected`/`attach_failed`. Nguyên nhân gốc phía server vẫn chờ log |
-| O3 | High | Không chia sẻ được mã phòng; gõ `ott-<uuid>` bị `not_found` | ✅ Khung mời có mã ngắn + sao chép mã/link `?join=`; Lobby nhận `ott-<uuid>`, alias, link |
-| O4 | Medium | Mã lỗi thô (`not_found`…) hiện cho người dùng | ✅ Bảng dịch lỗi tiếng Việt |
-| O5 | Medium | Khán giả luôn "không khả dụng" trên staging/production | ✅ `deploy.yml` build với `VITE_OTT_SPECTATOR_ENABLED`; smoke test kiểm `/control/active` |
-| O6 | Low | Đang chờ người thứ hai mà thẻ đối thủ ghi "Đã kết nối" | ✅ Hiện "Đang chờ người chơi…", không ai có lượt |
-| O7 | High | **"Rời bàn" không tới server**: đối thủ chỉ thấy "Mất kết nối" + 60 s chờ thay vì thắng ngay (tìm ra khi kiểm tra staging) | ✅ Client chờ lệnh `ott:leave` gửi xong (`flush`, tối đa 1 s) rồi mới đóng kết nối |
-
-Kiểm chứng giai đoạn 1: local — build, typecheck web/worker, unit, web, integration đều pass; staging (deploy nhánh bằng
-`workflow_dispatch`) — kịch bản Playwright hai/ba/bốn profile: tạo phòng → mã ngắn → B gõ mã → đi quân → khán giả xem
-read-only → A tải lại trang → "Vào lại" đúng ghế và thế cờ → link mời → A rời bàn → B thấy "Bạn thắng · Đối thủ đã rời bàn":
-**9/9 bước × 2 lần**; luồng cơ bản 3/3; chơi cùng máy, AI 3 mức, replay, giải đấu, giao diện tối, điện thoại không hồi quy.
-
-Kiểm chứng đợt 1 (PR #18): local — build, typecheck web/worker, unit 1007/1007, web 710/710, arena 428/428;
-CI của PR #18 — job "Install, build, typecheck, unit and web tests" và "Worker integration (wrangler dev --local)"
-đều **SUCCESS** (CI tự tạo `.dev.vars`, nên các test integration bị skip ở local đã chạy trên CI).
-Deploy staging tự động cho `f61c910` (workflow Deploy run `39637054259`): verify, deploy Worker + Vercel và smoke test đều **success**.
-Production chưa deploy (cần tag `v*`).
-
-Giai đoạn 1 online đã merge (PR #21), e2e online chạy trong CI (PR #22) và deploy production bằng tag `v1.3.0`
-ngày 2026-10-22 (Worker version `f7d37002-ca69-4a22-86c6-f1527f0f4953`).
+> Ngày audit: **2026-10-23**. Commit được kiểm tra: `e3849c7` (nhánh `main`).
+> Tài liệu này mô tả những gì **source code và kết quả chạy thực tế** cho thấy tại thời điểm audit.
+> Tài liệu cũ (README, HANDOFF, CONTEXT, các báo cáo) chỉ được dùng để hiểu ngữ cảnh; chỗ nào mâu thuẫn với code đều được ghi rõ ở mục 9.4.
+>
+> **Cập nhật cùng ngày:** một số vấn đề đã được sửa sau audit, xem mục 12. Các mục 1–11 giữ nguyên trạng thái lúc audit.
+>
+> Quy ước bằng chứng:
+> - **[RUN]**: đã thực thi trong audit này (lệnh/script và kết quả ghi ở mục 11).
+> - **[CODE]**: suy ra từ việc đọc code, chưa thực thi riêng.
+> - **[UNIT]**: có test tự động pass, nhưng chạy với fake/mock (không phải runtime thật).
 
 ---
 
 ## 1. Project Summary
 
-OTTv2 ("Oẳn Tù Tì v2") là trò chơi cờ chiến thuật hai người trên bàn 9×9. Mỗi bên có 10 quân
-(3 Đấm, 4 Lá, 3 Kéo), đi 1 ô theo 8 hướng, ăn theo vòng Đấm > Kéo > Lá > Đấm. Thắng khi đưa quân
-vào ô thắng của mình (A: a1, B: i9), ăn hết quân đối phương, đối phương không còn nước đi, hoặc
-đối phương hết giờ (10 phút/ghế).
+**Bài toán.** OTTv2 là trò chơi cờ chiến thuật hai người trên bàn 9×9. Mỗi bên có 10 Quân thuộc ba Loại quân Đấm/Lá/Kéo (3/4/3). Mỗi Lượt đi 1 Ô theo 8 hướng. Ăn theo oẳn tù tì. Thắng bằng cách đưa Quân tới Ô thắng của mình (A: a1, B: i9), làm đối phương Tuyệt chủng, khiến đối phương không còn nước hợp lệ (`no_moves`), hoặc khi đối phương hết giờ, rời phòng hay mất kết nối quá thời gian ân hạn. Toàn bộ luật nằm trong một module thuần (`packages/game-core/src/rules.js`).
 
-Repository thực tế gồm **ba khối lớn**, lớn hơn đáng kể so với mô tả trong `CLAUDE.md`:
+Repository thực tế chứa **hai hệ thống**:
 
-| Khối | Vai trò | Trạng thái |
+1. **Trò chơi cho người chơi** (React SPA + Cloudflare Worker): chơi cùng máy, chơi với AI, chơi online hai ghế có trọng tài phía server, xem trực tiếp (spectator), xem lại replay, giải đấu người chơi.
+2. **Đấu trường bot ("Arena")** (Node.js + SQLite, chạy cục bộ): tài khoản, upload mã nguồn bot (Node/Python/Java/C++), build, xếp lịch trận giữa các bot, chấm Elo, replay, giải đấu/competition. Đây là khoảng một nửa codebase nhưng **không được nhắc đến trong `CLAUDE.md`**.
+
+**Đối tượng.** Người chơi (UI tiếng Việt). Người viết bot và quản trị viên (Arena). Có bằng chứng đây là đồ án môn "Lập trình mạng" (tên thư mục); điều này không ảnh hưởng tới kết luận kỹ thuật.
+
+**Chức năng chính đã xác minh bằng chạy thực tế [RUN]:**
+- Luật chơi, trọng tài `Room` (ghế, đồng hồ, ân hạn reconnect, rời phòng) và AI ba mức.
+- Online qua Worker chạy `wrangler dev --local`: tạo phòng, vào phòng, attach bằng capability, đi nước, nhận snapshot riêng cho từng ghế (integration 12/12 test chạy đều pass). Luồng mời bằng mã ngắn, reload và resume, rời phòng trên hai profile Chromium: thân test chạy hết (xem mục 9, giới hạn trên Windows).
+- Spectator trên Worker local (khi build có bật cờ spectator).
+- Arena API: đăng nhập, tạo bot, build phiên bản Node và Python, trận ranked do worker nhúng chạy, finalize, Elo, replay, leaderboard.
+- Static server `server.js` chặn path traversal và đường dẫn riêng tư.
+
+**Giới hạn quan trọng:**
+- Production (Cloudflare + Vercel) **không được kiểm tra** trong audit này. Smoke read-only bị chặn quyền thực thi, xem mục 11.
+- Chưa có nghiệm thu thủ công giai đoạn 4 (theo README). Audit này không thay thế nghiệm thu đó.
+- Danh sách trận đang diễn ra cho spectator **hỏng hoàn toàn khi có hơn ~21–23 trận đồng thời** (ISSUE-01).
+- Trên Windows, khi đường dẫn repo có dấu cách (như máy audit), `npm run test:e2e` **không chạy được** (ISSUE-02/03).
+- Phần Arena chạy bot không cô lập (trusted mode, mặc định) hoặc qua Docker. Chế độ Docker **BLOCKED** trong audit vì Docker daemon không chạy.
+
+---
+
+## 2. Technology Stack
+
+| Lớp | Công nghệ khai báo | Thực sự được dùng trong code (đã kiểm tra) |
 |---|---|---|
-| Game cốt lõi + Web | Luật thuần, Room/trọng tài, AI minimax, React UI (local, AI, demo, replay) | Đã triển khai, test pass |
-| Online (Cloudflare Worker + Durable Objects) | Phòng chơi online server-authoritative qua PartyServer/Yjs + lệnh `ott:*`, lobby, khán giả, giải đấu người chơi | Đã triển khai; có pipeline deploy; trạng thái production **mâu thuẫn trong tài liệu** (xem §11, §12) |
-| Arena (bot platform, Node + SQLite) | Người dùng nộp bot (JS/Python/Java/C++), build, chạy trận bot-vs-bot, Elo, giải đấu, replay, competition | Đã triển khai phần lớn; chạy local/loopback; có lỗ hổng phân quyền (xem §12-H1) |
+| Ngôn ngữ | JavaScript (CJS + ESM), TypeScript 5.7 | Game core: CJS/UMD JS. Worker và web: TS. Arena: ESM `.mjs`. SDK bot: JS/Python/Java/C++. |
+| Runtime | Node ≥ 22 (`.nvmrc` = 22) | Node v22.14.0 trên máy audit. |
+| Frontend | React 18.3, Vite 5.4, CSS Modules | `apps/web` (SPA, lazy-load Arena/Replay). AI chạy trong Web Worker (`apps/web/src/sessions/ai/ai.worker.ts`). |
+| Realtime | `partyserver@0.5.10`, `y-partyserver@2.2.0`, `yjs@13.6.18` | Worker dùng `YServer` (y-partyserver) làm kênh WebSocket. Lệnh `ott:*` đi qua custom message. Tài liệu Yjs **không** được ghi (read-only, `onSave` rỗng). Client dùng `YProvider` trong bản vendor `vendor/playhtml-minimal/browser/runtime.js`. |
+| Hạ tầng online | Cloudflare Workers + Durable Objects (SQLite-backed), Rate Limiting binding | `apps/worker/wrangler.jsonc`: 3 DO (`OttGameServer`, `OttLobbyServer`, `OttLobbyStreamServer`), `CREATE_RATE_LIMITER`. |
+| Hosting frontend | Vercel (qua CI) | `.github/workflows/deploy.yml`. Không kiểm tra live. |
+| Database Arena | `better-sqlite3@11.10.0` | 4 migration SQL, 22 bảng nghiệp vụ + `schema_migrations` (xác minh trên DB tạo mới, mục 6). |
+| Thực thi bot | `child_process` (trusted-local), Docker (local-demo container) | Trusted: đã chạy Node/Python/Java. Docker: BLOCKED. |
+| Test | `node:test`, Vitest 2.1 + jsdom + Testing Library, Playwright 1.60, Wrangler 4.141 | Tất cả đã chạy (mục 11). |
+| Khác | `dotenv` (chỉ `server.js`), `esbuild` (qua Vite, dùng để build bundle PlayHTML) | — |
 
-Quy mô: ~540 file được git track, ~183k dòng (bao gồm fixture/lockfile). Mã nguồn chính
-(không tính test/vendor): `apps/web/src` ~40k dòng, `packages/arena-node` ~12k, `packages/arena` ~6.8k,
-`apps/worker/src` ~4.8k, `apps/arena-api` ~3.5k, `packages/game-core` ~1.1k.
+**Khai báo nhưng không phải phụ thuộc runtime của sản phẩm:** không có package `partykit` hay `playhtml` trong `package.json`. Thư mục `partykit/` là mã cũ, xem mục 3.3. `docs/playhtml/**` là tài liệu tham khảo upstream.
 
-## 2. Project Goals & Scope
+---
 
-Mục tiêu (rút ra từ code, `Rule.md`, `README.md`, `CLAUDE.md`):
+## 3. Architecture & Project Structure
 
-- Cài đặt luật chơi chính xác, thuần (không I/O), dùng chung cho mọi chế độ (`packages/game-core`).
-- Chơi local hai người một máy và chơi với máy (AI chạy trong Web Worker).
-- Chơi online với server là trọng tài duy nhất (client chỉ gửi lệnh, vẽ snapshot).
-- Chế độ khán giả (spectator) read-only và danh sách trận công khai.
-- Arena: nền tảng cho bot do người dùng viết thi đấu, có cách ly thực thi (container) cho mã không tin cậy.
-
-Ngoài phạm vi / chưa có: chat (chỉ có `apps/web/src/features/chat/README.md`, không có code và
-protocol không có lệnh chat), tài khoản người chơi cho chế độ online (online dùng capability token,
-không có đăng nhập).
-
-## 3. Technology Stack
-
-| Lớp | Công nghệ (phiên bản pin trong `package.json`) |
-|---|---|
-| Runtime | Node.js ≥ 22 (`.nvmrc` = 22; môi trường rà soát: v22.14.0, npm 10.9.2) |
-| Game core | JavaScript UMD/CommonJS thuần (chạy được cả Node lẫn browser qua `globalThis`) |
-| Frontend | React 18.3.1, TypeScript 5.7.3, Vite 5.4.14, CSS Modules, Web Worker cho AI |
-| Test frontend | Vitest 2.1.8, Testing Library, jsdom 24 |
-| Test backend | `node:test` (runner tự viết `scripts/run-node-tests.js`), Playwright 1.60 (e2e) |
-| Online | Cloudflare Workers + Durable Objects (SQLite-backed), `partyserver` 0.5.10, `y-partyserver` 2.2.0, `yjs` 13.6.18, Wrangler 4.141.0 |
-| Client online | Bản fork tối giản PlayHTML trong `vendor/playhtml-minimal/browser/` (bundle bằng esbuild) |
-| Arena | Node HTTP thuần (`node:http`), `better-sqlite3` 11.10.0, scrypt cho mật khẩu, Docker/OCI (Alpine) cho cách ly bot |
-| Static server | `server.js` — `node:http` thuần, `dotenv` |
-| CI/CD | GitHub Actions (`ci.yml`, `deploy.yml`), Cloudflare (Worker), Vercel (frontend) |
-
-Lúc rà soát, `partykit` 0.0.115 và `playhtml` 2.15.0 được khai báo nhưng không có source nào import; cả hai đã được gỡ ở `95bbb76` (xem §12-M5).
-
-## 4. Project Structure
+### 3.1. Cấu trúc thư mục (phần có code)
 
 ```
-packages/
-  game-core/src/      config.js, rules.js (luật thuần), room.js (Room/trọng tài, đồng hồ, reconnect), ai.js (minimax)
-  protocol/src/       Hợp đồng lệnh/phản hồi ott:* (parse/validate, giới hạn payload, alias)
-  game-client/src/    Adapter lệnh ott:* phía browser + bootstrap PlayHTML
-  arena/src/          Domain Arena: ruleset, maps, Elo, round-robin, Swiss, match-controller, replay, contracts/validation
-  arena-node/src/     Hạ tầng Arena: SQLite repositories + migrations, job queue/worker, build service,
-                      process-bot, container-executor, artifact store, live frames
-apps/
-  web/                React app (Vite): features/ (lobby, game, result, replay, spectator, tournaments, arena),
-                      sessions/ (local, ai, demo, online, spectator, replay), shared/ (theme, ui, model, audio)
-  worker/             Cloudflare Worker: entry/, game/ (OttGameServer DO), lobby/ (OttLobbyServer, stream, tournament),
-                      auth/ (HMAC capability, internal secret), persistence/ (DurableRoomAdapter)
-  arena-api/          HTTP API Arena (auth, bots, matches, tournaments, competitions, leaderboard)
-  arena-cli/          CLI offline (doctor, match headless)
-  arena-discovery/    Worker nhỏ lưu endpoint Arena (trycloudflare) cho frontend demo
-partykit/             Mã "legacy" — nhưng partykit/room-storage.js VẪN được Worker import (serialize/hydrate Room)
-vendor/playhtml-minimal/  Fork tối giản runtime PlayHTML cho browser
-bots/, sdk/arena/     Bot mẫu và SDK/ví dụ (JS, Python, Java, C++)
-ops/arena/            Dockerfile + image manifest cho sandbox bot
-scripts/              Runner test, worker-dev, smoke-deploy, arena-demo, browser harness
-tests/                71 file *.test.js (node:test) + fixtures; web có 51 file test riêng trong apps/web/src
-docs/                 Hướng dẫn PlayHTML, evidence, plans/specs, rollback
-server.js             Static server cho apps/web/dist
+packages/game-core/src/   Luật (rules.js), cấu hình (config.js), trọng tài Room (room.js), AI (ai.js), làm sạch tên (names.js)
+packages/protocol/src/    Hợp đồng lệnh/phản hồi ott:*, validator catalog trận công khai, alias mã phòng
+packages/game-client/src/ Bootstrap + adapter PlayHTML phía trình duyệt (OTT_PLAYHTML_CONNECTION_FACTORY)
+vendor/playhtml-minimal/  Bundle runtime trình duyệt (YProvider) đã build sẵn và được commit
+apps/web/                 React SPA: lobby, game, result, replay, spectator, tournaments, arena
+apps/worker/              Cloudflare Worker: entry, Game DO, Lobby DO, Lobby Stream DO, auth capability, persistence
+partykit/                 Mã PartyKit cũ. Chỉ room-storage.js còn được Worker import.
+server.js                 Static server cho apps/web/dist (local/dev)
+apps/arena-api/           HTTP API Arena (Node http), auth, routes
+apps/arena-cli/           CLI: doctor, match
+apps/arena-discovery/     Worker Cloudflare nhỏ lưu URL endpoint Arena (tunnel). CI không deploy.
+packages/arena/           Domain Arena: ruleset, match controller, Elo, formats (swiss, round-robin), maps, human tournaments
+packages/arena-node/      Hạ tầng Arena: SQLite repos, job queue, job worker, build/process/container executor, artifact store
+sdk/arena/                SDK Python và bot mẫu (JS, Python, Java, C++)
+bots/                     Bot tham chiếu (strategist, sentinel)
+ops/arena/                Dockerfile + manifest image runner
+scripts/                  worker-dev, chạy test, smoke deploy, arena demo
+tests/                    ~80 file test node:test (+ fixtures). apps/web/src/**/*.test.* là test Vitest.
 ```
 
-Ở thư mục gốc có ~20 file Markdown handoff/report lịch sử (HANDOFF*.md, PROGRESS_HANDOFF_*.md,
-TEST_REPORT.md, IMPLEMENTATION_STATUS.md, …), nhiều nội dung đã lỗi thời hoặc mâu thuẫn nhau.
+### 3.2. Entry points
 
-## 5. System Architecture
+| Thành phần | Entry | Khởi động |
+|---|---|---|
+| Web SPA | `apps/web/index.html` → `apps/web/src/main.tsx` | `npm run dev:web` (Vite), `npm run build:web` → `apps/web/dist` |
+| Static server | `server.js` | `npm start` (cổng `PORT`, mặc định 3000). Chỉ phục vụ `apps/web/dist`. |
+| Worker online | `apps/worker/src/entry/ott-worker.ts` | `npm run worker:dev` (`wrangler dev --local`), deploy qua CI |
+| Worker test | `apps/worker/src/entry/ott-test-worker.ts` | Dùng bởi `wrangler.spectator-test.jsonc` và test |
+| Arena API | `apps/arena-api/src/main.mjs` | `npm run arena:api` (127.0.0.1:3001, kèm job worker nhúng) |
+| Arena worker ngoài | `packages/arena-node/src/worker/job-worker.mjs` | `npm run arena:worker` (khi `ARENA_EXTERNAL_WORKER=true`) |
+| Arena CLI | `apps/arena-cli/src/main.mjs` | `npm run arena:cli`, `npm run arena:doctor` |
+| Quản lý user Arena | `apps/arena-api/scripts/manage-user.mjs` | `npm run arena:user -- create ...` |
+| Arena demo (Docker) | `scripts/arena-demo.js` | `npm run arena:demo` |
 
+### 3.3. Vai trò module và ranh giới (đã đối chiếu code)
+
+- **`rules.js`** [CODE+RUN]: hàm thuần, không I/O. `createInitialState` (`rules.js:85`), `getLegalMoves` (`:128`), `detectWinner` (`:157`), `applyMove` (`:180`), `elapseClock` (`:253`). Nước thua oẳn tù tì trả `ok:false` và không đổi trạng thái.
+- **`room.js`** [CODE+RUN]: class `Room`. Giữ ghế A/B, `handleMove` (`:209`, có chống gửi trùng và kiểm `expectedRevision`), đồng hồ server-authoritative (`settleClock`), ân hạn reconnect (`disconnectPlayer` `:282`, `expireReconnect` `:365`), `leavePlayer` (`:319`), `resumePlayer` (`:339`).
+- **Worker** [CODE+RUN]:
+  - `ott-worker.ts`: router. Chỉ cho `/control/<action>` (tới DO `OTT_LOBBY` tên `"lobby"`), `/parties/main/ott-<uuid>` (Game DO) và `/parties/lobby/ott-lobby-public` (stream, chỉ khi `OTT_SPECTATOR_ENABLED=true`). Mọi path khác trả 404. CORS chỉ cho `OTT_BROWSER_ORIGIN`.
+  - `OttLobbyServer` (`apps/worker/src/lobby/ott-lobby-server.ts`): cấp phát phòng (allocation), alias mã phòng ngắn, owner credential, ticket capability ký HMAC (TTL 60 s), join/resume/spectate, catalog trận công khai, GC phòng kết thúc (24 h), giải đấu người chơi (`TournamentCoordinator`).
+  - `OttGameServer` (`apps/worker/src/game/ott-game-server.ts`): mỗi phòng một DO. Bọc `Room` bằng `DurableRoomAdapter` (`apps/worker/src/persistence/room-storage.ts`). Nhận `ott:attach|ott:spectate|ott:move|ott:leave`. Throttle 40 ms mỗi kết nối. Phát snapshot riêng theo người xem. Báo Lobby khi Ván kết thúc. Xóa toàn bộ storage sau thời gian giữ (mặc định 1 h).
+  - `OttLobbyStreamServer`: phát catalog trận công khai tới client spectator qua WebSocket.
+- **`partykit/`**: chỉ `room-storage.js` (serialize/hydrate `Room`) được Worker production import (`room-storage.ts:6`). `ott-room.js`, `ott-lobby.js`, `lobby.js`, `playhtml-*.js`, `protocol.js`, `connection.js` chỉ còn được test tham chiếu. Test "legacy" của chúng đang fail (ISSUE-09).
+- **Web** [CODE+UNIT+RUN]: `apps/web/src/sessions/*` là ranh giới phiên (`local`, `ai`, `online`, `spectator`, `replay`, `demo`). Local/AI gọi `rules.js` qua `gameCoreBridge.ts`. Online chỉ gửi lệnh và vẽ snapshot server trả về (đúng ranh giới trong `CLAUDE.md`).
+
+### 3.4. Sơ đồ kiến trúc
+
+```mermaid
+flowchart LR
+  subgraph Browser["Trình duyệt (React SPA)"]
+    UI["features/* (Lobby, Game, Replay, Arena, Tournaments)"]
+    LS["LocalSession / AiSession\n(rules.js + ai.js; AI trong Web Worker)"]
+    OS["OnlineSession / SpectatorSession"]
+    GW["OnlineLobbyGateway\n(fetch /control/*)"]
+    RT["vendor playhtml-minimal\n(YProvider WebSocket)"]
+    AG["ArenaApiGateway\n(fetch /api/arena/v1/*)"]
+  end
+  subgraph CF["Cloudflare Worker ottv2-minimal"]
+    R["ott-worker.ts router"]
+    L["OttLobbyServer DO\n(allocations, alias, capability, tournaments)"]
+    G["OttGameServer DO / phòng\n(Room + DurableRoomAdapter)"]
+    S["OttLobbyStreamServer DO\n(catalog trận công khai)"]
+  end
+  subgraph Arena["Arena (Node, chạy cục bộ)"]
+    API["arena-api (http)"]
+    JW["JobWorker (build/match)"]
+    DB[("SQLite better-sqlite3")]
+    EX["process-bot / container-executor"]
+  end
+  UI --> LS
+  UI --> OS
+  OS --> GW --> R --> L
+  OS --> RT -->|"WS /parties/main/ott-uuid"| R --> G
+  RT -->|"WS /parties/lobby/ott-lobby-public"| S
+  L -->|"/internal/initialize, /internal/seat-update"| G
+  G -->|"/internal/terminalize, /internal/active-update"| L
+  L -->|"/internal/active-update"| S
+  UI --> AG --> API --> DB
+  API --> JW --> EX
+  JW --> DB
 ```
-                  ┌────────────────────────── Browser (React, apps/web) ──────────────────────────┐
-                  │ LobbyScreen ─► Session (contract.ts)                                          │
-                  │   LocalSession ── gameCoreBridge ──► game-core rules.js (globalThis.OTT_RULES)│
-                  │   AiSession ── ai.worker.ts (Web Worker) ──► game-core ai.js                  │
-                  │   DemoSession / ReplaySession (fixtures, replay file)                         │
-                  │   OnlineSession / SpectatorSession ── runtimeBridge ── vendor playhtml-minimal │
-                  └──────────────┬──────────────────────────────────────┬────────────────────────┘
-          HTTPS POST /control/<action> (CORS: OTT_BROWSER_ORIGIN)      WebSocket /parties/main/ott-<uuid>
-                                 │                                       /parties/lobby/ott-lobby-public
-                  ┌──────────────▼───────────── Cloudflare Worker (apps/worker) ────────────────────┐
-                  │ ott-worker.ts: định tuyến, chặn path lạ (404)                                    │
-                  │ OttLobbyServer DO (1 instance "lobby"): create/list/join/resume/spectate/invite, │
-                  │   rate limit, alias, tournament coordinator, cấp capability HMAC                 │
-                  │ OttGameServer DO (1/phòng, YServer read-only): ott:attach/move/leave/spectate,   │
-                  │   DurableRoomAdapter ──► game-core Room ──► rules.applyMove; alarm cho đồng hồ   │
-                  │ OttLobbyStreamServer DO: luồng danh sách trận công khai cho khán giả            │
-                  └─────────────────────────────────────────────────────────────────────────────────┘
 
-  Arena (độc lập, Node):  arena-api (HTTP, 127.0.0.1:3001) ─► SQLite (var/arena/arena.db)
-                          └► JobWorker ─► process-bot (trusted) | container-executor (Docker) ─► game-core rules
+---
+
+## 4. Core Features
+
+Trạng thái là bằng chứng end-to-end mạnh nhất có được cho từng tính năng. Số liệu test chi tiết ở mục 11.
+
+| # | Feature | Implementation Location | Actual Behavior | Test Status | Evidence | Limitations |
+|---|---|---|---|---|---|---|
+| F1 | Luật chơi | `packages/game-core/src/rules.js`, `config.js` | Thế trận ban đầu 10 Quân/bên (A ở e5–h8, B đối xứng 180°). Đi 1 Ô/8 hướng. Chặn Ô có Quân cùng phe hoặc cùng loại. Đòn thua bị từ chối và không đổi trạng thái. Thắng theo `goal`/`elimination`/`no_moves`/`timeout`. Đứng trên Ô thắng của đối phương không thắng. | **PASS** | [RUN] probe trực tiếp (mục 11.3). [UNIT] `rules.test.js`, `rules-fuzz.test.js` trong 1023 test unit pass. | — |
+| F2 | Trọng tài `Room` (ghế, đồng hồ, ân hạn, rời phòng, resume) | `packages/game-core/src/room.js` | 10 phút/ghế, đồng hồ chỉ chạy ở ghế tới lượt và đang kết nối. `close` → ân hạn 60 s rồi `disconnect_timeout`. `leave` thua ngay. Từ chối người thứ ba, `stale_revision`, gửi trùng (trả `duplicate:true`). | **PASS** | [RUN] probe (mục 11.3). [UNIT] `room.test.js`. | Người tạo phòng rời phòng khi đang chờ: `winner="B"` dù ghế B trống (ISSUE-07). |
+| F3 | AI 3 mức | `packages/game-core/src/ai.js` | Minimax alpha-beta có ngân sách nút: easy (sâu 1, có ngẫu nhiên), medium (sâu 2), hard (sâu 4, ≤100k nút). Trả nước hợp lệ. | **PASS** | [RUN] hard 129 ms/31 132 nút ở thế ban đầu. easy 1 ms, medium 7 ms. [UNIT] `ai.test.js`. | Đo trên một thế cờ, một máy. |
+| F4 | Chơi cùng máy | `apps/web/src/sessions/local/LocalSession.ts` | Hai người thay phiên trên một trình duyệt. Đồng hồ cục bộ tick qua `elapseClock`. | **PASS** (jsdom) | [UNIT] Vitest 764/764. | Không chạy thủ công trong trình duyệt thật. |
+| F5 | Chơi với AI | `apps/web/src/sessions/ai/*` | AI chạy trong Web Worker (`ai.worker.ts`), có fallback đồng bộ. Chọn mức AI ở lobby. | **PASS** (jsdom) | [UNIT] Vitest. | Web Worker thật trong trình duyệt chưa được chạy trong audit. |
+| F6 | Kịch bản demo `?demo=` | `apps/web/src/sessions/demo/scenarios.ts` | 24 kịch bản (lobby/game/result/spectator), gồm các kịch bản ghi trong `CLAUDE.md`. | **PASS** (jsdom) | [UNIT] Vitest. | — |
+| F7 | Replay (nhập JSON, ký hiệu nước, điều khiển, tách sang luyện tập) | `apps/web/src/features/replay/*`, `sessions/replay/*` | Nhập file replay, tua từng nước, tách ra Ván local/AI từ một frame. | **PASS** (jsdom) | [UNIT] Vitest. [RUN] Arena sinh replay hợp lệ (20 frame). | Chưa nạp replay Arena vào UI thật. |
+| F8 | Static server | `server.js` | Chỉ GET/HEAD. Phục vụ `apps/web/dist`. Chặn traversal (`..`, `%2e%2e`, `\`), `server.js`, `package.json`, `.env`, `tests/`, `apps/worker/`. | **PASS** | [RUN] probe HTTP (mục 11.4). [UNIT] `server.test.js`. | Không có SPA fallback (app dùng query string nên không cần). |
+| F9 | Online: tạo phòng → danh sách chờ → vào bằng mã → attach → đi nước | `OnlineSession.ts`, `OnlineLobbyGateway.ts`, `ott-lobby-server.ts` (create `:594`, join `:981`), `ott-game-server.ts` | Lobby DO cấp `allocationId`, alias, ticket attach (60 s), owner credential. Game DO xác thực ticket, gán ghế, chạy `Room`, phát snapshot theo ghế. | **PASS** (Worker local) | [RUN] `test:integration` 12 pass + 1 skip. [RUN] Playwright hai profile: thân test chạy hết dưới đường dẫn không dấu cách (mục 11.2). | Production không kiểm tra. Bộ e2e báo exit 1 trên Windows (ISSUE-02/03). Không phải nghiệm thu thủ công. |
+| F10 | Online: reload + resume, rời phòng | `resumeStore.ts`, `ott-lobby-server.ts` resume `:694`, `room.js` | Credential được xoay vòng khi resume. Server không nhận ghế do client tự chọn. `leave` kết thúc Ván cho cả hai bên. | **PASS** (Worker local) | [RUN] integration test 3. [RUN] `browser-online-flow.test.js`: thân test chạy hết. | Như F9. |
+| F11 | Mời bằng invite token cho phòng thường | `ott-lobby-server.ts` `create-invite` `:740`, `claim-invite` `:821`. `OnlineLobbyGateway.createSeatInvite` | Có ở server và gateway, nhưng **không có UI nào gọi** (mời thực tế là chia sẻ alias rồi `join`). Luồng `claim-invite` chỉ được UI giải đấu dùng. | **NOT TESTED** (runtime) | [CODE] grep UI. [UNIT] `online-revision-alias-invite.test.js`. | Rủi ro kẹt ghế B khi `seat-update` lỗi (ISSUE-08, chưa xác minh). |
+| F12 | Hết giờ / hết ân hạn / phòng tạo mà không attach trên Worker | `room-storage.ts` `onAlarm` `:300`, `ott-game-server.ts` `publishCommitted` `:803` | Alarm DO settle đồng hồ, kết thúc Ván, gọi Lobby `/internal/terminalize`, thử lại khi lỗi. | **PASS** | [RUN] integration test 6 (hết hạn allocation chưa attach). [UNIT] `ott-game-room.test.js`, `worker-room-storage.test.js`. | Timeout đồng hồ và ân hạn trên runtime thật chỉ được test qua fake. |
+| F13 | Spectator: danh sách trận công khai + xem read-only | `SpectatorSession.ts`, `PublicMatchList.tsx`, Lobby `spectate` `:678`, `OttLobbyStreamServer` | Ticket spectate, bàn cờ read-only, đếm người xem, catalog đẩy qua stream DO. | **PARTIAL** | [RUN] Playwright spectator: thân test chạy hết **khi build có `VITE_OTT_SPECTATOR_ENABLED=true`**. Không có cờ thì test fail (ISSUE-04). [RUN] validator: catalog bị từ chối khi > 21–23 trận (ISSUE-01). | Hỏng hoàn toàn khi tải đồng thời cao (ISSUE-01). Không nằm trong CI. |
+| F14 | Giải đấu người chơi (swiss / vòng tròn) | `tournament-coordinator.ts`, `packages/arena/src/domain/human-tournaments/*`, `HumanTournamentDialog.tsx` | Tạo giải (secret cho ban tổ chức), đăng ký, bắt đầu, cấp phòng theo vòng, đồng bộ kết quả, sang vòng. Chỉ hỗ trợ map `classic`. | **NOT TESTED** (runtime) | [UNIT] `human-tournament-domain.test.js`, `online-hotfix-regression.test.js` (DO fake, bundle esbuild). | Chưa chạy trên Wrangler/runtime thật. |
+| F15 | Deploy CI (main → staging, tag `v*` → production) và smoke | `.github/workflows/{ci,deploy}.yml`, `scripts/smoke-deploy.js` | CI: build, typecheck, unit, web, integration, e2e (Linux). Deploy: Worker và Vercel, kiểm tra secret, smoke. | **NOT TESTED** | [CODE] đọc workflow. Smoke read-only tới production bị chặn quyền trong phiên audit. | Không kiểm tra live. CI không chạy spectator e2e. |
+| F16 | Arena: tài khoản và phiên | `apps/arena-api/src/http-server.mjs` (login `:283`), `auth/*`, `scripts/manage-user.mjs` | User do admin tạo bằng CLI (scrypt). Đăng nhập cấp bearer token. Giới hạn tần suất login sai theo username+IP. Đăng ký công khai tắt mặc định. | **PASS** | [RUN] smoke: đăng ký → 404 `REGISTRATION_DISABLED`, sai mật khẩu → 401, `/me` không token → 401. [UNIT] `arena-auth.test.js`. | — |
+| F17 | Arena: bot, upload phiên bản, build (trusted-local) | `routes/bots.mjs`, `bot-version-service.mjs`, `build-service.mjs`, `profile-registry.mjs` | Cần Idempotency-Key. Trusted mode chỉ admin được nộp source (author nhận 403). Build bất đồng bộ qua job queue → `ready`. | **PASS** (Node, Python, Java) | [RUN] smoke: Node và Python `ready`. [RUN] `tests/runtime/arena-profiles.test.js` 12/12 với `node,python,java`. | C++ BLOCKED (máy không có g++). `/capabilities` vẫn quảng cáo `cpp` (ISSUE-05). |
+| F18 | Arena: trận ranked/practice → job worker → finalize → Elo → replay → leaderboard | `routes/matches.mjs`, `job-worker.mjs`, `match-controller.mjs`, `finalizer.mjs`, `elo.mjs`, `routes/leaderboard.mjs` | Ranked chỉ admin. Trận chạy hai process bot qua NDJSON stdin/stdout. Kết quả có digest. Elo cập nhật. | **PASS** | [RUN] Node vs Python: `completed`, 19 nước, A thắng `goal`, replay 20 frame. Leaderboard có rating 1216/1184. | Bot lỗi import vẫn qua build và bị xử thua có tính Elo (ISSUE-06). |
+| F19 | Arena: xem trận trực tiếp (live frames) | `live-frame-store.mjs`, `routes/matches.mjs` `/live`, `LiveMatchPanel.tsx` | Lưu frame khi đang chạy để UI poll. | **NOT TESTED** (runtime) | [UNIT] `arena-draft-live.test.js`, Vitest. | — |
+| F20 | Arena: tournaments / competitions / rounds | `routes/{tournaments,competitions,competition-rounds}.mjs`, repos tương ứng, `packages/arena/src/domain/formats/*` | Round-robin, swiss, đăng ký/duyệt entry, sang phase, retry trận. | **NOT TESTED** (runtime) | [UNIT] `arena-tournament*.test.js`, `arena-competition*.test.js`, `arena-rounds-acceptance.test.js`. | — |
+| F21 | Arena: chạy thử draft | `draft-service.mjs`, `routes/bots.mjs` `/draft/run` | Chạy source chưa lưu với bot đối thủ để xem trước. | **NOT TESTED** (runtime) | [UNIT] `arena-public-reads-draft.test.js`. | — |
+| F22 | Arena: thực thi untrusted trong container Docker + bộ test cô lập | `container-executor.mjs`, `ops/arena/*`, `tests/isolation/arena-isolation.test.js`, `scripts/arena-demo.js` | Chạy bot Python/Node trong image pin `ottv2-arena-runner:local`. | **BLOCKED** | [RUN] `arena:doctor`: `container-executor: unavailable (docker_daemon_unavailable)`. | Cần Docker Desktop và image pin. |
+| F23 | Arena CLI | `apps/arena-cli/src/main.mjs` | `doctor` (báo profile/khả năng), `match` (first-legal, in-process). | **PASS** (`doctor`) | [RUN] `npm run arena:doctor`. [UNIT] `arena-cli.test.js`. | `match` chỉ có unit test. |
+| F24 | Arena discovery Worker | `apps/arena-discovery/src/index.mjs` | GET/PUT URL endpoint Arena (chỉ `*.trycloudflare.com`), CORS cho một origin Vercel cố định. | **PASS** (test riêng) | [RUN] `node --test apps/arena-discovery/discovery.test.mjs` 7/7. | Không thuộc npm script hay CI. `wrangler.jsonc` ghi cứng `account_id`. |
+| F25 | Arena web UI | `apps/web/src/features/arena/*` | Màn Arena chỉ hiện khi có `VITE_OTT_ARENA_API_ENDPOINT` hoặc `VITE_OTT_ARENA_DISCOVERY_ENDPOINT`. | **NOT TESTED** (end-to-end) | [UNIT] Vitest với gateway mock. Test e2e `browser-arena-registration-demo` là opt-in và cần Docker. | `deploy.yml` không đặt biến Arena, nên bản deploy qua CI không có Arena [CODE]. |
+
+---
+
+## 5. Main User & System Flows
+
+### 5.1. Chơi cùng máy / với AI (không mạng)
+
+- **Trigger:** Lobby → "Cùng máy" hoặc "Đấu với AI" (`LobbyScreen.tsx:257`, `:264`).
+- **Bước:** `App.tsx` tạo `LocalSession`/`AiSession` → `gameCoreBridge.ts` gọi `rules.applyMove`/`elapseClock` → snapshot → `GameScreen`. AI: `aiEngine.ts` gửi trạng thái sang `ai.worker.ts` → `chooseMove` → nước đi được áp lại qua `rules.applyMove`.
+- **Kết quả:** Ván kết thúc với `ResultDialog`.
+- **Test status:** PASS (jsdom + probe core). Không cần mạng.
+- **Chưa xác minh:** chạy thủ công trong trình duyệt thật.
+
+### 5.2. Online hai ghế (luồng chính)
+
+```mermaid
+sequenceDiagram
+  participant A as Trình duyệt A
+  participant B as Trình duyệt B
+  participant W as Worker router
+  participant L as OttLobbyServer
+  participant G as OttGameServer (ott-uuid)
+  A->>W: POST /control/create {name}
+  W->>L: create (rate limit 5/phút/IP + 40 ms/action)
+  L->>G: /internal/initialize (secret + capability game-init)
+  G-->>L: ok (Room tạo, lưu storage)
+  L-->>A: allocationId, alias, ticket(A, 60 s), resumeCredential
+  A->>G: WS /parties/main/ott-uuid, ott:attach{ticket}
+  G-->>A: ott:state (you=A, status=waiting)
+  B->>W: POST /control/join {allocationId|alias, name}
+  W->>L: join (allocation → joining)
+  L->>G: /internal/seat-update (capability seat-update, B)
+  L-->>B: ticket(B), resumeCredential
+  B->>G: ott:attach{ticket}
+  G-->>A: ott:state (playing)
+  G-->>B: ott:state (playing)
+  A->>G: ott:move{from,to,expectedRevision}
+  G->>G: Room.handleMove → rules.applyMove → lưu storage
+  G-->>A: ott:state (rev+1)
+  G-->>B: ott:state (rev+1)
+  Note over G,L: Khi Ván kết thúc: G → L /internal/terminalize (thử lại bằng alarm nếu lỗi)
 ```
 
-Nguyên tắc kiến trúc được code tuân thủ (Confirmed bằng đọc code):
+- **Trigger:** "Chơi online" → "Tạo phòng" / "Vào phòng" với mã (`OnlineRoomPanel.tsx`).
+- **Module/API:** `/control/{create,list,join,resume,active,spectate,resolve-alias,create-invite,claim-invite,tournament-*}` (POST JSON ≤ 4 KB). WebSocket y-partyserver với custom message `__ott` (≤ 8 KB, 40 ms/gói).
+- **Phân quyền:** ticket HMAC theo `allocationId`/`roomId`/`purpose`/`seat`, sống 60 s, nonce dùng một lần [CODE `internal-auth.ts`, RUN integration test 4 "parallel reuse of one attach ticket mutates one seat and rejects its replay"]. Owner credential được băm và xoay vòng khi resume. Gọi giữa các DO cần header secret `OTT_INTERNAL_SECRET`.
+- **Kết quả:** Snapshot riêng theo người xem (`projectRoomPayload`, `room-storage.ts:48`), không lộ `resumeToken` [UNIT].
+- **Test status:** PASS trên Worker local. Production NOT TESTED.
+- **Chưa xác minh:** hibernation/eviction DO thật, độ trễ mạng thật, nghiệm thu thủ công.
 
-- Luật chỉ nằm ở `packages/game-core/src/rules.js`; Room, Worker, Arena và web session đều gọi lại nó
-  (`node-engine.mjs` của Arena `require` chính `rules.js`/`config.js`).
-- Online: `OttGameServer.isReadOnly()` trả `true`, `onSave()` rỗng → client không ghi được Yjs document;
-  state ván chỉ đi qua lệnh `ott:*` và snapshot do server gửi.
-- `server.js` chỉ phục vụ file tĩnh từ `apps/web/dist`, không có WebSocket hay luật.
+### 5.3. Reconnect / resume / rời phòng
 
-## 6. Core Features
+- `close` socket → `Room.disconnectPlayer` dừng đồng hồ của ghế đó và đặt hạn 60 s. Alarm DO → `expireReconnect` → `disconnect_timeout`.
+- Reload: client đọc `resumeStore` → `/control/resume` (xoay credential, ticket mới) → `ott:attach` → `Room.resumePlayer`.
+- `ott:leave` → `Room.leavePlayer` → ghế kia thắng `leave` → terminalize.
+- **Test status:** PASS (probe `Room` + integration test 3 + thân Playwright `browser-online-flow` chạy hết).
 
-| Chức năng | Trạng thái | Bằng chứng |
+### 5.4. Spectator
+
+- Lobby mở WS `/parties/lobby/ott-lobby-public` → nhận catalog `ott:active-matches` → bấm "Xem trận" → `/control/spectate` (ticket `spectate`) → WS Game DO `ott:spectate` → snapshot read-only có `spectatorCount`.
+- Game DO gửi `/internal/active-update` cho Lobby DO sau mỗi commit. Lobby DO đẩy catalog sang Stream DO, thử lại tối đa 4 lần với backoff.
+- **Test status:** PARTIAL. Luồng chạy được khi build có cờ spectator. Catalog hỏng khi > ~21 trận (ISSUE-01).
+
+### 5.5. Arena: từ bot đến bảng xếp hạng
+
+- **Trigger:** admin (trusted mode) hoặc author (chế độ container) gọi API, hoặc dùng UI Arena khi đã cấu hình endpoint.
+- **Bước:** `POST /bots` → `POST /bots/:id/versions {source, profileId}` (lưu artifact theo digest, tạo job `build`) → JobWorker build → `ready` → `POST /matches {kind, participants}` → job `match` → `match-controller` chạy hai process bot (NDJSON, có đồng hồ) → `finalizer` ghi `match_results`, `rating_changes`, `bot_ratings` → `GET /matches/:id/replay`, `GET /leaderboard?ladderId=`.
+- **Test status:** PASS cho trusted-local Node/Python [RUN]. Container BLOCKED.
+
+### 5.6. Giải đấu người chơi
+
+- **Trigger:** Lobby → "Giải đấu người chơi" (`HumanTournamentDialog`).
+- **Bước:** `tournament-create` → `tournament-register` (secret người chơi) → `tournament-start` (khóa tạm 30 s, cấp phòng game cho từng cặp, sinh invite token) → `tournament-access` → người chơi `claim-invite` → chơi như 5.2 → `tournament-sync-match` / `tournament-advance`.
+- **Test status:** NOT TESTED trên runtime thật (chỉ unit với DO fake).
+
+---
+
+## 6. Data Flow & Database
+
+### 6.1. Online: Durable Object storage (key–value, backend SQLite)
+
+| DO | Key chính (đọc trong code) | Ghi khi |
 |---|---|---|
-| Luật chơi (di chuyển, ăn, đòn thua bị từ chối, ô thắng, tuyệt chủng, no_moves, timeout) | Đã triển khai — Confirmed | `rules.js`; `tests/rules.test.js`, `tests/rules-fuzz.test.js` pass |
-| Room: ghế A/B, đồng hồ server-authoritative, grace reconnect 60s, leave xử thua, chống trùng/stale revision | Đã triển khai — Confirmed; có lỗi đồng hồ ở case biên (§12-M1, M2) | `room.js`; `tests/room.test.js` pass; script tái hiện |
-| Hai người một máy | Đã triển khai — Confirmed (test) | `sessions/local/LocalSession.ts` + test |
-| Chơi với máy (easy/medium/hard, Web Worker) | Đã triển khai — Confirmed (test) | `ai.js`, `sessions/ai/*`, `tests/ai.test.js` |
-| Demo scenarios `?demo=…` | Đã triển khai — Confirmed (test) | `sessions/demo/*`, `ScenarioSwitcher` |
-| Replay (import/xem/điều khiển/phím tắt, fork sang local/AI) | Đã triển khai — Confirmed (test) | `features/replay/*`, `sessions/replay/*` |
-| Online tạo/vào/resume phòng, alias, invite | Đã triển khai — test unit/integration; production **Not verified** bởi lần rà soát này | `apps/worker/src/lobby`, `game` |
-| Khán giả + danh sách trận công khai | Đã triển khai sau cờ `OTT_SPECTATOR_ENABLED` (đang `"true"` trong `wrangler.jsonc`) | `ott-lobby-stream-server.ts`, `SpectatorSession.ts` |
-| Giải đấu người chơi (human tournament) | Đã triển khai (domain + coordinator + UI dialog) — Confirmed (test) | `packages/arena/src/domain/human-tournaments`, `tournament-coordinator.ts` |
-| Arena: tài khoản, bot, version/build, trận, Elo, giải, competition/rounds, leaderboard, live frames, draft run | Đã triển khai — Confirmed (test); có lỗi phân quyền (§12-H1) | `apps/arena-api`, `packages/arena*` |
-| Cách ly bot bằng container | Đã triển khai (Docker, non-root, Alpine pinned) — isolation suite **Not verified** ở lần này | `container-executor.mjs`, `ops/arena/Dockerfile` |
-| Chat | **Chưa triển khai** (chỉ README) | `apps/web/src/features/chat/` |
+| `OttLobbyServer` (một instance, tên `"lobby"`) | `allocation:<id>` (status `initializing → waiting → joining → playing → terminal`), `waiting:<id>`, `alias:<ALIAS>`, `allocation-alias:<id>`, `owner-credential:<id>:<A\|B>`, `owner-ticket:<id>:<seat>`, `seat-invite:<token>`, `terminal-outcome:<id>`, `terminal-gc:<id>`, `rate:last:<action>:<client>`, `public-catalog-*`, `tournament:<id>`, `provisioning-fence:<id>` | create/join/resume/claim, terminalize, active-update, alarm (GC, retry) |
+| `OttGameServer` (một instance mỗi phòng) | `allocationId`, `roomId`, `creatorName`, `creatorAttachDeadlineMs`, `room` (Room đã serialize), `live-attachment:<connId>`, `attach-nonce:*` / `spectate-nonce:*`, `allocationTerminalReason`, `terminalGcAt`, `terminalRetryReason`, `public-summary-sequence` | Mỗi lệnh `ott:*` hợp lệ (`DurableRoomAdapter.mutate`), alarm, đóng kết nối |
+| `OttLobbyStreamServer` | catalog cache + `lobby-stream-resend*` | `/internal/active-update` |
 
-## 7. Key Workflows
+**Nguồn sự thật:** trạng thái Ván chỉ nằm trong `room` của Game DO. Lobby chỉ giữ metadata cấp phát và bản tóm tắt công khai. Tài liệu Yjs không được lưu (`onSave` rỗng, `isReadOnly` = true).
 
-### 7.1 Một nước đi local/AI
-1. `Board` → `useBoardSelection` → `session.move(from, to)`.
-2. `LocalSession` gọi `bridge.applyMove(state, player, from, to)` → `rules.applyMove` trả `{ok, state, events}`.
-3. Nước không hợp lệ (gồm đòn thua) → `ok:false`, state không đổi; nước hợp lệ → đổi lượt, kiểm tra
-   thắng (goal → elimination → no_moves của đối phương).
-4. Đồng hồ local: `setInterval` → `rules.elapseClock` → timeout.
-5. AI: `AiSession` gửi state sang `ai.worker.ts`; `chooseMove` dùng iterative deepening + alpha-beta, giới
-   hạn số nút (easy d1/2k, medium d2/20k, hard d4/100k).
+**Điểm có thể gây mất nhất quán (đã thấy trong code):**
+- Lobby và Game là hai DO, không có transaction chung. Code bù trừ bằng rollback (`withInitializationRollback`, `rollbackJoinReservation`) và retry bằng alarm (`scheduleTerminalRetry`) [CODE, có unit test].
+- `claim-invite` cho phòng thường: nếu `/internal/seat-update` lỗi, `pendingSeatBInvite` vẫn nằm trên allocation và không có rollback (ISSUE-08) [CODE, chưa xác minh runtime].
+- Catalog công khai được dựng lại toàn bộ mỗi lần và phải hợp lệ trọn vẹn. Một bản quá 8 KB làm toàn bộ catalog không khả dụng (ISSUE-01).
 
-### 7.2 Tạo và chơi phòng online
-1. Browser `POST /control/create {name}` → Worker → `OttLobbyServer`: kiểm tra body (giới hạn byte, JSON),
-   burst rate-limit 40 ms/action/IP, rate limiter Cloudflare 5 lần/phút cho create.
-2. Lobby tạo `allocationId` (UUID), alias, owner credential, capability HMAC (`attach`, seat A), rồi gọi
-   `OttGameServer /internal/initialize` với header `x-ott-internal-secret` + capability `game-init`.
-3. Client mở WebSocket `/parties/main/ott-<uuid>`, gửi `ott:attach {ticket}`; Game DO xác minh capability,
-   nonce chống replay, gắn ghế vào connection (serializeAttachment để sống qua hibernation).
-4. Người thứ hai `join` → lobby cấp capability seat B → `ott:attach` → `Room.addPlayer` → status `playing`.
-5. `ott:move {from,to,expectedRevision}` → `DurableRoomAdapter.move` → `Room.handleMove` → `rules.applyMove`
-   → persist vào DO storage → broadcast `ott:state` (projection theo viewer) → cập nhật public summary.
-6. Đồng hồ/grace: Room trong Worker không dùng timer (`schedule` rỗng); DO alarm gọi `adapter.onAlarm()`
-   → `settleClock`/`expireReconnect`/`expireWaitingCreator`.
-7. Kết thúc: Game DO gọi lobby `/internal/terminalize`; lỗi thì retry bằng alarm; sau `retentionMs`
-   (mặc định 1 giờ) storage của Game DO bị xoá.
+### 6.2. Arena: SQLite
 
-### 7.3 Arena
-`POST /api/arena/v1/auth/login` (Bearer token, scrypt) → tạo bot → nộp version (chỉ admin khi
-`trustedMode`) → build → job queue → JobWorker chạy trận (process hoặc container) → finalizer ghi kết
-quả/Elo/replay → leaderboard/live frames.
+- Migration: `packages/arena-node/src/persistence/migrations/001-arena.sql` … `004-arena-live-frames.sql`. Trên DB mới tạo trong audit, cả 4 migration đã áp dụng và có 22 bảng nghiệp vụ [RUN]: `users`, `auth_sessions`, `api_requests` (idempotency), `bots`, `bot_versions`, `artifacts`, `jobs`, `job_attempts`, `matches`, `match_participants`, `match_results`, `match_live_frames`, `bot_ratings`, `rating_changes`, `tournaments`, `tournament_entries`, `tournament_matches`, `tournament_standings`, `competitions`, `competition_entries`, `competition_rounds`, `competition_round_byes`.
+- Quan hệ chính [CODE]: `bots` (owner → `users`) 1–n `bot_versions` (digest → artifact trên đĩa `ARENA_STORAGE_DIR`). `matches` 1–2 `match_participants` (khóa vào `bot_version_id` và digest) và 1–1 `match_results`. `rating_changes` → `bot_ratings` theo `ladderId`. `jobs` (build/match) n–1 phiên bản/trận.
+- Ghi/đọc đã xác minh bằng smoke [RUN]: tạo user → session → bot → version → job build → `ready` → match → job match → result/Elo → replay → leaderboard.
+- Dữ liệu ngoài DB: artifact source/build nằm trong `ARENA_STORAGE_DIR` (mặc định `var/arena/artifacts`, đã gitignore).
 
-## 8. Networking & Data Flow
+### 6.3. Web: lưu trữ phía client
 
-| Kênh | Giao thức | Kiểm soát (Confirmed bằng code) |
-|---|---|---|
-| Control API | HTTPS `POST /control/<action>` | CORS chỉ cho `OTT_BROWSER_ORIGIN`; body ≤ `MAX_BODY`, đọc stream có giới hạn, UTF-8 fatal; rate limit 40 ms + 5/phút cho create |
-| Game | WebSocket (y-partyserver) + custom message `ott:*` | Path regex chặt (`ott-<uuid>`); parse whitelist key; ≤ 8 KB; cách 40 ms/gói (gói vượt bị **bỏ im lặng**); tọa độ phải nằm trong bàn (`rules.inside` dùng `Number.isInteger`) |
-| Nội bộ DO↔DO | `fetch` với `x-ott-internal-secret` | So sánh hằng thời gian; capability HMAC có `purpose`, `seat`, `expiresAt`, nonce lưu trong storage |
-| Lobby stream | WebSocket `/parties/lobby/ott-lobby-public` | Chỉ mở khi `OTT_SPECTATOR_ENABLED === "true"` |
-| Arena API | HTTP `127.0.0.1:3001` | CORS allowlist, body ≤ 1 MiB, Bearer token (cấm token trong query), role `author`/`admin` |
-| Static | HTTP `0.0.0.0:3000` | Chặn `..`, symlink thoát ra ngoài, path private; chỉ GET/HEAD |
+- `localStorage`: tên người chơi (`playerNameStorage.ts`), thông tin resume ván online (`resumeStore.ts`), tùy chọn âm thanh và theme [CODE].
 
-Đồng thời (concurrency) trong Game DO: mọi lệnh và sự kiện close được xếp hàng tuần tự
-(`enqueueRoomOperation`); connection có "generation" để bỏ kết quả của socket đã bị thay thế.
+---
 
-## 9. Configuration & Environment Variables
+## 7. API & External Integrations
 
-| Biến | Nơi dùng | Ghi chú |
-|---|---|---|
-| `PORT` | `server.js`, `config.js`; **cũng là fallback của Arena API** (`apps/arena-api/src/config.mjs:55`) | Mặc định 3000 (static) / 3001 (Arena) |
-| `OTT_WORKER_HOST`, `OTT_WORKER_PORT` | `config/local-runtime.js`, `scripts/worker-dev.js` | Chỉ cho phép loopback |
-| `VITE_OTT_PLAYHTML_HOST`, `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT` | Build web | Để trống ⇒ online unavailable |
-| `VITE_OTT_SPECTATOR_ENABLED`, `VITE_OTT_ARENA_API_ENDPOINT`, `VITE_OTT_ARENA_DISCOVERY_ENDPOINT` | Build web | Không có trong `.env.example` |
-| `OTT_INTERNAL_SECRET` | Worker secret (`.dev.vars` local, `wrangler secret` khi deploy) | Thiếu ⇒ create/initialize trả 503/403 (fail-closed) |
-| `OTT_BROWSER_ORIGIN`, `OTT_SPECTATOR_ENABLED` | `wrangler.jsonc` vars | CI ghi đè `OTT_BROWSER_ORIGIN` bằng `FRONTEND_URL` |
-| `OTT_TEST_CLOCK_MS`, `OTT_TEST_RECONNECT_GRACE_MS`, `OTT_TEST_CREATOR_ATTACH_TTL_MS`, `OTT_TERMINAL_RETENTION_MS` | Env `test`/`demo` | Rút ngắn thời gian cho test |
-| `ARENA_*` (`ALLOWED_ORIGINS`, `API_PORT`, `API_HOST`, `DB_PATH`, `STORAGE_DIR`, `MAX_BODY_BYTES`, `MAX_SOURCE_BYTES`, `EXTERNAL_WORKER`, `PUBLIC_REGISTRATION`, `LOCAL_DEMO_CONTAINERS`, `TRUSTED_MODE`) | Arena | `TRUSTED_MODE` mặc định `true` |
-| `ARENA_DISCOVERY_WRITE_TOKEN` | arena-discovery Worker | Thiếu ⇒ PUT trả 503 |
-| GitHub Environment: `WORKER_URL`, `FRONTEND_URL`, `CLOUDFLARE_*`, `VERCEL_*` | `deploy.yml` | Kiểm tra bắt buộc + HTTPS trước khi deploy |
+### 7.1. Worker online (`apps/worker`)
 
-File cấu hình: `.env.example`, `apps/worker/wrangler.jsonc` (+ `wrangler.test.jsonc`, `wrangler.spectator-test.jsonc`),
-`apps/arena-discovery/wrangler.jsonc` (có `account_id` hard-code — không phải secret), `apps/web/vite.config.ts`,
-`apps/web/vitest.config.ts`, hai `tsconfig.json`. Không phát hiện secret hard-code trong file được track.
+| Endpoint | Method | Mục đích | Auth |
+|---|---|---|---|
+| `/control/create` | POST | Tạo phòng, trả ticket A + credential | Rate limit 5/phút/IP (binding) + 40 ms/action |
+| `/control/list` | POST | Danh sách phòng đang chờ | — |
+| `/control/join` | POST | Vào ghế B bằng `allocationId`, `ott-<uuid>` hoặc alias | — (phòng giải đấu bị từ chối) |
+| `/control/resume` | POST | Lấy ticket mới bằng resume credential | Credential băm, xoay vòng |
+| `/control/active` | POST | Catalog trận công khai | Chỉ khi `OTT_SPECTATOR_ENABLED=true` |
+| `/control/spectate` | POST | Ticket xem trận | Như trên |
+| `/control/resolve-alias`, `create-invite`, `claim-invite` | POST | Alias và invite ghế B | `create-invite` cần owner credential ghế A |
+| `/control/tournament-{create,register,start,get,access,sync-match,advance}` | POST | Giải đấu người chơi | Secret ban tổ chức / người chơi |
+| `/parties/main/ott-<uuid>` | WS | Kênh Ván (`ott:attach/spectate/move/leave`) | Ticket capability |
+| `/parties/lobby/ott-lobby-public` | WS | Stream catalog | Chỉ khi bật spectator |
+| `/internal/*` (giữa các DO) | POST | initialize, seat-update, terminalize, active-update | Header `x-ott-internal-secret` |
 
-## 10. Setup, Run, Build & Deployment
+CORS chỉ cho đúng `OTT_BROWSER_ORIGIN` (production: `https://ottv2-psi.vercel.app`, staging: `https://ottv2-staging.vercel.app`, theo `wrangler.jsonc`).
+
+### 7.2. Arena API (`/api/arena/v1`, mặc định `127.0.0.1:3001`)
+
+`GET /capabilities` · `POST /auth/register` (tắt mặc định) · `POST /auth/login` · `POST /auth/logout` · `GET /me` · `GET|POST /bots` · `GET|POST /bots/:id/versions` · `GET /bots/:id/ready-versions` · `POST /bots/:id/draft/run` · `GET|POST /matches` · `GET /matches/:id` · `GET /matches/:id/replay` · `GET /matches/:id/live` · `GET|POST /tournaments`, `POST /tournaments/:id/start` · `GET /competition-catalog` · `/competitions/...` (register, review, submission, advance, retry, next-round) · `GET /leaderboard?ladderId=`.
+
+- Auth: bearer token từ `/auth/login`. Vai trò `admin`/`author`. Ranked và nộp source trong trusted mode chỉ dành cho admin [RUN]. GET công khai cho matches/tournaments.
+- POST tạo tài nguyên bắt buộc có `Idempotency-Key` [RUN].
+- CORS theo `ARENA_ALLOWED_ORIGINS`.
+
+### 7.3. Dịch vụ ngoài
+
+| Dịch vụ | Dùng cho | Bắt buộc khi | Trạng thái audit |
+|---|---|---|---|
+| Cloudflare Workers/DO | Online, spectator, giải đấu người chơi | Chơi online | Chỉ Worker local (Miniflare) |
+| Vercel | Hosting SPA | Deploy | Không kiểm tra |
+| GitHub Actions | CI/CD | Deploy | Chỉ đọc cấu hình |
+| Docker | Arena container mode | `ARENA_LOCAL_DEMO_CONTAINERS=true` | BLOCKED |
+| Cloudflare quick tunnel (`*.trycloudflare.com`) | Arena discovery | Demo Arena công khai | Không kiểm tra |
+
+---
+
+## 8. Run & Test Instructions
+
+### 8.1. Cài đặt và chạy (suy ra từ `package.json` và config)
 
 ```bash
-npm ci                     # Node 22
-npm run build:web          # Vite → apps/web/dist (server.test.js cần bản build này)
-npm start                  # static server :3000 phục vụ dist
-npm run dev:web            # Vite dev server — cổng mặc định của Vite là 5173 (README ghi 3000, xem §12-L3)
-npm run worker:dev         # wrangler dev --local (cần .dev.vars với OTT_INTERNAL_SECRET)
-npm run arena:api          # Arena API 127.0.0.1:3001 (+ embedded JobWorker)
-npm run arena:demo         # Arena ở chế độ container (ARENA_TRUSTED_MODE=false)
+npm ci                     # Node >= 22
+npm run build:web          # bắt buộc trước npm start và trước test:unit (server.test.js kiểm tra dist thật)
+npm start                  # static server http://localhost:3000 (chỉ phục vụ apps/web/dist)
+npm run dev:web            # Vite dev server
+npm run worker:dev         # wrangler dev --local cho Worker online (cần .dev.vars, xem dưới)
+npm run arena:user -- create --username <u> --role admin --password <p>   # tạo user Arena
+npm run arena:api          # Arena API + job worker nhúng (127.0.0.1:3001)
 ```
 
-Deploy (`.github/workflows/deploy.yml`): push `main` → staging; tag `v*` → production; chạy lại workflow
-trên tag cũ để rollback. Các bước: CI → `wrangler deploy` (ghi đè `OTT_BROWSER_ORIGIN`) → kiểm tra secret
-`OTT_INTERNAL_SECRET` tồn tại → build web trỏ tới `WORKER_URL` → `vercel deploy` → `scripts/smoke-deploy.js`
-→ ghi release notes. Arena **không** có pipeline deploy (chỉ chạy local/loopback, có thể công bố qua
-tunnel trycloudflare theo thiết kế của `arena-discovery`).
+Để UI kết nối Worker local hoặc Arena: đặt biến `VITE_*` lúc build hoặc dev (bên dưới). Không đặt thì online hiển thị unavailable, còn local/AI vẫn chạy.
 
-## 11. Current Implementation Status
+### 8.2. Biến môi trường (chỉ tên)
 
-- **Đã triển khai & có test pass**: game-core, web (local/AI/demo/replay/spectator UI/arena UI), Worker
-  (lobby/game/stream/tournament), Arena (API, persistence, queue, build, execution, Elo, giải, competition).
-- **Triển khai một phần**: chat (chưa có code); Arena ở `trustedMode` chỉ cho admin nộp source **và** chạy
-  draft trên host (chờ "Task 19 isolation verification"); non-admin chỉ chạy draft khi có container isolation
-  (đã sửa ở `41b89e0`, xem §12-H1).
-- **Trạng thái rollout online — tài liệu mâu thuẫn (Confirmed)**:
-  `CLAUDE.md` và `README.md` ghi "rollout BLOCKED, online unavailable"; trong khi `HANDOFF.md` (mục
-  2026-09-30) ghi Worker và Vercel production đã deploy, spectator production **ENABLED**, và code/CI hiện
-  có pipeline deploy production đầy đủ. Lần rà soát này **không truy cập** môi trường deploy nên không xác
-  nhận được trạng thái production thực tế (**Not verified**).
-- `HANDOFF.md` ghi "Tám test Node vẫn skip"; ở local `npm run test:unit` báo 0 skipped, còn
-  `npm run test:integration` báo 7 skipped (6 do thiếu `.dev.vars`, 1 manual). Trên CI các test cần
-  `.dev.vars` đã chạy và job integration pass.
-- Các sửa đổi sau rà soát (H1, M1, M2, M3, M5 một phần, L3, L4) đã nằm trong `main` (PR #18).
+- **Web (build-time):** `VITE_OTT_PLAYHTML_HOST`, `VITE_OTT_PLAYHTML_CONTROL_ENDPOINT`, `VITE_OTT_SPECTATOR_ENABLED`, `VITE_OTT_ARENA_API_ENDPOINT`, `VITE_OTT_ARENA_DISCOVERY_ENDPOINT`.
+- **Static server / local runtime:** `PORT`, `OTT_WORKER_HOST`, `OTT_WORKER_PORT` (và `OTT_PLAYHTML_HOST`, `OTT_PLAYHTML_CONTROL_ENDPOINT` trong `.env.example`).
+- **Worker:** secret `OTT_INTERNAL_SECRET` (local: file `.dev.vars`, đã gitignore). Vars `OTT_BROWSER_ORIGIN`, `OTT_SPECTATOR_ENABLED`. Chỉ dùng cho test: `OTT_TEST_CLOCK_MS`, `OTT_TEST_RECONNECT_GRACE_MS`, `OTT_TEST_CREATOR_ATTACH_TTL_MS`, `OTT_TERMINAL_RETENTION_MS`. Binding `CREATE_RATE_LIMITER`.
+- **Arena:** `ARENA_API_PORT`, `ARENA_API_HOST`, `ARENA_DB_PATH`, `ARENA_STORAGE_DIR`, `ARENA_ALLOWED_ORIGINS`, `ARENA_MAX_BODY_BYTES`, `ARENA_MAX_SOURCE_BYTES`, `ARENA_TRUSTED_MODE`, `ARENA_PUBLIC_REGISTRATION`, `ARENA_LOCAL_DEMO_CONTAINERS`, `ARENA_EXTERNAL_WORKER`.
+- **Test:** `OTT_BROWSER_RUNTIME_TEST`, `OTT_SPECTATOR_RUNTIME_TEST`, `OTT_RECONNECT_RUNTIME_TEST`, `OTT_ARENA_ENABLED_PROFILES`, `OTT_ARENA_DEMO_E2E`.
+- **CI deploy:** secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`. Vars `WORKER_URL`, `FRONTEND_URL`.
 
-## 12. Known Issues & Risks
+### 8.3. Lệnh test đã xác minh trong audit
 
-Xếp theo mức độ. Không phát hiện lỗi Critical được xác nhận.
+| Lệnh | Kết quả trên máy audit |
+|---|---|
+| `npm run build:web` | OK (cảnh báo chunk 533.78 kB > 500 kB) |
+| `npm run typecheck:web`, `npm run typecheck:worker` | OK, không lỗi |
+| `npm run test:unit` (= `npm test`) | 1023/1023 pass, 0 skip |
+| `npm run test:web` | 60 file, 764/764 pass |
+| `npm run test:integration` (cần `.dev.vars`) | 12 pass, 1 skip có chủ đích (placeholder nghiệm thu thủ công) |
+| `npm run test:e2e` | **FAIL trên Windows khi đường dẫn có dấu cách** (ISSUE-02). Dưới đường dẫn không dấu cách: thân test chạy hết, nhưng suite vẫn exit 1 do hook dọn dẹp (ISSUE-03) |
+| `npm run test:browser-worker:spectator` (logic tương đương) | FAIL khi build không có `VITE_OTT_SPECTATOR_ENABLED=true` (ISSUE-04). Có cờ: thân test chạy hết |
+| `OTT_ARENA_ENABLED_PROFILES=node,python,java node --test tests/runtime/arena-profiles.test.js` | 12/12 pass |
+| `npm run test:arena:isolation` | BLOCKED (cần Docker) |
+| `npm run arena:doctor` | OK |
 
-### H1 — High — Confirmed — ✅ Đã sửa (`41b89e0`): `draft/run` của Arena bỏ qua chặn `trustedMode`, cho tài khoản `author` chạy mã tuỳ ý trên host
-- **Vị trí**: `apps/arena-api/src/routes/bots.mjs:190-201` (chặn chỉ ở `POST /bots/:id/versions`),
-  `apps/arena-api/src/routes/bots.mjs:354-420` (`POST /bots/:id/draft/run` không có chặn tương tự),
-  `packages/arena-node/src/execution/draft-service.mjs:163-164` (`trustedLocalMode` ⇒ `isolation = "trusted-process"`).
-- **Điều kiện**: Arena API chạy cấu hình mặc định (`ARENA_TRUSTED_MODE` không đặt ⇒ `trustedMode=true`,
-  `npm run arena:api`) và tồn tại một tài khoản không phải admin (tạo bởi admin, hoặc
-  `ARENA_PUBLIC_REGISTRATION=true`). Tài khoản `author` tự tạo bot được (`POST /api/arena/v1/bots` không
-  giới hạn role) rồi gọi `draft/run` với `source` bất kỳ.
-- **Bằng chứng**: test hiện có `tests/arena-draft-live.test.js` (khối "4. HTTP API Endpoints", ~dòng 1350-1390)
-  đăng nhập bằng token role `author`, server `trustedMode: true`, và **khẳng định** HTTP 200 với
-  `isolation: "trusted-process"`. Thông điệp ở `bots.mjs:197` nói rõ chính sách là "admin-curated builds only
-  until Task 19 isolation verification".
-- **Ảnh hưởng**: thực thi mã tuỳ ý với quyền của tiến trình Node (đọc DB SQLite, file hệ thống, mạng).
-  Nếu Arena được công bố ra Internet (thiết kế `arena-discovery` trỏ tới endpoint `*.trycloudflare.com`),
-  đây là RCE từ xa cho bất kỳ ai có tài khoản author.
-- **Khắc phục**: áp dụng cùng điều kiện `if (trustedMode && user.role !== "admin") → 403` cho `draft/run`
-  (hoặc buộc `isolation = "container"` cho non-admin), và sửa test để khẳng định 403 cho author.
+### 8.4. Điều kiện để chạy đầy đủ
 
-### M1 — Medium — Confirmed (mức Room) — ✅ Đã sửa (`5afc9b2`): resume chạy đồng hồ của ghế vẫn đang mất kết nối
-- **Vị trí**: `packages/game-core/src/room.js:358-362` (`resumePlayer` đặt `runningSeat = state.turn`
-  không kiểm tra ghế đó có `connected`); mẫu tương tự ở `apps/worker/src/persistence/room-storage.ts:155-158`
-  (`restoreLiveConnection`).
-- **Điều kiện**: cả hai ghế mất kết nối, ghế **không** tới lượt kết nối lại trước.
-- **Bằng chứng**: script tái hiện (scratchpad, chỉ đọc): sau khi A resume, `turn=B`, `B.connected=false`,
-  `runningSeat=B`; 30 giây sau B bị trừ 30000 ms.
-- **Ảnh hưởng**: vi phạm `Rule.md` §14.2 ("đồng hồ của người mất kết nối dừng"); ghế đang mất kết nối mất
-  thời gian oan. So sánh: `handleMove` (room.js:267-269) đã xử lý đúng case này.
-- **Khắc phục**: chỉ đặt `runningSeat` khi `this.players[this.state.turn]?.connected`; áp dụng tương tự
-  trong `restoreLiveConnection`; thêm test tại `Room` cho kịch bản này.
+- `.dev.vars` có `OTT_INTERNAL_SECRET` (bất kỳ chuỗi ngẫu nhiên nào cho local, như CI làm).
+- Playwright Chromium (`npx playwright install chromium`).
+- Trên Windows: đặt repo ở đường dẫn **không có dấu cách** (cho tới khi sửa ISSUE-02). Dù vậy suite vẫn có thể exit 1 do ISSUE-03.
+- Arena container: Docker Desktop (linux/amd64) và image `ottv2-arena-runner:local` đúng digest trong `ops/arena/image-manifest.json`.
+- Profile C++: `g++`/`clang++` có trong PATH.
 
-### M2 — Medium — Confirmed (mức Room) — ✅ Đã sửa (`5afc9b2`): ván bắt đầu với đồng hồ của A chạy khi A đang mất kết nối
-- **Vị trí**: `room.js:112-118` (`addPlayer` bật `playing` và chạy đồng hồ A mà không xét `players.A.connected`).
-- **Bằng chứng**: tái hiện: A tạo phòng, mất kết nối (trong grace), B vào ⇒ `status=playing`,
-  `A.connected=false`, `runningSeat=A`.
-- **Worker**: `DurableRoomAdapter.attach` (room-storage.ts:385-389) không kiểm tra A còn kết nối; việc lobby
-  có ngăn join trong tình huống này hay không **chưa được xác minh**.
-- **Khắc phục**: khi đủ hai ghế, chỉ chạy đồng hồ nếu ghế tới lượt đang kết nối.
+---
 
-### M3 — Medium — Potential — ✅ Đã sửa (`2bc9989`): đường đọc `publishPublicSummary` làm biến đổi Room trong bộ nhớ
-- **Vị trí**: `apps/worker/src/game/ott-game-server.ts:705-711` gọi `room.settleClock(now, { commit: false })`.
-- **Mô tả**: `settleClock` vẫn gán `this.state`, `clockAnchorMs` và, nếu hết giờ, gọi `finishTerminal()`
-  (status `done`) — nhưng đường này không `persist()` và không broadcast. Room trong bộ nhớ có thể lệch
-  với snapshot đã lưu cho tới khi alarm xử lý. Ngoài ra summary luôn ghi `status: "playing"` cứng.
-- **Ảnh hưởng dự kiến**: thường tự hồi phục nhờ alarm (`onAlarm` thấy `done` và terminalize), nhưng storage
-  `room` có thể vẫn là `playing` sau terminal. **Chưa tái hiện được** trong lần rà soát này.
-- **Khắc phục**: tính summary từ bản sao (`rules.elapseClock` trên `cloneState`) thay vì mutate Room.
+## 9. Audit Results
 
-### M4 — Medium — Confirmed — ⏳ Mở: tài liệu trạng thái/cấu hình mâu thuẫn
-- `CLAUDE.md`, `README.md`: online "BLOCKED/unavailable"; `HANDOFF.md`: production đã deploy, spectator ENABLED;
-  `deploy.yml` deploy production từ tag `v*`.
-- `apps/worker/wrangler.jsonc` có `OTT_BROWSER_ORIGIN = https://ottv2-psi.vercel.app`, còn `HANDOFF.md`
-  ghi alias production `https://ottv2-two.vercel.app`. CI ghi đè bằng `--var`, nhưng deploy thủ công theo
-  README (`wrangler deploy --config apps/worker/wrangler.jsonc`) sẽ dùng giá trị trong file ⇒ CORS sai origin.
-- **Ảnh hưởng**: người/agent bảo trì làm theo ràng buộc sai; deploy thủ công có thể làm hỏng CORS.
-- **Khắc phục**: chọn một nguồn sự thật cho trạng thái rollout, cập nhật `CLAUDE.md`/`README.md`, đồng bộ origin.
+### 9.1. Tổng hợp trạng thái (theo bảng F1–F25 ở mục 4)
 
-### M5 — Medium — Confirmed — 🟡 Một phần (`95bbb76`): dependency không dùng kéo theo lỗ hổng; dev toolchain có advisory nghiêm trọng
-- `partykit@0.0.115` và `playhtml@2.15.0` nằm trong `dependencies` nhưng không có import nào trong source/test
-  (`git grep`). `npm audit --omit=dev`: **5** lỗ hổng (2 high: `undici`/`@fastify/busboy` qua `miniflare`;
-  3 moderate: `esbuild`) — tất cả qua chuỗi `partykit`.
-- `npm audit` toàn bộ: **12** (2 critical: `vitest`/`tinypool`; 7 high gồm `vite`, `wrangler`, `miniflare`,
-  `undici`, `sharp`, `source-map-js`, `@fastify/busboy`; 3 moderate). Phần lớn là dev-only.
-- **Khắc phục**: gỡ `partykit`/`playhtml` (sau khi chạy lại toàn bộ test), nâng `vitest`/`vite` theo advisory;
-  không dùng `npm audit fix --force` mù quáng vì sẽ hạ `partykit` về `0.0.0`.
+| Trạng thái | Số lượng | Tính năng |
+|---|---|---|
+| PASS | 16 | F1–F10, F12, F16, F17, F18, F23, F24 |
+| PARTIAL | 1 | F13 (spectator) |
+| FAIL | 0 | — (không tính năng sản phẩm nào chạy sai trong phạm vi đã thực thi; các FAIL nằm ở công cụ test, xem 9.3) |
+| BLOCKED | 1 | F22 (container Docker) |
+| NOT TESTED | 7 | F11, F14, F15, F19, F20, F21, F25 |
+| **Tổng** | **25** | |
 
-### L1 — Low — Confirmed — ✅ Đã sửa (`0b860e0`): giới hạn/làm sạch tên người chơi không nhất quán
-`room.js:5-13` cắt `NAME_MAX = 20` và bỏ `<`/`>` lẻ; `ott-lobby-server.ts:123-127` cắt 32 và chỉ bỏ thẻ
-`<...>`; `ott-game-server.ts:168` cắt 32. Tên trong danh sách phòng chờ (≤32) khác tên trong ván (≤20).
-React escape output nên **không** phát hiện XSS. Khắc phục: một hàm sanitize dùng chung.
+Ghi chú: F4–F7 PASS ở mức jsdom/Vitest, không phải trình duyệt thật. F9–F10 PASS trên Worker local, không phải production.
 
-### L2 — Low — Confirmed — ✅ Đã sửa (`dad7b2e`): throttle 40 ms bỏ gói im lặng và tự gia hạn
-`ott-game-server.ts:224-227` cập nhật `lastOttPacketMs` cả khi gói bị bỏ, không gửi lỗi. Client gửi đều
-< 40 ms bị bỏ toàn bộ; client hợp lệ gửi 2 lệnh sát nhau sẽ không nhận phản hồi cho lệnh thứ hai.
-Khắc phục: chỉ cập nhật mốc khi gói được nhận, trả `ott:error rate_limited`.
+### 9.2. Danh sách vấn đề
 
-### L3 — Low — Confirmed — ✅ Đã sửa (`95bbb76`): README sai so với code
-README "Cần Node.js 18 trở lên" (engines `>=22`); `npm run dev:web` rồi "mở http://localhost:3000"
-trong khi `vite.config.ts` không đặt `server.port` (Vite mặc định 5173). Arena mặc định chỉ cho CORS
-`:3000`, nên frontend chạy bằng `dev:web` (5173) gọi Arena sẽ bị chặn CORS (**Potential**, chưa thử).
+| ID | Mức độ | Chức năng | Mô tả | Vị trí | Bằng chứng | Tác động | Độ chắc chắn / phạm vi chưa xác minh |
+|---|---|---|---|---|---|---|---|
+| ISSUE-01 | **High** (khi có tải) | Spectator (F13) | Catalog trận công khai phải ≤ 8 KB **và** ≤ 100 trận. Vượt ngưỡng thì validator từ chối **toàn bộ** catalog thay vì cắt bớt. Ngưỡng 8 KB đạt ở khoảng **21–23 trận đồng thời**. `currentPublicCatalog()` khi đó trả `null`. | `packages/protocol/src/index.ts:1,6,180-205`. `apps/worker/src/lobby/ott-lobby-server.ts:346-367` (`currentPublicCatalog`), `:581-585` (`active` → 503 `catalog_unavailable`), `:498-501` (giao stream → restore/retry) | [RUN] Bundle validator thật, sinh N trận hợp lệ: tên 5 ký tự hợp lệ tối đa 23, N=24 → `invalid_payload`. Tên 20 ký tự hợp lệ tối đa 21, N=22 → `invalid_payload`. | Từ trận thứ ~22, mọi người không xem được danh sách trận. Thông báo stream thử lại rồi cạn lượt. Các Ván vẫn chơi bình thường. | Cao với validator. Hành vi end-to-end của Worker với > 21 Ván thật **chưa chạy**, chỉ suy từ code. Allocation của phòng giải đấu cũng được tính vào catalog [CODE]. |
+| ISSUE-02 | Medium (công cụ) | `npm run test:e2e` | Trên Windows, fixture gọi `cmd.exe /d /s /c "<chuỗi đã quote>"` mà **không** có `windowsVerbatimArguments` (khác `scripts/worker-dev.js`). Đối số chứa dấu cách (`--env-file`, `--persist-to`) bị tách nên Wrangler không khởi động. | `tests/worker-runtime/fixture.js:60-67` | [RUN] Cả 2 test fail sau 30 s: `node.exe: "D:\Ky1nam4\Lập: not found`. Chạy lại từ ổ `subst` không dấu cách thì Wrangler khởi động. | Dev trên Windows (đường dẫn có dấu cách) không chạy được e2e cục bộ. | Nguyên nhân khả dĩ nhất (khác biệt code + tái hiện). CI Linux không bị ảnh hưởng [suy luận]. |
+| ISSUE-03 | Low (công cụ) | `npm run test:e2e` | Hook dọn dẹp `fs.rmSync(persistTo)` gặp `EBUSY` vì workerd còn giữ cache Miniflare. Thân test pass nhưng suite báo `not ok` (`failureType: hookFailed`) và exit 1. | `tests/worker-runtime/fixture.js:166` | [RUN] 3 lần chạy dưới `W:\OTTv2` đều `EBUSY ... miniflare-CacheObject`. | Kết quả e2e trên Windows luôn đỏ, che mất lỗi thật. | Chỉ quan sát trên Windows. |
+| ISSUE-04 | Medium (công cụ/CI) | Spectator e2e | Script `test:browser-worker:spectator` build web **không** đặt `VITE_OTT_SPECTATOR_ENABLED`. Fixture chỉ inject host. `applyWebRuntimeConfig` ghi đè `globalThis.OTT_SPECTATOR_ENABLED=false` khi load. Hệ quả: test spectator không thể pass từ shell sạch. CI cũng không chạy test này. | `package.json:14`. `apps/web/src/runtime-config.ts:110`. `tests/browser-worker-runtime.test.js:101` | [RUN] Không cờ: `TimeoutError` chờ nút "Xem trận…Alice…Bob". Build có cờ: thân test chạy hết. | Đường spectator không có kiểm tra browser tự động nào thực sự chạy (CI không có, script local hỏng). | Cao. |
+| ISSUE-05 | Low | Arena `/capabilities` (F17) | Trusted mode trả `profiles: ["python","node","cpp","java"]` theo danh sách tĩnh, không theo kết quả probe. `arena:doctor` trên cùng máy báo `cpp: unavailable`. | `apps/arena-api/src/http-server.mjs:257-273` | [RUN] smoke `/capabilities` và `arena:doctor`. | UI/client có thể đề xuất profile không build được. | Cao. Chưa thử upload phiên bản C++ để xem lỗi build cụ thể. |
+| ISSUE-06 | Low (thiết kế cần xác nhận) | Arena build và trận ranked (F17–F18) | Build chỉ kiểm tra/biên dịch, không chạy thử. Source lỗi khi chạy vẫn `ready`, vào trận ranked thì thua `forfeit/crash` **và vẫn bị tính Elo**. Bot mẫu `sdk/arena/examples/first_legal.py` import `ott_bot` từ thư mục SDK bên cạnh, nên **không chạy được khi upload như một file đơn**. | `sdk/arena/examples/first_legal.py:13-18`. `packages/arena-node/src/execution/build-service.mjs`. `finalizer.mjs` | [RUN] Upload `first_legal.py` → `ready` → trận ranked: `"Acting seat B faulted: Stdout closed..."`, Elo 1200→1184. Bot Python tự chứa thì thắng/thua bình thường (19 nước). | Người dùng làm theo SDK mẫu có thể mất Elo vì lỗi đóng gói. | Việc tính Elo khi crash có thể là chủ đích; cần chủ dự án xác nhận. |
+| ISSUE-07 | Low | `Room.leavePlayer` (F2) | Người tạo phòng rời khi phòng đang chờ (chưa có ghế B): Room đặt `winner="B"`, `reason="leave"`, `status="done"` dù ghế B trống. | `packages/game-core/src/room.js:319-337` | [RUN] probe: `{"status":"done","winner":"B","reason":"leave","hasB":false}`. | Lobby nhận terminalize với `winner:"B"`. Màn kết quả có thể hiển thị Xanh thắng trong phòng không có Xanh. | Hành vi Room đã xác nhận. Ảnh hưởng UI **chưa xác minh**. |
+| ISSUE-08 | Low (rủi ro) | `claim-invite` phòng thường (F11) | Khi `/internal/seat-update` thất bại, `pendingSeatBInvite` đã ghi vào allocation không được gỡ (khác nhánh `join` có `rollbackJoinReservation`). Alarm chỉ xóa bản ghi invite, không xóa cờ này, nên `join` trả `not_available` mãi. | `apps/worker/src/lobby/ott-lobby-server.ts:900-902`, `:942-945`, `:983` | [CODE] đọc luồng. | Phòng có thể kẹt ở trạng thái chờ. Hiện UI không gọi luồng này (F11), nên khả năng xảy ra thấp. | **Chưa xác minh runtime** (cần tiêm lỗi seat-update). |
+| ISSUE-09 | Low (nợ kỹ thuật) | `partykit/` | Bộ test legacy fail 13/24 (`partykit-room.test.js`, `partykit-runtime.test.js`). Chúng kiểm tra `OttRoom`/`PartyKitOttRoom` đã không còn được dùng. `room-storage.js` (vẫn dùng ở production) có test serialize/hydrate trong suite unit đang pass. | `partykit/*.js`, `tests/legacy/*` | [RUN] `node --test tests/legacy/*.js`: 10 pass, 13 fail, 1 skip. | Mã chết gây nhầm lẫn. Không ảnh hưởng runtime. | Cao. |
+| ISSUE-10 | Low (vệ sinh repo) | Test Python | Chạy test để lại `sdk/arena/python/__pycache__/` chưa được `.gitignore`. | `.gitignore` | [RUN] xuất hiện sau khi chạy test, đã được xóa thủ công trong audit. | Dễ commit nhầm. | Cao. |
+| ISSUE-11 | Info | Build web | Chunk chính 533.78 kB (gzip 161 kB) vượt ngưỡng cảnh báo 500 kB. | `vite build` | [RUN] | Tải trang đầu chậm hơn. | — |
 
-### L4 — Low — Confirmed — ✅ Đã sửa (`95bbb76`): `$schema` trỏ tới đường dẫn không tồn tại
-`apps/worker/wrangler.test.jsonc:2`, `wrangler.spectator-test.jsonc:2` → `node_modules/playhtml/node_modules/wrangler/...` (không có). Chỉ ảnh hưởng gợi ý editor.
+### 9.3. FAIL ở tầng công cụ (không phải tính năng sản phẩm)
 
-### L5 — Low — Confirmed: bundle lớn
-`npm run build:web` cảnh báo `index-*.js` 661 kB (gzip 196 kB) > 500 kB; toàn bộ UI Arena được tải cho
-mọi người chơi. Khắc phục: `React.lazy` cho route Arena/Replay.
+- `npm run test:e2e` trên máy audit: FAIL (ISSUE-02, ISSUE-03).
+- Spectator e2e từ shell sạch: FAIL (ISSUE-04).
+- Test legacy `tests/legacy/*`: FAIL (ISSUE-09). Không nằm trong npm script hay CI.
 
-### L6 — Low — Potential: Lobby là một Durable Object đơn
-Mọi `/control/*` đi vào `idFromName("lobby")`; mỗi request còn `scheduleAlarm()` liệt kê toàn bộ key
-`rate:last:*` (`ott-lobby-server.ts:262`). Ở tải cao đây là nút thắt. Chưa đo.
+### 9.4. Tài liệu mâu thuẫn với code
 
-### L7 — Low — Potential: alias phòng sinh bằng `Math.random`
-`packages/protocol/src/index.ts` `generateRandomAlias` dùng `Math.random`. Việc alias một mình có đủ để
-chiếm ghế hay không (invite/claim) **chưa được xác minh**.
+| Tài liệu nói | Code/runtime cho thấy |
+|---|---|
+| `CONTEXT.md`, `CLAUDE.md` (mục PlayHTML): rollout PlayHTML/PartyKit **BLOCKED**, "online UI phải unavailable", nhắc PartyKit `0.0.115`. | Online đã được hiện thực trên Cloudflare Workers + `partyserver@0.5.10`/`y-partyserver@2.2.0` (không phụ thuộc package `partykit`). UI online hoạt động khi có cấu hình endpoint. Integration và e2e local chạy được. `README.md` (22/10/2026) mô tả đã deploy production `v1.3.0`. Audit này **không** kết luận gì về trạng thái "Task 5" hay mức production-ready (theo `CLAUDE.md`, trạng thái đó thuộc `docs/playhtml-upstream-lock.md`). |
+| `CLAUDE.md` mô tả ranh giới module nhưng không nhắc Arena. | Arena (API, worker, SQLite, CLI, SDK, discovery, UI) chiếm khoảng một nửa source. |
+| `CLAUDE.md`: "Online dùng Worker/PlayHTML". | Đúng về kênh truyền: bundle `vendor/playhtml-minimal` chỉ là `YProvider` + shim tối thiểu. State Ván không đi qua dữ liệu PlayHTML/Yjs. |
 
-### L8 — Low — Confirmed: static server tối giản
-`server.js` không đặt CSP/`X-Frame-Options`; HEAD trả cả body. Production frontend chạy trên Vercel nên
-ảnh hưởng chủ yếu khi tự host bằng `npm start`.
+### 9.5. Cần kiểm tra thêm
 
-## 13. Testing Status
+- Production/staging: chạy `scripts/smoke-deploy.js` (read-only) và một Ván thật hai thiết bị.
+- Hibernation/eviction DO thật giữa Ván (đồng hồ, alarm, rebind kết nối).
+- Giải đấu người chơi trên Worker thật (F14).
+- Arena: competitions/tournaments/live/draft trên API thật. Chế độ container với Docker. Profile C++.
 
-Kết quả thực tế **lúc rà soát**, trước khi sửa (Windows 11, Node 22.14.0):
+---
+
+## 10. Known Limitations & Next Steps
+
+### 10.1. Giới hạn đã xác nhận
+
+- Catalog spectator vỡ ở khoảng 21–23 trận đồng thời (ISSUE-01).
+- Bộ e2e không chạy được trên Windows với đường dẫn có dấu cách và luôn đỏ do cleanup (ISSUE-02/03). Spectator e2e không tự chạy được và không có trong CI (ISSUE-04).
+- Arena trusted mode chạy source bot trực tiếp trên host (không sandbox). Code chủ động giới hạn: chỉ admin được nộp source, API bind loopback mặc định.
+- Bản deploy qua CI không cấu hình Arena (thiếu `VITE_OTT_ARENA_*` trong `deploy.yml`) [CODE].
+- Giải đấu người chơi chỉ hỗ trợ map `classic` (`tournament-coordinator.ts`).
+
+### 10.2. Rủi ro cần kiểm tra thêm
+
+- ISSUE-08 (kẹt `pendingSeatBInvite`) nếu sau này UI dùng invite cho phòng thường.
+- Rate limit `create` dựa trên `cf-connecting-ip`. Request không có IP dùng chung bucket `"anonymous"` và bỏ qua binding (comment trong code nói đây là chủ đích cho local/internal).
+- Mỗi lần commit nước đi, Game DO gọi Lobby DO (`active-update`). Một Lobby DO duy nhất phục vụ mọi phòng, nên có thể thành điểm nghẽn khi tải cao (chưa đo).
+
+### 10.3. Ưu tiên đề xuất (đề xuất, không phải lỗi đã xác nhận)
+
+1. Sửa ISSUE-01: phân trang hoặc cắt bớt catalog, hoặc nâng giới hạn riêng cho catalog. Thêm test với > 25 trận.
+2. Sửa harness e2e cho Windows (ISSUE-02/03) và cho script spectator đặt cờ build (ISSUE-04). Cân nhắc thêm spectator e2e vào CI.
+3. Làm rõ chính sách tính Elo khi crash và kiểm tra chạy thử khi build (ISSUE-06). Làm bot mẫu Python tự chứa.
+4. `/capabilities` dùng kết quả probe (ISSUE-05).
+5. Dọn `partykit/` (chuyển `room-storage.js` vào `packages/`, xóa phần còn lại và test legacy) (ISSUE-09). Thêm `__pycache__/` vào `.gitignore` (ISSUE-10).
+6. Cập nhật `CONTEXT.md`/`CLAUDE.md` theo kiến trúc thật và bổ sung phần Arena (9.4).
+
+---
+
+## 11. Audit Scope & Confidence
+
+### 11.1. Phạm vi source đã đọc
+
+- Đọc đầy đủ: `packages/game-core/src/*`, `apps/worker/src/entry/ott-worker.ts`, `apps/worker/src/lobby/ott-lobby-server.ts`, `apps/worker/src/game/ott-game-server.ts`, `apps/worker/src/persistence/room-storage.ts`, `packages/protocol/src/index.ts` (phần validator), `server.js`, `apps/arena-api/src/main.mjs`, `http-server.mjs` (dispatch/auth), `config.mjs`, `scripts/run-node-tests.js`, `scripts/worker-dev.js`, `scripts/smoke-deploy.js`, `.github/workflows/*`, `apps/worker/wrangler*.jsonc`, `vendor/playhtml-minimal/browser/runtime-entry.js`, `apps/web/src/runtime-config.ts`.
+- Đọc một phần hoặc lần theo luồng: `auth/internal-auth.ts`, `tournament-coordinator.ts`, `ott-lobby-stream-server.ts`, `apps/web/src/app/App.tsx`, `sessions/*` (bridge, local, ai, online runtime/gateway), `features/lobby/*`, arena routes (bots, matches), `profile-registry.mjs`, `tests/worker-runtime/fixture.js`, `apps/arena-discovery/src/index.mjs`.
+- **Chưa đọc chi tiết**: phần lớn component UI Arena/Replay/Competition, `container-executor.mjs`, `draft-service.mjs`, `competition-*-repository.mjs`, domain `swiss`/`round-robin`/`maps`, `packages/game-client/src/*` (chỉ biết vai trò qua import). Kết luận về các phần này dựa vào test tự động đã pass.
+
+### 11.2. Lệnh đã chạy (máy audit: Windows 11, Node 22.14.0, npm 10.9.2)
 
 | Lệnh | Kết quả |
 |---|---|
-| `npm run build:web` | ✅ thành công (cảnh báo chunk > 500 kB) |
-| `npm run typecheck:web` | ✅ exit 0 |
-| `npm run typecheck:worker` | ✅ exit 0 |
-| `npm run test:unit` (= `npm test`) | ✅ 1004 tests, 1004 pass, 0 fail, 0 skipped |
-| `npm run test:web` | ✅ 52 files, 710 tests pass (stderr jsdom "navigation not implemented" ở test tải replay — không làm fail) |
-| `npm run test:integration` | ⚠️ 13 tests: 6 pass, 0 fail, **7 skipped** — 6 test cần `.dev.vars` (không có trên máy này), 1 là placeholder manual acceptance. Các kịch bản create/join/resume/replay ticket trên Wrangler thật **chưa được chạy** |
-| `npm run test:arena` | ✅ 428 tests, 428 pass, 0 skipped |
-| `npm audit` | 12 vulnerabilities (2 critical, 7 high, 3 moderate); `--omit=dev`: 5 (2 high, 3 moderate) |
-| Script tái hiện lỗi đồng hồ `Room` | Tái hiện được M1, M2 |
+| `npm run build:web` | exit 0, 1.4 s |
+| `npm run typecheck:web` / `typecheck:worker` | exit 0 / exit 0 |
+| `npm run test:unit` | 1023 test, 145 suite, 1023 pass, 0 fail, 0 skip (≈36 s) |
+| `npm run test:web` | 60 file, 764 test pass (≈23 s) |
+| `npm run test:integration` (với `.dev.vars` tạm, secret ngẫu nhiên) | 13 test: 12 pass, 1 skip (≈44 s) |
+| `npm run test:e2e` tại `D:\Ky1nam4\Lập trình mạng\OTTv2` | 2/2 fail: Wrangler không khởi động (ISSUE-02) |
+| e2e qua `subst W:` (`node scripts/run-browser-worker-runtime.js`) | 2 test `hookFailed` EBUSY. Thân test chạy hết (≈15.6 s và 8.4 s) |
+| spectator e2e qua `W:` không cờ / có `VITE_OTT_SPECTATOR_ENABLED=true` | fail ở bước "Xem trận" / thân test chạy hết, cleanup EBUSY |
+| `OTT_ARENA_ENABLED_PROFILES=node,python,java node --test tests/runtime/arena-profiles.test.js` | 12/12 pass |
+| `node --test apps/arena-discovery/discovery.test.mjs` | 7/7 pass |
+| `node --test tests/legacy/*.test.js` | 24 test: 10 pass, 13 fail, 1 skip |
+| `npm run arena:doctor` | exit 0. Docker: `docker_daemon_unavailable`. C++: `cpp_compiler_not_found` |
+| Script smoke Arena (scratchpad, DB tạm, cổng 3101/3102) | Mục 11.5 |
+| Script probe luật/Room/AI (scratchpad) | Mục 11.3 |
+| Probe static server (cổng 3105) | Mục 11.4 |
+| Bundle validator `packages/protocol` (esbuild ra scratchpad) | Mục 9.2 ISSUE-01 |
 
-Để chạy đủ integration: tạo `.dev.vars` (gitignored) với `OTT_INTERNAL_SECRET=<chuỗi ngẫu nhiên>` như
-bước "Write .dev.vars" trong `ci.yml`. Lần rà soát này không tự tạo file đó để không thay đổi cấu hình local.
+### 11.3. Probe game-core [RUN] (trích)
 
-**Không chạy** (lý do): `npm run test:e2e` / browser harness (cần Playwright Chromium + Worker, thời gian dài,
-không bắt buộc cho kết luận); `npm run test:arena:isolation` (chạy container với bot độc hại như fork-bomb,
-cấp phát RAM — không chạy trên máy cá nhân khi chưa được đồng ý); smoke test production (không truy cập
-môi trường deploy). Không có lint/format script trong dự án.
+- Thế trận ban đầu: A `e8l f8d e7k f7l g7d f6k g6l h6d g5k h5l`, 10 Quân/bên, 36 nước hợp lệ mỗi bên, không nước nào vào Ô thắng của mình.
+- `Chưa tới lượt`, `Chỉ được đi 1 ô theo 8 hướng`, `Không được đi vào ô có quân cùng loại`, đòn thua → `ok:false`, số Quân không đổi.
+- `goal` (A tới a1), đứng trên i9 không thắng, `elimination`, `no_moves` (Quân B bị vây), `timeout` (10 phút).
+- Tên `<b>Alice</b> <script>x</script>` → `Alice x`.
+- `Room`: đồng hồ trừ 5 000 ms cho A sau 5 s. Gửi trùng → `duplicate:true`. `stale_revision`. Ghế tới lượt mất kết nối → đồng hồ dừng, hạn 60 000 ms → `disconnect_timeout`. Resume đúng token OK, sai token bị từ chối. Người thứ ba bị từ chối.
 
-### Sau khi sửa (PR #18)
+### 11.4. Probe static server [RUN]
 
-| Lệnh | Local | CI (PR #18) |
-|---|---|---|
-| `npm run build:web`, `typecheck:web`, `typecheck:worker` | ✅ | ✅ |
-| `npm run test:unit` | ✅ 1007/1007 sau PR #18; 1014/1014 sau đợt 2 (thêm test Worker M1/M2, throttle, `names`) | ✅ (PR #18) |
-| `npm run test:web` | ✅ 710/710 sau PR #18; 712/712 sau đợt 2 | ✅ (PR #18) |
-| `npm run test:arena` | ✅ 428/428 | ✅ (các file `tests/arena-*.test.js` nằm trong `test:unit`) |
-| `npm run test:integration` | 6 pass, 7 skipped (thiếu `.dev.vars`) | ✅ (CI tạo `.dev.vars`) |
-| `npm audit --omit=dev` | 0 lỗ hổng | — |
-| `npm audit` (toàn bộ) | 10 (2 critical, 6 high, 2 moderate), đều ở gói dev | — |
+`/`, `/index.html`, `/playhtml-game.html` → 200. `/server.js`, `/package.json`, `/.env`, `/..%2fserver.js`, `/%2e%2e/server.js`, `/..\server.js`, `/apps/worker/...`, `/tests/...`, URL encode lỗi → 403. File không tồn tại → 404. `POST /` → 405. Header `Cache-Control: no-store` (html/js), `X-Content-Type-Options: nosniff`.
 
-Ghi chú: `test:arena` chỉ là một tập con của `test:unit` (runner lấy mọi `tests/*.test.js`), nên Arena đã
-được CI kiểm tra. Khoảng trống test còn lại: `test:arena:isolation` và `test:arena:profiles` không chạy trên CI; e2e
-Playwright và manual acceptance chưa có kết quả mới.
+### 11.5. Smoke Arena [RUN]
 
-## 14. Limitations & Technical Debt
+DB và artifact tạm trong thư mục scratchpad (không đụng `var/`). Admin và author tạo bằng `manage-user.mjs`. Kết quả: `/capabilities` (trusted-local), đăng ký → 404, login sai → 401, `/me` không token → 401, tạo bot thiếu Idempotency-Key → 400, author nộp source → 403 `SOURCE_SUBMISSION_DISABLED`, build Node/Python → `ready`, author tạo trận ranked → 403, trận admin → `completed`, replay 200, leaderboard (cần `ladderId`) có rating, route lạ → 404.
 
-- Thư mục `partykit/` được gọi là legacy nhưng `apps/worker/src/persistence/room-storage.ts:6` vẫn import
-  `partykit/room-storage.js` (serialize/hydrate) cho production — cần chuyển sang `packages/`.
-- Game-core là UMD dựa trên `globalThis` + CommonJS; Worker import qua `@ts-ignore`, không có type.
-- File rất lớn: `ArenaScreen.tsx` (1573 dòng), `ott-lobby-server.ts` (1180), `contracts/validation.mjs` (1183),
-  `container-executor.mjs` (1108), `ott-game-server.ts` (931) — khó review.
-- ~20 file handoff/report ở thư mục gốc, nhiều trạng thái lịch sử mâu thuẫn; `CLAUDE.md` không mô tả Arena.
-- Logging: Worker có `logEvent` tối giản và nhiều `catch {}` nuốt lỗi (có chú thích lý do) — khó chẩn đoán sự cố production.
-- AI: iterative deepening tạo search mới mỗi độ sâu với ngân sách riêng ⇒ tổng nút có thể tới depth × maxNodes (hard: ~400k).
-- Không có lint (ESLint/Prettier) trong scripts/CI.
-- Chưa có evidence hibernation/eviction thực tế của Durable Object (theo `HANDOFF.md`; không kiểm tra lại được ở đây).
+### 11.6. Không thể kiểm tra
 
-## 15. Recommended Next Steps
+- Production/staging (Cloudflare, Vercel): smoke read-only bị cơ chế phân quyền của phiên audit từ chối. Không có quyền hay credential deploy.
+- Docker container mode và bộ isolation: Docker daemon không chạy. Audit không khởi động Docker Desktop.
+- Profile C++: không có compiler.
+- Nghiệm thu thủ công hai thiết bị, hibernation/eviction DO thật.
 
-Đã xong: H1, M1, M2 (kèm test mức `Room` và Worker), M3, L1, L2, L3, L4, phần production của M5 và giai đoạn 1
-online (O1–O7) — xem bảng "Trạng thái xử lý" ở đầu tài liệu. Việc còn lại, theo thứ tự ưu tiên:
+### 11.7. Tác động của audit lên repository
 
-1. ~~Review và merge giai đoạn 1, rồi tạo tag `v*`~~ — xong: PR #21, #22, production chạy `v1.3.0`.
-2. **Theo dõi log `attach_rejected`/`attach_failed`** trên production (Workers Observability / `wrangler tail`) để tìm
-   nguyên nhân gốc của O2; nghi vấn cần kiểm chứng: lệch đồng hồ giữa Lobby DO và Game DO (`issuedAt > now`) khi DO khởi động lạnh.
-3. ~~Giai đoạn 2 — cảm giác ăn quân~~ — đã làm 2.1–2.7 (xem mục 8 của kế hoạch 2026-10-22); chờ review, kiểm tra staging rồi tag.
-4. ~~Chốt M4~~ — xong 2026-10-22. Còn lại: **nghiệm thu thủ công giai đoạn 4** trên production trước khi ghi production-ready.
-5. **Nâng cấp toolchain dev**: `vitest`/`tinypool` (critical), `vite`, `wrangler`/`miniflare` — nâng từng gói,
-   chạy lại toàn bộ test; không dùng `npm audit fix --force`.
-6. **Chạy e2e/isolation** trong môi trường phù hợp (máy CI riêng hoặc VM): `npm run test:e2e`,
-   `npm run test:arena:isolation`; thu evidence hibernation/eviction Durable Object.
-7. **Giảm nợ kỹ thuật**: chuyển `partykit/room-storage.js` vào `packages/`, `React.lazy` cho Arena/Replay (L5),
-   dọn các file handoff lịch sử vào `docs/archive/`, thêm lint vào CI; cân nhắc giới hạn độ dài tên ngay trên ô nhập
-   ở giao diện (hiện chỉ server cắt).
+- **Không sửa source code, test, cấu hình hay dependency.** Chỉ tạo file này.
+- Tạm thời trong lúc audit (đều đã hoàn tác): tạo `.dev.vars` với secret ngẫu nhiên cho integration/e2e rồi xóa. Ánh xạ ổ `subst W:` rồi gỡ. `npm run test:e2e` build lại `vendor/playhtml-minimal/browser/runtime.js` (nội dung giống hệt, chỉ khác kết thúc dòng), đã khôi phục bằng `git checkout`. Xóa thư mục tạm `.wrangler/browser-worker-*` và `sdk/arena/python/__pycache__/` do test sinh ra. `apps/web/dist` (gitignore) được build lại ở cấu hình mặc định.
+- Trạng thái git sau audit giống lúc bắt đầu, cộng thêm file này: `PROJECT_OVERVIEW.md` cũ (đang tracked) đã bị xóa khỏi working tree **trước** audit, và `PROJECT_OVERVIEW_22_10.md` (untracked) có sẵn từ trước. Audit không đụng tới hai file đó.
+
+### 11.8. Kết luận có độ tin cậy thấp hoặc thiếu bằng chứng
+
+- Tác động end-to-end của ISSUE-01 trên Worker thật (suy từ code và validator).
+- ISSUE-08 (chỉ đọc code).
+- ISSUE-02 nguyên nhân gốc chính xác (đã tái hiện và có khác biệt code, nhưng chưa thử sửa vì audit không sửa code).
+- Hành vi CI Linux (chỉ đọc workflow, không xem log CI).
+- F4–F7, F25: chỉ có bằng chứng jsdom/mock, chưa chạy tay trong trình duyệt.
+
+---
+
+## 12. Cập nhật sau audit (2026-10-23)
+
+Các sửa đổi dưới đây chưa được commit. Sau khi sửa, toàn bộ bộ kiểm tra đã chạy lại trên máy audit: `build:web`, `typecheck:web`, `typecheck:worker` OK. `test:unit` 1027/1027. `test:web` 764/764. `test:integration` 12 pass + 1 skip. `test:e2e` (logic `run-browser-worker-runtime.js`) 2/2 pass **ngay tại đường dẫn có dấu cách**. Spectator e2e 1/1 pass.
+
+| ID | Trạng thái | Thay đổi | Test hồi quy |
+|---|---|---|---|
+| ISSUE-01 | Đã sửa | `fitPublicMatchCatalog()` trong `packages/protocol/src/index.ts` giữ các trận đầu tiên vừa giới hạn 8 KB / 100 trận. `currentPublicCatalog()` dùng hàm này, nên catalog bị cắt thay vì không khả dụng. Thứ tự giữ nguyên, các trận vượt ngưỡng tạm thời không hiện trong danh sách. | `tests/spectator-test-worker.test.js` (40 trận) |
+| ISSUE-02 | Đã sửa | `tests/worker-runtime/fixture.js` dùng `spawnLocalCommand` của `scripts/worker-dev.js` (`windowsVerbatimArguments`, quote kiểu `""`). | e2e chạy tại đường dẫn có dấu cách |
+| ISSUE-03 | Đã sửa | Xóa thư mục state Wrangler bất đồng bộ, thử lại tối đa ~15 s khi `EBUSY`/`EPERM`/`ENOTEMPTY`, sau đó chỉ cảnh báo. | e2e không còn `hookFailed` |
+| ISSUE-04 | Đã sửa | `scripts/run-browser-worker-runtime.js --spectator` tự build web với `VITE_OTT_SPECTATOR_ENABLED=true`. `test:browser-worker:spectator` bỏ bước `build:web` không có cờ. CI **chưa** chạy spectator e2e (chưa thêm). | spectator e2e 1/1 |
+| ISSUE-05 | Đã sửa | `/capabilities` chỉ liệt kê profile có probe thành công, cache 5 phút (probe dùng `spawnSync`). Ở chế độ container có Docker thì không probe host. | `tests/arena-api.test.js` |
+| ISSUE-07 | Đã sửa | Người tạo rời phòng đang chờ: phòng đóng với `reason: "leave"`, `winner: null`, không có sự kiện thắng. `partykit/room-storage.js` chấp nhận trạng thái này khi hydrate (giống `disconnect_timeout`). | `tests/room.test.js` |
+| ISSUE-08 | Đã sửa (đã hiệu chỉnh mô tả) | Giữ chỗ ghế B sau lỗi `seat-update` là **chủ đích** (có test `online-hotfix-regression`). Lỗi thật: khi alarm xóa invite `pending` (hết hạn hoặc 60 s sau khi claim), chỗ giữ và owner credential ghế B không được gỡ, nên phòng kẹt vĩnh viễn. Alarm giờ gọi `releaseAbandonedSeatReservation()` trước khi xóa invite. | `tests/online-revision-alias-invite.test.js` |
+| ISSUE-10 | Đã sửa | `.gitignore` thêm `__pycache__/`. | — |
+| ISSUE-06 | Chưa sửa | Cần chủ dự án quyết định: có tính Elo khi bot crash không, có chạy thử khi build không, có biến bot mẫu Python thành file tự chứa không. | — |
+| ISSUE-09 | Chưa sửa | Dọn `partykit/` là refactor (một số module còn được unit test dùng). Cần quyết định trước. | — |
+| ISSUE-11 | Chưa sửa | Chỉ là cảnh báo kích thước bundle. | — |
+| 9.4 | Chưa sửa | `CLAUDE.md`/`CONTEXT.md` là chỉ dẫn của dự án và có phần trạng thái do `docs/playhtml-upstream-lock.md` sở hữu, nên cần chủ dự án tự cập nhật. | — |

@@ -8,7 +8,15 @@ export const MAX_PUBLIC_MATCHES = 100;
 export const ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-export function generateRandomAlias(random: () => number = Math.random): string {
+/** A float in [0, 1) from the platform CSPRNG; Workers and Node 22 both expose `crypto`. */
+function secureRandom(): number {
+  const buffer = new Uint32Array(1);
+  crypto.getRandomValues(buffer);
+  return buffer[0]! / 0x1_0000_0000;
+}
+
+/** Room codes are typed by people and resolve to a room, so they must not be predictable. */
+export function generateRandomAlias(random: () => number = secureRandom): string {
   let code = "";
   for (let i = 0; i < 6; i++) {
     code += ALIAS_ALPHABET[Math.floor(random() * ALIAS_ALPHABET.length)];
@@ -195,6 +203,25 @@ export function validatePublicMatchCatalog(value: unknown): ParseResult<PublicMa
     return { ok: false, error: "invalid_public_match_catalog" };
   }
   return { ok: true, value: value as PublicMatchCatalogMessage };
+}
+
+/**
+ * Keep the leading matches that fit one catalog message (match count and byte limit), in order.
+ * A full catalog is cut instead of rejected, so one busy moment cannot hide every live match.
+ */
+export function fitPublicMatchCatalog(catalogRevision: number, matches: readonly PublicMatchView[]): PublicMatchView[] {
+  const envelope = { __ott: true, type: "ott:active-matches", catalogRevision, matches: [] };
+  let bytes = byteLength(JSON.stringify(envelope));
+  const kept: PublicMatchView[] = [];
+  for (const match of matches) {
+    if (kept.length >= MAX_PUBLIC_MATCHES) break;
+    // Each further element adds its JSON plus one separating comma.
+    const added = byteLength(JSON.stringify(match)) + (kept.length ? 1 : 0);
+    if (bytes + added > MAX_OTT_PAYLOAD_BYTES) break;
+    bytes += added;
+    kept.push(match);
+  }
+  return kept;
 }
 
 function parseJson(value: string): ParseResult<Record<string, unknown>> {

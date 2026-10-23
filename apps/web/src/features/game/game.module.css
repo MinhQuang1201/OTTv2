@@ -53,6 +53,12 @@
   min-width: 0;
 }
 
+.actionIcon {
+  display: inline-block;
+  margin-right: 6px;
+  line-height: 1;
+}
+
 .spectatorCount {
   color: var(--ui-text-muted);
   font: 700 var(--ui-text-xs)/1 var(--ui-font-mono);
@@ -818,6 +824,133 @@
   }
   .boardRanks {
     font-size: 9px;
+  }
+}
+
+/* Phones: board first, one-line player strips above and below it, icon-only toolbar. */
+@media (max-width: 600px) {
+  /* Row 1: table name and icon buttons. Row 2: connection badge and viewer count, when shown. */
+  .topBar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+    align-items: center;
+    gap: 6px;
+    padding: var(--ui-space-2) var(--ui-space-3);
+  }
+  .topBar > div:first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .kicker,
+  .badgeOnDevice {
+    display: none;
+  }
+  .topBarActions {
+    display: contents;
+  }
+  .topBarActions > span {
+    grid-row: 2;
+    grid-column: 1;
+    justify-self: start;
+    white-space: nowrap;
+  }
+  .topBarActions > .spectatorCount {
+    grid-column: 2 / -1;
+    justify-self: end;
+  }
+  .topBarActions button {
+    min-width: 40px;
+    padding-inline: 10px;
+  }
+  .actionIcon {
+    margin-right: 0;
+  }
+  .actionText,
+  .boardColumn h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .gameLayout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ui-space-2);
+    margin-top: var(--ui-space-3);
+  }
+  /* Let each player strip sit beside the board instead of in a shared column. */
+  .players {
+    display: contents;
+  }
+  .gameLayout .playerPanel {
+    order: 1;
+  }
+  .gameLayout .boardColumn {
+    order: 2;
+    gap: var(--ui-space-2);
+  }
+  /* The seat whose pieces start at the bottom of the current view sits below the board. */
+  .gameLayout[data-perspective="A"] .playerPanel[data-seat="A"],
+  .gameLayout[data-perspective="B"] .playerPanel[data-seat="B"] {
+    order: 3;
+  }
+  .gameLayout .sideRail {
+    order: 4;
+    min-height: 0;
+    max-height: 240px;
+  }
+
+  .playerPanel {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-space-2);
+    padding: 6px 10px;
+  }
+  .playerIdentity {
+    flex: 1 1 auto;
+    gap: var(--ui-space-2);
+  }
+  .seatMark {
+    width: 26px;
+    height: 26px;
+    font-size: 0.7rem;
+  }
+  .playerMeta {
+    display: none;
+  }
+  .playerPanel[data-connected="false"] .playerMeta {
+    display: block;
+    color: var(--ui-danger);
+  }
+  .counts {
+    order: 2;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .counts span,
+  .countBadge {
+    min-width: 0;
+    gap: 3px;
+    padding: 2px 4px;
+    border-width: 1px;
+    box-shadow: none;
+  }
+  .clock {
+    order: 3;
+    font-size: 1.15rem;
+  }
+  /* Remaining counts on each strip already show what was taken. */
+  .capturedTrayRow,
+  .activeBadge {
+    display: none;
+  }
+
+  .captureLabel {
+    font-size: 0.7rem;
   }
 }
 

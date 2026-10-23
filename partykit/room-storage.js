@@ -103,7 +103,7 @@ function validateState(state, status, players) {
     occupied.add(position);
   }
   if (status === "done" && (!state.reason || state.clock.runningSeat !== null)) invalid();
-  if (status === "done" && state.winner === null && !(state.reason === "disconnect_timeout" && players.A && !players.B)) invalid();
+  if (status === "done" && state.winner === null && !((state.reason === "disconnect_timeout" || state.reason === "leave") && players.A && !players.B)) invalid();
   if (status !== "done" && (state.winner !== null || state.reason !== null)) invalid();
 }
 
