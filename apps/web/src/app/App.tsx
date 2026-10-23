@@ -221,7 +221,10 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const onLobbyScreen = appState.status === "lobby";
   const pollWaitingRooms = onLobbyScreen && !isDemo && onlineGateway.available;
   // A waiting room leaves the list when its game starts, and the public catalog announces exactly that.
-  const publicMatchSet = lobbyStreamSnapshot?.matches.map((match) => match.allocationId).sort().join(",") ?? "";
+  const knownMatchSet = lobbyStreamSnapshot && lobbyStreamSnapshot.catalogRevision >= 0
+    ? lobbyStreamSnapshot.matches.map((match) => match.allocationId).sort().join(",")
+    : null;
+  const lastMatchSetRef = useRef<string | null>(null);
   const [waitingRoomsRefresh, setWaitingRoomsRefresh] = useState(0);
 
   useEffect(() => {
@@ -243,7 +246,19 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       if (active) setWaitingRooms((current) => current.status === "ready" ? current : { status: "error", message: "Không thể tải danh sách phòng." });
     });
     return () => { active = false; };
-  }, [isDemo, demo.scenario, onlineGateway, onLobbyScreen, publicMatchSet, waitingRoomsRefresh]);
+  }, [isDemo, demo.scenario, onlineGateway, onLobbyScreen, waitingRoomsRefresh]);
+
+  useEffect(() => {
+    const previous = lastMatchSetRef.current;
+    lastMatchSetRef.current = knownMatchSet;
+    // The first catalog only confirms what the lobby read on entry; reading again at once would
+    // trip the Lobby's 40 ms per-client burst limit.
+    if (!pollWaitingRooms || knownMatchSet === null || previous === null || previous === knownMatchSet) return;
+    // Every lobby viewer hears the catalog at the same moment; spread their reads so players
+    // behind one IP do not collide either.
+    const timer = window.setTimeout(() => setWaitingRoomsRefresh((value) => value + 1), 250 + Math.random() * 1000);
+    return () => window.clearTimeout(timer);
+  }, [knownMatchSet, pollWaitingRooms]);
 
   useEffect(() => {
     if (!pollWaitingRooms) return;

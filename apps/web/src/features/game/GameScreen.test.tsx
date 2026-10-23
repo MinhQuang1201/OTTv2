@@ -57,6 +57,7 @@ describe("GameScreen", () => {
 
     expect(screen.getByTestId("room-label")).toHaveTextContent("Phòng C4Y-KF6");
     expect(screen.getByTestId("room-label")).not.toHaveTextContent("ott-be151565");
+    expect(screen.getByTestId("room-label")).toHaveAttribute("data-room-id", "ott-be151565-b21f-4857-8826-d88809291446");
   });
 
   it("renders truth-based HUD values and excludes unsupported actions", () => {

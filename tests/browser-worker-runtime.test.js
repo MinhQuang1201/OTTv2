@@ -83,8 +83,9 @@ test("two isolated browser profiles create, join, attach and play a legal move o
     throw new Error(`Creator did not attach. body=${JSON.stringify((await a.locator("body").innerText()).slice(0, 500))} ui=${JSON.stringify(ui)} pageErrors=${JSON.stringify(pageErrors.a)} consoleErrors=${JSON.stringify(consoleErrors.a)} sockets=${JSON.stringify(sockets.a)} frames=${JSON.stringify(frames.a)} worker=${JSON.stringify(diagnostics)}`);
   }
   await a.waitForFunction(() => document.querySelectorAll('[data-testid^="board-cell-"]').length === 81);
-  const roomLabel = await a.locator('[data-testid="room-label"]').textContent();
-  assert.ok(roomLabel && /ott-[0-9a-f-]+/.test(roomLabel), "creator should be attached to its canonical Worker room");
+  const roomLabel = a.locator('[data-testid="room-label"]');
+  assert.match(await roomLabel.getAttribute("data-room-id") ?? "", /^ott-[0-9a-f-]+$/, "creator should be attached to its canonical Worker room");
+  assert.match(await roomLabel.textContent() ?? "", /^Phòng [A-Z0-9]{3}-[A-Z0-9]{3}$/, "players should see the short room code, not the internal room id");
 
   const b = await openProfile("b", "Bob");
   await b.reload({ waitUntil: "networkidle" });

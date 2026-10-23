@@ -56,7 +56,7 @@ export function GameTopBar({
         <span className={styles.kicker}>
           {spectator ? "Đang xem trực tiếp" : "OTTv2 · Bàn đấu"}
         </span>
-        <strong data-testid="room-label">
+        <strong data-testid="room-label" data-room-id={roomId ?? undefined}>
           {tableLabel(roomAlias || roomId, mode)}
         </strong>
       </div>
