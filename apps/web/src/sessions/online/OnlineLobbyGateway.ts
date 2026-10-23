@@ -50,6 +50,7 @@ function normalizeRoom(value: unknown): WaitingRoomView | null {
   if (!roomId || playerCount < 0) return null;
   return Object.freeze({
     roomId,
+    alias: typeof item.alias === "string" && item.alias ? item.alias : null,
     hostName: typeof names.A === "string" ? names.A : typeof item.hostName === "string" ? item.hostName : "Người chơi",
     playerCount,
     maxPlayers: 2,

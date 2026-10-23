@@ -15,6 +15,8 @@ function tableLabel(roomId: string | null, mode: SessionMode | undefined): strin
 
 export interface GameTopBarProps {
   readonly roomId: string | null;
+  /** Short code players share; preferred over the internal room id when known. */
+  readonly roomAlias?: string | null;
   readonly mode?: SessionMode;
   readonly connection: ConnectionState;
   readonly spectatorCount?: number;
@@ -28,6 +30,7 @@ export interface GameTopBarProps {
 
 export function GameTopBar({
   roomId,
+  roomAlias,
   mode,
   connection,
   spectatorCount = 0,
@@ -53,8 +56,8 @@ export function GameTopBar({
         <span className={styles.kicker}>
           {spectator ? "Đang xem trực tiếp" : "OTTv2 · Bàn đấu"}
         </span>
-        <strong data-testid="room-label">
-          {tableLabel(roomId, mode)}
+        <strong data-testid="room-label" data-room-id={roomId ?? undefined}>
+          {tableLabel(roomAlias || roomId, mode)}
         </strong>
       </div>
       <div className={styles.topBarActions}>

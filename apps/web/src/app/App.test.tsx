@@ -1588,8 +1588,74 @@ describe("App shell lifecycle", () => {
       };
       act(() => notify());
 
-      await waitFor(() => expect(screen.queryByText("room-filled")).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText("room-filled")).not.toBeInTheDocument(), { timeout: 3000 });
       expect(listRooms).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not read the list again when the first catalog arrives", async () => {
+      let streamSnapshot = { status: "loading" as "loading" | "ready", matches: [] as PublicMatchView[], catalogRevision: -1 };
+      let notify: () => void = () => undefined;
+      const fakeStream = {
+        start: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn((listener: () => void) => { notify = listener; return () => undefined; }),
+        getSnapshot: vi.fn(() => streamSnapshot),
+      };
+      const { listRooms, gateway } = gatewayReturning([]);
+      render(<App demoEnabled={false} spectatorEnabled={true} onlineGateway={gateway} onlineLobbyStreamFactory={() => fakeStream as any} />);
+      await waitFor(() => expect(listRooms).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(fakeStream.subscribe).toHaveBeenCalled());
+
+      streamSnapshot = {
+        status: "ready",
+        catalogRevision: 7,
+        matches: [{
+          allocationId: "alloc-existing",
+          roomId: "ott-existing",
+          status: "playing",
+          players: {
+            A: { seat: "A", name: "Alice", connected: true, remainingMs: 600_000 },
+            B: { seat: "B", name: "Bob", connected: true, remainingMs: 600_000 },
+          },
+          spectatorCount: 0,
+          serverNow: 1,
+          runningSeat: "A",
+        }],
+      };
+      act(() => notify());
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      expect(listRooms).toHaveBeenCalledTimes(1);
+    });
+
+    it("names waiting rooms by their short code", async () => {
+      const listRooms = vi.fn(async () => ({ available: true, rooms: [{ roomId: "ott-be151565-b21f-4857-8826-d88809291446", alias: "C4Y-KF6", hostName: "Alice", playerCount: 1, maxPlayers: 2 }] }));
+      render(<App demoEnabled={false} spectatorEnabled={false} onlineGateway={{ available: true, listRooms } as unknown as OnlineLobbyGateway} />);
+
+      expect(await screen.findByText("C4Y-KF6")).toBeInTheDocument();
+      expect(screen.queryByText(/ott-be151565/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the live-match list loading until the first catalog arrives", async () => {
+      let streamSnapshot = { status: "ready" as const, matches: [] as PublicMatchView[], catalogRevision: -1 };
+      let notify: () => void = () => undefined;
+      const fakeStream = {
+        start: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn((listener: () => void) => { notify = listener; return () => undefined; }),
+        getSnapshot: vi.fn(() => streamSnapshot),
+      };
+      const { gateway } = gatewayReturning([]);
+      render(<App demoEnabled={false} spectatorEnabled={true} onlineGateway={gateway} onlineLobbyStreamFactory={() => fakeStream as any} />);
+      await waitFor(() => expect(fakeStream.subscribe).toHaveBeenCalled());
+
+      const matchList = screen.getByTestId("public-match-list");
+      expect(matchList).toHaveTextContent(/Đang tải/);
+      expect(matchList).not.toHaveTextContent("Chưa có trận đang diễn ra");
+
+      streamSnapshot = { status: "ready", matches: [], catalogRevision: 4 };
+      act(() => notify());
+      await waitFor(() => expect(screen.getByTestId("public-match-list")).toHaveTextContent("Chưa có trận đang diễn ra"));
     });
 
     it("re-reads waiting rooms when a player returns to the lobby", async () => {

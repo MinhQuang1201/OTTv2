@@ -111,6 +111,8 @@ export interface SessionErrorView {
 
 export interface WaitingRoomView {
   readonly roomId: string;
+  /** Short shareable code (`K7N-M4P`); older Workers may not send it. */
+  readonly alias?: string | null;
   readonly hostName: string;
   readonly playerCount: number;
   readonly maxPlayers: number;

@@ -82,6 +82,18 @@ export function HumanTournamentDialog({
     }
   }, [playerName, regPlayerName, organizerName]);
 
+  // Focus usually stays on the lobby button that opened the dialog, so listen on the document.
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleJoin = async () => {
