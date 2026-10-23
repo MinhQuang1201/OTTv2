@@ -2,7 +2,7 @@
 
 ## Status
 
-**Task 6 browser/Worker technical gate: PASS for the minimal OTT fork. Production rollout: BLOCKED pending the broader Task 8 matrix and Task 10 manual acceptance.** The dated Task 6/7 evidence at the end of this file supersedes earlier “browser NOT RUN” findings, which describe the state before the real-browser harness was added.
+**Task 6 browser/Worker technical gate: PASS for the minimal OTT fork. Production: deployed from `v*` tags through CI (see `DEPLOYMENT.md`), but the broader Task 8 matrix and Task 10 manual acceptance have not been done, so this is not a production-readiness claim.** The dated Task 6/7 evidence at the end of this file supersedes earlier “browser NOT RUN” findings, which describe the state before the real-browser harness was added.
 
 The original Task 1 compatibility spike did not establish a browser extension
 point. Task 6 later supplied a minimal, source-backed browser fork using the
