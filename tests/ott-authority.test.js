@@ -2010,3 +2010,25 @@ test("a leave the Room cannot match to a seat is logged as dropped", async (t) =
     { level: "warn", event: "command_dropped", roomId: "ott-room-task6", type: "ott:leave", reason: "seat_not_found", seat: "A", roomStatus: "playing" });
   assert.deepEqual(fixture.messages.at(-1), { __ott: true, roomId: "ott-room-task6", revision: 3, type: "ott:error", error: "invalid_command" });
 });
+
+test("closing sockets of a finished Room is routine, a broken Room still warns", async (t) => {
+  const { OttGameServer } = await gameModule();
+  const logs = captureWorkerLogs();
+  t.after(() => logs.restore());
+
+  const finished = gameFixture(OttGameServer.prototype);
+  finished.server.roomLoad = Promise.resolve({ ...seatlessAdapter(), unavailable: true, room: { revision: 9, status: "done", state: { reason: "leave" }, players: {} } });
+  const winner = connection("finished-room-player");
+  finished.server.identities.set(winner, { role: "player", seat: "A" });
+  finished.server.onClose(winner, 1005, "", true);
+  await finished.server.roomOperationTail;
+  assert.equal(logs.lines.some((line) => line.event === "close_ignored"), false);
+
+  const broken = gameFixture(OttGameServer.prototype);
+  broken.server.roomLoad = Promise.resolve({ ...seatlessAdapter(), unavailable: true, room: null });
+  const player = connection("broken-room-player");
+  broken.server.identities.set(player, { role: "player", seat: "B" });
+  broken.server.onClose(player, 1006, "", false);
+  await broken.server.roomOperationTail;
+  assert.deepEqual(logs.lines.find((line) => line.event === "close_ignored"), { level: "warn", event: "close_ignored", seat: "B", reason: "room_unavailable" });
+});

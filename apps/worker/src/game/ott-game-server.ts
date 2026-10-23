@@ -1000,7 +1000,8 @@ export class OttGameServer extends YServer {
         return;
       }
       if (!adapter || adapter.unavailable || !adapter.room) {
-        ignored("room_unavailable");
+        // markTerminalized leaves a finished Room unavailable on purpose; closing its sockets is routine.
+        if (adapter?.room?.status !== "done") ignored("room_unavailable");
         return;
       }
       try {
