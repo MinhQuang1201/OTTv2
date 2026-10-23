@@ -11,3 +11,4 @@ apps/web/dist/
 var/arena/
 .vercel/
 __pycache__/
+var/bot-cup/

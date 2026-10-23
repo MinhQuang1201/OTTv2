@@ -95,7 +95,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
           };
         }
         if (args.some((a) => a.includes("inspect"))) {
-          return { status: 0, stdout: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54" };
+          return { status: 0, stdout: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5" };
         }
         return { status: 0, stdout: "" };
       },
@@ -213,7 +213,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
     };
 
     const probe = probeContainerRuntime({
-      expectedImageId: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54",
+      expectedImageId: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5",
       commandRunner: fakeRunner
     });
 
@@ -270,7 +270,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
           };
         }
         if (args.some((a) => a.includes("inspect"))) {
-          return { status: 0, stdout: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54" };
+          return { status: 0, stdout: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5" };
         }
         return { status: 0, stdout: "" };
       }
@@ -278,7 +278,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
 
     // Forgery attempt with bare boolean
     const probe = probeContainerRuntime({
-      expectedImageId: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54",
+      expectedImageId: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5",
       verifiedTargetHost: true,
       commandRunner: fakeRunner
     });
@@ -334,7 +334,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
           return { status: 0, stdout: JSON.stringify({ Server: { Os: "linux", Version: "28.0", Arch: "amd64" } }) };
         }
         if (args.some((a) => a.includes("inspect"))) {
-          return { status: 0, stdout: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54" };
+          return { status: 0, stdout: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5" };
         }
         return { status: 0, stdout: "" };
       },
@@ -400,7 +400,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
           return { status: 0, stdout: JSON.stringify({ Server: { Os: "linux", Version: "28.0", Arch: "amd64" } }) };
         }
         if (args.some((a) => a.includes("inspect"))) {
-          return { status: 0, stdout: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54" };
+          return { status: 0, stdout: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5" };
         }
         return { status: 0, stdout: "" };
       }
@@ -515,7 +515,7 @@ describe("Container Executor — Unit & Controlled Command Runner", () => {
           return { status: 0, stdout: JSON.stringify({ Server: { Os: "linux", Version: "28.0", Arch: "amd64" } }) };
         }
         if (args.some((a) => a.includes("inspect"))) {
-          return { status: 0, stdout: "sha256:1aa51999f9abee74e6a8a368eb496c88a913a7e1dd53ec53df15f5df12298a54" };
+          return { status: 0, stdout: "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5" };
         }
         return { status: 0, stdout: "" };
       }

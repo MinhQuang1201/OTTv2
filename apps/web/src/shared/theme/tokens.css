@@ -30,6 +30,9 @@
   --ui-legal: #15803d;
   --ui-selection: #c83232;
   --ui-focus: #2563eb;
+  /* UET (Bot Cup banner): the logo blue */
+  --ui-uet-blue: #00477f;
+  --ui-uet-on-blue: #ffffff;
 
   /* Board specifics */
   --ui-board-light: #fffdf8;
@@ -126,6 +129,8 @@
   --ui-legal: #4ade80;
   --ui-selection: #e05353;
   --ui-focus: #60a5fa;
+  --ui-uet-blue: #0b3a63;
+  --ui-uet-on-blue: #eef5ff;
 
   /* Board specifics */
   --ui-board-light: #28312b;

@@ -16,6 +16,8 @@ import type { PieceType, Seat } from "../../shared/model/game";
 import { HumanTournamentDialog } from "../tournaments/HumanTournamentDialog";
 import type { OnlineLobbyGateway } from "../../sessions/online/OnlineLobbyGateway";
 import { AI_LEVELS, DEFAULT_AI_LEVEL, isAiLevel, type AiLevel } from "../../shared/model/aiLevel";
+import { BotCupBanner } from "../bot-cup/BotCupBanner";
+import type { BotCupApiGateway } from "../bot-cup/BotCupApiGateway";
 import styles from "./lobby.module.css";
 
 interface MiniBoardState {
@@ -69,6 +71,9 @@ export interface LobbyScreenProps {
   readonly onDiscardResume?: () => void;
   readonly initialRoomCode?: string;
   readonly onCancelConnecting?: () => void;
+  /** Bot Cup banner (plan P2); shown only when both are given. */
+  readonly botCupGateway?: BotCupApiGateway;
+  readonly onOpenBotCup?: () => void;
 }
 
 export function LobbyScreen({
@@ -90,6 +95,8 @@ export function LobbyScreen({
   onDiscardResume,
   initialRoomCode,
   onCancelConnecting,
+  botCupGateway,
+  onOpenBotCup,
 }: LobbyScreenProps) {
   const [playerName, setPlayerName] = useState("");
   const [aiLevel, setAiLevel] = useState<AiLevel>(DEFAULT_AI_LEVEL);
@@ -156,6 +163,9 @@ export function LobbyScreen({
 
   return (
     <section className={styles.lobby} aria-labelledby="lobby-title">
+      {botCupGateway && onOpenBotCup ? (
+        <BotCupBanner gateway={botCupGateway} onOpen={() => { importGenerationRef.current += 1; onOpenBotCup(); }} />
+      ) : null}
       {pendingGame && onResumeOnline ? (
         <PendingGameCard game={pendingGame} ready={onlineAvailability === "online"} onResume={onResumeOnline} onDiscard={onDiscardResume} />
       ) : null}

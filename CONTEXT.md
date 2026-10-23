@@ -58,3 +58,38 @@ Tên của adapter/thư viện khách trong kiến trúc cũ, kết nối WebSoc
 **PlayHTML (active)**:
 Kiến trúc online: adapter client gửi command `ott:*` qua kết nối PlayHTML tới Cloudflare Worker authoritative (`apps/worker`, `partyserver`/`y-partyserver`); Worker/`Room` quyết định ghế, luật, đồng hồ và kết quả. Lobby khởi tạo Room qua request nội bộ ký HMAC; client chỉ attach bằng ticket. Production đã deploy từ tag `v*` nhưng chưa nghiệm thu thủ công. Khi online không khả dụng, online UI phải unavailable, còn local/AI vẫn hoạt động; không thay bằng client relay, bridge/mock hay fallback transport.
 _Avoid_: socket wrapper, netcode
+
+## Bot Cup
+
+Giải đấu bot cho sinh viên UET. Kế hoạch: `docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md`.
+
+**Giải (event)**:
+Một lần tổ chức Bot Cup, chạy ở chế độ Demo (khoảng 8 đội, sinh viên mọi khóa) hoặc Thực tế (chỉ K71, email `MSSV@vnu.edu.vn`).
+_Avoid_: tournament khi nói về giải người chơi trong `features/tournaments`
+
+**Đội**:
+Một tài khoản thi đấu gồm 1–3 sinh viên, đăng nhập bằng handle và mật khẩu chung. Đội 1 người là đội cá nhân. Mỗi sinh viên chỉ thuộc một đội trong một giải.
+_Avoid_: Ghế (ghế là A/B trong một ván), user, player account
+
+**Đội trưởng**:
+Người tạo đội, xác minh đội bằng OTP gửi tới email của mình.
+
+**Bài nộp**:
+Một file mã nguồn bot (Python hoặc JavaScript) đội đã gửi; bất biến, nhận diện bằng SHA-256.
+_Avoid_: version như phiên bản Arena khi nói về luật giải
+
+**Bản thi đấu**:
+Bài nộp đội chọn để thi; bị niêm phong lúc Khóa code.
+
+**Khóa code**:
+Mốc giờ sau đó không đội nào được đổi Bản thi đấu, kể cả trước chung kết.
+
+**Vòng kiểm tra**:
+Mỗi bot đấu 6 ván với house bot Dễ; cần ít nhất 4 điểm để vào vòng loại.
+
+**Cặp đấu**:
+Hai đội gặp nhau trong một vòng: 2 ván đổi màu (Swiss) hoặc 6 ván, 3 bản đồ × 2 màu (vòng tròn, knockout).
+_Avoid_: Ván (một ván là một trận cờ)
+
+**Runner**:
+Máy của BTC chạy bot trong container và gửi kết quả về API; không bao giờ là trình duyệt hay Worker.

@@ -1,0 +1,306 @@
+.screen {
+  display: grid;
+  gap: var(--ui-space-5);
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-4) var(--ui-space-5);
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-uet-blue);
+  color: var(--ui-uet-on-blue);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+.headerLogo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #ffffff;
+  padding: 2px;
+}
+
+.headerText {
+  min-width: 0;
+}
+
+/* On the UET blue the shared secondary button reads as disabled in dark mode; invert it instead. */
+.headerButton {
+  background: var(--ui-uet-on-blue);
+  color: var(--ui-uet-blue);
+  border-color: var(--ui-uet-on-blue);
+}
+
+.headerText h1 {
+  margin: 0;
+  font-family: var(--ui-font-display);
+  font-size: var(--ui-text-xl);
+}
+
+.headerText p {
+  margin: 2px 0 0;
+  font-size: var(--ui-text-sm);
+  opacity: 0.9;
+}
+
+.tabs,
+.authSwitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.authSwitch {
+  margin-bottom: var(--ui-space-4);
+}
+
+.tab {
+  min-height: var(--ui-control-height);
+  padding: 0 var(--ui-space-4);
+  border: 2px solid var(--ui-glass-border-strong);
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab[aria-pressed="true"] {
+  background: var(--ui-text);
+  color: var(--ui-canvas);
+}
+
+.tab:focus-visible,
+.linkButton:focus-visible {
+  outline: 3px solid var(--ui-focus);
+  outline-offset: 2px;
+}
+
+.body {
+  min-width: 0;
+}
+
+.guest {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+  gap: var(--ui-space-6);
+  align-items: start;
+}
+
+.form,
+.inlineForm {
+  display: grid;
+  gap: var(--ui-space-4);
+  min-width: 0;
+}
+
+.form h2 {
+  margin: 0;
+  font-size: var(--ui-text-lg);
+}
+
+.inlineForm {
+  margin-top: var(--ui-space-4);
+  padding-top: var(--ui-space-4);
+  border-top: 1px dashed var(--ui-line);
+}
+
+.subheading {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-text-md);
+}
+
+.kindField {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-4);
+  margin: 0;
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-line);
+}
+
+.kindField legend {
+  padding: 0 var(--ui-space-1);
+  font-weight: 600;
+}
+
+.radio,
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-space-2);
+  cursor: pointer;
+}
+
+.radio input,
+.check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex: none;
+}
+
+.checkField {
+  display: grid;
+  gap: var(--ui-space-1);
+}
+
+.fieldError {
+  color: var(--ui-danger);
+  font-size: var(--ui-text-sm);
+}
+
+.hint {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-sm);
+}
+
+.alert {
+  padding: var(--ui-space-3);
+  border: 2px solid currentColor;
+  font-size: var(--ui-text-sm);
+}
+
+.alert_error {
+  color: var(--ui-danger);
+}
+
+.alert_success {
+  color: var(--ui-legal);
+}
+
+.alert_info {
+  color: var(--ui-seat-b-strong);
+}
+
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ui-seat-b-strong);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-3);
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-5);
+  align-items: start;
+}
+
+.teamCard {
+  grid-column: 1 / -1;
+}
+
+.teamMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.memberList {
+  display: grid;
+  gap: var(--ui-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--ui-space-2) var(--ui-space-3);
+  align-items: center;
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-line);
+}
+
+.memberMeta {
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.memberActions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.prose {
+  max-width: 72ch;
+  line-height: 1.6;
+}
+
+.prose h2 {
+  margin-top: 0;
+}
+
+.prose h3 {
+  margin-bottom: var(--ui-space-2);
+}
+
+.schedule {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.schedule th,
+.schedule td {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-line);
+  text-align: left;
+}
+
+.faq dt {
+  margin-top: var(--ui-space-4);
+  font-weight: 700;
+}
+
+.faq dd {
+  margin: var(--ui-space-1) 0 0;
+}
+
+@media (max-width: 860px) {
+  .guest,
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .header {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: var(--ui-space-3);
+  }
+
+  .headerLogo {
+    width: 44px;
+    height: 44px;
+  }
+
+  .headerText h1 {
+    font-size: var(--ui-text-lg);
+  }
+
+  .tab {
+    flex: 1 1 40%;
+  }
+}

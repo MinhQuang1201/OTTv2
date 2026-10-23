@@ -1,0 +1,70 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Bot Cup registration API (plan docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md, P1).
+  // The browser reaches it through the Vercel rewrite /api/t/* -> this Worker, so cookies stay first-party.
+  "name": "ottv2-bot-cup-api",
+  "main": "src/index.mjs",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "vars": {
+    "BOT_CUP_EVENT_ID": "uet-k71-2026",
+    "BOT_CUP_WEB_ORIGIN": "https://ottv2-psi.vercel.app",
+    "BOT_CUP_EMAIL_MODE": "brevo",
+    "BOT_CUP_EMAIL_SENDER_NAME": "OTT Bot Cup"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ottv2-bot-cup",
+      // Not created yet: production gets its database when the real event is scheduled (plan §14.2).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "ottv2-bot-cup-api-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "vars": {
+        "BOT_CUP_EVENT_ID": "staging-demo",
+        "BOT_CUP_WEB_ORIGIN": "https://ottv2-staging.vercel.app",
+        // Real mail through Brevo's free plan; the verified sender address is the BOT_CUP_EMAIL_SENDER secret.
+        "BOT_CUP_EMAIL_MODE": "brevo",
+        "BOT_CUP_EMAIL_SENDER_NAME": "OTT Bot Cup (staging)",
+        // Cloudflare's always-pass test site key; the matching secret is set with `wrangler secret put TURNSTILE_SECRET`.
+        "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-staging",
+          "database_id": "c82abd1a-c2d0-4b69-a995-67d626f4c6fb",
+          "migrations_dir": "migrations"
+        }
+      ]
+    },
+    "test": {
+      // Local only (`wrangler dev --local`), used by tests/bot-cup-api-worker.test.js.
+      "name": "ottv2-bot-cup-api-test",
+      "vars": {
+        "BOT_CUP_EVENT_ID": "test-event",
+        "BOT_CUP_WEB_ORIGIN": "http://localhost:5173",
+        "BOT_CUP_ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
+        "BOT_CUP_EMAIL_MODE": "outbox",
+        "BOT_CUP_TURNSTILE_BYPASS": "true"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-test",
+          "database_id": "00000000-0000-0000-0000-000000000001",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}
