@@ -41,7 +41,7 @@ export function WaitingRoomList({ state, onSelectRoom, disabled = false }: Waiti
               <li key={room.roomId}>
                 <button className={styles.roomItem} type="button" disabled={full || disabled} onClick={() => onSelectRoom(room.roomId)}>
                   <span className={styles.roomItemMain}>
-                    <strong>{room.roomId}</strong>
+                    <strong>{room.alias ?? room.roomId}</strong>
                     <span>{room.hostName}</span>
                   </span>
                   <span className={styles.roomItemMeta}>{room.playerCount}/{room.maxPlayers} người</span>

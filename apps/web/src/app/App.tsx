@@ -562,6 +562,8 @@ function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario
     return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
   }
   if (!demoEnabled && lobbyStream) {
+    // The stream turns ready once subscribed; until the first catalog arrives it knows of no matches yet.
+    if (lobbyStream.status === "ready" && lobbyStream.catalogRevision < 0) return { status: "loading" };
     if (lobbyStream.status === "ready") return { status: "ready", matches: lobbyStream.matches };
     if (lobbyStream.status === "loading" || lobbyStream.status === "reconnecting") return { status: "loading" };
     if (lobbyStream.status === "error") return { status: "error", message: lobbyStream.message ?? "Online lobby stream gặp lỗi." };

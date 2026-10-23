@@ -40,6 +40,25 @@ describe("GameScreen", () => {
     expect(leave).toHaveBeenCalledTimes(1);
   });
 
+  it("names the room by its short code instead of the internal room id", () => {
+    const session = new DemoSession("game-active-a");
+    const snapshot = {
+      ...session.getSnapshot(),
+      roomId: "ott-be151565-b21f-4857-8826-d88809291446",
+      roomAlias: "C4Y-KF6",
+      connection: "online" as const,
+    };
+    vi.spyOn(session, "getSnapshot").mockReturnValue(snapshot);
+    render(
+      <AppProviders>
+        <GameScreen session={session} snapshot={snapshot} onLobby={vi.fn()} />
+      </AppProviders>,
+    );
+
+    expect(screen.getByTestId("room-label")).toHaveTextContent("Phòng C4Y-KF6");
+    expect(screen.getByTestId("room-label")).not.toHaveTextContent("ott-be151565");
+  });
+
   it("renders truth-based HUD values and excludes unsupported actions", () => {
     const session = new DemoSession("game-active-a");
     const snapshot = {

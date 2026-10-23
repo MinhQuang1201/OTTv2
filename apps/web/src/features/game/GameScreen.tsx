@@ -182,6 +182,7 @@ export function GameScreen({ session, snapshot: initialSnapshot, onLobby }: Game
   return <section className={styles.gameScreen} aria-labelledby="game-title" data-testid="game-screen">
      <GameTopBar
        roomId={activeSnapshot.roomId}
+       roomAlias={activeSnapshot.roomAlias}
        mode={activeSnapshot.mode}
        connection={activeSnapshot.connection}
        spectator={spectator}

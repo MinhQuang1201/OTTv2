@@ -21,6 +21,24 @@ describe("HumanTournamentDialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("closes on Escape even when focus stayed outside the dialog", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<HumanTournamentDialog isOpen={true} onClose={onClose} onJoinMatch={vi.fn()} />);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores Escape while closed", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<HumanTournamentDialog isOpen={false} onClose={onClose} onJoinMatch={vi.fn()} />);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("does not render when closed", () => {
     const { container } = render(<HumanTournamentDialog isOpen={false} onClose={vi.fn()} onJoinMatch={vi.fn()} />);
     expect(container.firstChild).toBeNull();
