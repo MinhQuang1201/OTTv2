@@ -584,6 +584,8 @@ function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario
     if (lobbyStream.status === "error") return { status: "error", message: lobbyStream.message ?? "Online lobby stream gặp lỗi." };
     return { status: "unavailable", message: lobbyStream.message ?? "Danh sách trận đang diễn ra hiện không khả dụng." };
   }
+  // The lobby renders before the coordinator binds its stream; a failed stream ends in the error screen instead.
+  if (!demoEnabled) return { status: "loading" };
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 

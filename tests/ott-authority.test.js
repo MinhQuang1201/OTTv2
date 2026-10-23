@@ -1922,3 +1922,91 @@ test("an attach the Game DO refuses is answered with ott:error instead of silenc
   await fixture.server.dispatchOttMessage(other, JSON.stringify({ __ott: true, roomId: "ott-some-other-room", type: "ott:attach", ticket: "x.y" }));
   assert.deepEqual(fixture.messages.at(-1), { __ott: true, roomId: "ott-some-other-room", revision: 0, type: "ott:error", error: "room_unavailable" });
 });
+
+// Ghost-match diagnostics: a leave or close the Room cannot apply must leave a log line.
+function captureWorkerLogs() {
+  const lines = [];
+  const original = { info: console.info, warn: console.warn, error: console.error };
+  for (const level of ["info", "warn", "error"]) {
+    console[level] = (line) => { try { lines.push(JSON.parse(line)); } catch { lines.push({ raw: String(line) }); } };
+  }
+  return { lines, restore() { Object.assign(console, original); } };
+}
+
+function seatlessAdapter(roomId = "ott-room-task6") {
+  return {
+    roomId,
+    unavailable: false,
+    room: { revision: 3, status: "playing", state: {}, players: {} },
+    lastPayload: roomPayload(roomId, 3),
+    async rollbackAttach() { return null; },
+    async close() { return { result: null, payload: roomPayload(roomId, 3), terminalReason: null }; },
+    async leave() { return { result: null, payload: roomPayload(roomId, 3), terminalReason: null }; },
+    restoreLiveConnection() { return false; },
+  };
+}
+
+test("a seated player's close that the Room cannot match is logged, not swallowed", async (t) => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve(seatlessAdapter());
+  const player = connection("ghost-close");
+  fixture.server.identities.set(player, { role: "player", seat: "B" });
+  const logs = captureWorkerLogs();
+  t.after(() => logs.restore());
+
+  fixture.server.onClose(player, 1006, "", false);
+  await fixture.server.roomOperationTail;
+
+  assert.deepEqual(logs.lines.find((line) => line.event === "connection_closed"),
+    { level: "info", event: "connection_closed", code: 1006, wasClean: false, role: "player", seat: "B", attaching: false });
+  assert.deepEqual(logs.lines.find((line) => line.event === "close_ignored"),
+    { level: "warn", event: "close_ignored", seat: "B", reason: "seat_not_found", roomId: "ott-room-task6", roomStatus: "playing" });
+});
+
+test("closing a socket that never took a seat logs the close but no ignored seat", async (t) => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve(seatlessAdapter());
+  const logs = captureWorkerLogs();
+  t.after(() => logs.restore());
+
+  fixture.server.onClose(connection("never-attached"), 1000, "", true);
+  await fixture.server.roomOperationTail;
+
+  assert.equal(logs.lines.filter((line) => line.event === "connection_closed").length, 1);
+  assert.equal(logs.lines.some((line) => line.event === "close_ignored"), false);
+});
+
+test("a leave from a socket without a Room identity is logged as dropped", async (t) => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve(seatlessAdapter());
+  const logs = captureWorkerLogs();
+  t.after(() => logs.restore());
+
+  await fixture.server.dispatchOttMessage(connection("unknown-leaver"), JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:leave",
+  }));
+
+  assert.deepEqual(logs.lines.find((line) => line.event === "command_dropped"),
+    { level: "warn", event: "command_dropped", roomId: "ott-room-task6", type: "ott:leave", reason: "no_identity" });
+});
+
+test("a leave the Room cannot match to a seat is logged as dropped", async (t) => {
+  const { OttGameServer } = await gameModule();
+  const fixture = gameFixture(OttGameServer.prototype);
+  fixture.server.roomLoad = Promise.resolve(seatlessAdapter());
+  const player = connection("seatless-leaver");
+  fixture.server.identities.set(player, { role: "player", seat: "A" });
+  const logs = captureWorkerLogs();
+  t.after(() => logs.restore());
+
+  await fixture.server.dispatchOttMessage(player, JSON.stringify({
+    __ott: true, roomId: "ott-room-task6", type: "ott:leave",
+  }));
+
+  assert.deepEqual(logs.lines.find((line) => line.event === "command_dropped"),
+    { level: "warn", event: "command_dropped", roomId: "ott-room-task6", type: "ott:leave", reason: "seat_not_found", seat: "A", roomStatus: "playing" });
+  assert.deepEqual(fixture.messages.at(-1), { __ott: true, roomId: "ott-room-task6", revision: 3, type: "ott:error", error: "invalid_command" });
+});

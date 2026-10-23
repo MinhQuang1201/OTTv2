@@ -264,12 +264,20 @@ export class OttGameServer extends YServer {
   private async processOttCommand(connection: Connection, command: OttCommand, reservation: RoleReservation | null): Promise<void> {
     try {
       const roomId = await this.ctx.storage.get<string>("roomId");
-      if (reservation && !this.isCurrentReservation(connection, reservation)) return;
-      if (this.closedConnections.has(connection)) return;
+      if (reservation && !this.isCurrentReservation(connection, reservation)) {
+        logEvent("warn", "command_dropped", { type: command.type, reason: "stale_reservation" });
+        return;
+      }
+      if (this.closedConnections.has(connection)) {
+        logEvent("warn", "command_dropped", { type: command.type, reason: "connection_closed" });
+        return;
+      }
       if (!roomId || command.roomId !== roomId) {
         if (command.type === "ott:attach") {
           logEvent("warn", "attach_rejected", { reason: roomId ? "room_mismatch" : "room_not_initialized" });
           this.sendError(connection, command.roomId, ROOM_UNAVAILABLE_CODE);
+        } else {
+          logEvent("warn", "command_dropped", { type: command.type, reason: roomId ? "room_mismatch" : "room_not_initialized" });
         }
         return;
       }
@@ -292,6 +300,8 @@ export class OttGameServer extends YServer {
         if (result && !result.delivered && this.isCurrentReservation(connection, reservation)) this.sendCustomMessage(connection, JSON.stringify(result));
         return;
       } else if (!existingIdentity) {
+        // A leave from a socket the Room no longer knows would otherwise vanish without a trace.
+        logEvent("warn", "command_dropped", { roomId, type: command.type, reason: "no_identity" });
         return;
       } else if (existingIdentity.role === "spectator") {
         this.sendError(connection, command.roomId, "spectator_read_only");
@@ -332,7 +342,10 @@ export class OttGameServer extends YServer {
       return { type: "ott:error", revision: 0, error: ROOM_UNAVAILABLE };
     }
     await this.rebindLiveConnections(adapter);
-    if (generation !== undefined && !this.isLiveGeneration(connection, generation)) return;
+    if (generation !== undefined && !this.isLiveGeneration(connection, generation)) {
+      logEvent("warn", "command_dropped", { roomId: adapter.roomId, type: command.type, reason: "stale_generation" });
+      return;
+    }
     try {
       let result: any;
       let committed: CommittedRoomOutcome | null = null;
@@ -391,6 +404,17 @@ export class OttGameServer extends YServer {
         result = committed?.result;
       }
       if (!result || result.ok === false) {
+        if (!result && command.type !== "ott:attach") {
+          // Room.seatOf did not recognise this socket, so the move or leave changed nothing.
+          const identity = this.getIdentity(connection);
+          logEvent("warn", "command_dropped", {
+            roomId: adapter.roomId,
+            type: command.type,
+            reason: "seat_not_found",
+            seat: identity?.role === "player" ? identity.seat : null,
+            roomStatus: adapter.room.status,
+          });
+        }
         if (committed) await this.publishCommitted(adapter, committed);
         if (command.type === "ott:attach") this.pendingIdentities.delete(connection);
         if (result?.error === "stale_revision") {
@@ -928,18 +952,39 @@ export class OttGameServer extends YServer {
   ): void {
     const identity = this.getIdentity(connection) ?? this.pendingIdentities.get(connection);
     const reservation = this.roleReservations.get(connection);
+    logEvent("info", "connection_closed", {
+      code,
+      wasClean,
+      role: identity?.role ?? null,
+      seat: identity?.role === "player" ? identity.seat : null,
+      attaching: Boolean(reservation),
+    });
     const generation = this.invalidateConnection(connection);
     void this.enqueueRoomOperation(() => this.handleClose(connection, identity, reservation, generation)).catch(() => undefined);
     super.onClose(connection, code, reason, wasClean);
   }
 
   private async handleClose(connection: Connection, identity?: RoomViewer, reservation?: RoleReservation, generation = this.ensureConnectionGeneration(connection)): Promise<void> {
-    if (!this.isLiveGeneration(connection, generation)) return;
+    const seat = identity?.role === "player" ? identity.seat : null;
+    // Only a seated player's close matters to the Room; anything else leaving early is routine.
+    const ignored = (reason: string, fields: Record<string, unknown> = {}) => {
+      if (seat) logEvent("warn", "close_ignored", { seat, reason, ...fields });
+    };
+    if (!this.isLiveGeneration(connection, generation)) {
+      ignored("superseded");
+      return;
+    }
     try {
       if (reservation) await reservation.completed;
-      if (!this.isLiveGeneration(connection, generation)) return;
+      if (!this.isLiveGeneration(connection, generation)) {
+        ignored("superseded_during_attach");
+        return;
+      }
       await this.clearAttachment(connection, generation);
-      if (!this.isLiveGeneration(connection, generation)) return;
+      if (!this.isLiveGeneration(connection, generation)) {
+        ignored("superseded");
+        return;
+      }
       if (identity?.role === "spectator") {
         const adapter = await this.loadRoom();
         if (!this.isLiveGeneration(connection, generation)) return;
@@ -950,8 +995,14 @@ export class OttGameServer extends YServer {
         return;
       }
       const adapter = await this.loadRoom();
-      if (!this.isLiveGeneration(connection, generation)) return;
-      if (!adapter || adapter.unavailable || !adapter.room) return;
+      if (!this.isLiveGeneration(connection, generation)) {
+        ignored("superseded");
+        return;
+      }
+      if (!adapter || adapter.unavailable || !adapter.room) {
+        ignored("room_unavailable");
+        return;
+      }
       try {
         let rollback: CommittedRoomOutcome | null = null;
         try { rollback = await adapter.rollbackAttach(connection); } catch { /* retry through normal close below */ }
@@ -961,8 +1012,11 @@ export class OttGameServer extends YServer {
         }
         const outcome = await adapter.close(connection);
         if (outcome?.result) await this.publishCommitted(adapter, outcome);
-      } catch {
+        // Room.seatOf did not recognise this socket: the seat stays "connected" and no grace starts.
+        else ignored("seat_not_found", { roomId: adapter.roomId, roomStatus: adapter.room.status });
+      } catch (cause) {
         // A failed write makes the room unavailable; never publish an unpersisted close.
+        logEvent("error", "close_failed", { roomId: adapter.roomId, seat, cause: cause instanceof Error ? cause.message.slice(0, 120) : "unknown" });
       }
     } finally {
       this.forgetConnectionGeneration(connection, generation);
