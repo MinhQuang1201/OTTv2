@@ -18,6 +18,14 @@ export function uniqueViolation(error) {
   return UNIQUE_ERRORS.find(([columns]) => message.includes(columns))?.[1] ?? "conflict";
 }
 
+// A game with, for each seat, the team (if a submission played there) and the version number.
+const MATCH_WITH_TEAMS = `
+  SELECT m.*, sa.team_id AS a_team_id, sa.seq AS a_seq, ta.display_name AS a_team_name,
+         sb.team_id AS b_team_id, sb.seq AS b_seq, tb.display_name AS b_team_name
+  FROM matches m
+    LEFT JOIN submissions sa ON sa.id = m.a_submission_id LEFT JOIN teams ta ON ta.id = sa.team_id
+    LEFT JOIN submissions sb ON sb.id = m.b_submission_id LEFT JOIN teams tb ON tb.id = sb.team_id`;
+
 function mapEvent(row) {
   if (!row) return null;
   let config = {};
@@ -216,6 +224,43 @@ export function createStore(db) {
          WHERE event_id = ? AND normalized_hash = ? AND team_id <> ?
          GROUP BY team_id LIMIT ?`,
         eventId, normalizedHash, teamId, limit
+      );
+    },
+
+    smokeMatches(submissionId) {
+      return all(
+        `SELECT id, map_id, game_index, a_submission_id, b_submission_id, a_house, b_house, status, outcome, winner, reason, plies,
+                stderr_a, stderr_b
+         FROM matches WHERE stage = 'smoke' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
+        submissionId, submissionId
+      );
+    },
+
+    // ---------- games (P5) ----------
+
+    getMatchWithTeams(matchId) {
+      return first(`${MATCH_WITH_TEAMS} WHERE m.id = ?`, matchId);
+    },
+
+    /** Games where one of the team's submissions played, newest first. */
+    teamMatches(teamId, limit = 50) {
+      return all(`${MATCH_WITH_TEAMS} WHERE sa.team_id = ? OR sb.team_id = ? ORDER BY m.created_at DESC, m.game_index DESC LIMIT ?`, teamId, teamId, limit);
+    },
+
+    finishedPractice(eventId) {
+      return all(
+        `SELECT m.a_submission_id, m.b_submission_id, m.a_house, m.b_house, m.outcome, m.winner, m.loser
+         FROM matches m WHERE m.event_id = ? AND m.stage = 'practice' AND m.status = 'finished'`,
+        eventId
+      );
+    },
+
+    /** Every submission of the event's active teams, for working out each team's final submission. */
+    activeTeamSubmissions(eventId) {
+      return all(
+        `SELECT s.id, s.team_id, s.seq, s.status, t.display_name, t.final_submission_id
+         FROM submissions s JOIN teams t ON t.id = s.team_id WHERE t.event_id = ? AND t.status = 'active'`,
+        eventId
       );
     },
 

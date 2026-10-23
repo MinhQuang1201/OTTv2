@@ -111,14 +111,15 @@ describe("SubmissionsPanel", () => {
     gateway.chooseFinalSubmission.mockResolvedValue({ ...initial, finalSubmissionId: v1.id, finalChosen: true });
     render(<SubmissionsPanel gateway={asGateway(gateway)} event={event} team={team} onSignedOut={vi.fn()} />);
 
-    const items = await screen.findAllByRole("listitem");
+    const versions = await screen.findByRole("list", { name: "Các phiên bản đã nộp" });
+    const items = within(versions).getAllByRole("listitem");
     expect(within(items[0]).getByText("Lỗi cú pháp")).toBeInTheDocument();
     expect(within(items[0]).queryByRole("button", { name: "Chọn làm Bản thi đấu" })).toBeNull();
     expect(within(items[1]).getByText("Bản thi đấu")).toBeInTheDocument();
     await user.click(within(items[2]).getByRole("button", { name: "Chọn làm Bản thi đấu" }));
     expect(gateway.chooseFinalSubmission).toHaveBeenCalledWith("s1");
     expect(await screen.findByText("Bản thi đấu: phiên bản 1.")).toBeInTheDocument();
-    expect(within(screen.getAllByRole("listitem")[2]).getByText("Bản thi đấu")).toBeInTheDocument();
+    expect(within(within(screen.getByRole("list", { name: "Các phiên bản đã nộp" })).getAllByRole("listitem")[2]).getByText("Bản thi đấu")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dùng phiên bản mới nhất" })).toBeInTheDocument();
   });
 

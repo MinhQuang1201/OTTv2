@@ -371,6 +371,29 @@ export function buildDockerRunArgs(params) {
  * Creates a BotPort adapter backed by an isolated OCI container process.
  * Fails closed without host fallback on any runtime error.
  */
+/**
+ * Runs a docker CLI command without blocking the event loop. Container clean-up happens while other games are being
+ * timed in the same process; a synchronous `docker kill`/`docker rm` (hundreds of ms on Docker Desktop) would be charged
+ * to whichever bot was thinking at that moment (found in Bot Cup P4).
+ */
+function dockerAsync(args, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn("docker", args, { shell: false, windowsHide: true, stdio: "ignore" });
+    } catch (_) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch (_) {}
+      resolve();
+    }, timeoutMs);
+    proc.once("error", () => { clearTimeout(timer); resolve(); });
+    proc.once("close", () => { clearTimeout(timer); resolve(); });
+  });
+}
+
 export function createContainerBot(options) {
   if (!options || typeof options !== "object") {
     throw new Error("ContainerBot options must be an object");
@@ -658,11 +681,12 @@ export function createContainerBot(options) {
         startupTimer = setTimeout(() => {
           if (!settled) {
             settled = true;
-            try {
-              // Kill container via docker kill
-              spawnSync("docker", ["kill", containerName], { shell: false, windowsHide: true });
-              if (child?.pid) killProcessTree(child.pid);
-            } catch (_) {}
+            // Kill the container, then the docker CLI process if it is still around.
+            dockerAsync(["kill", containerName]).then(() => {
+              try {
+                if (child?.pid && !hasExited) killProcessTree(child.pid);
+              } catch (_) {}
+            });
 
             if (stopped) {
               resolve();
@@ -728,10 +752,11 @@ export function createContainerBot(options) {
             settled = true;
             if (stopped) {
               started = false;
-              try {
-                spawnSync("docker", ["kill", containerName], { shell: false, windowsHide: true });
-                if (child.pid) killProcessTree(child.pid);
-              } catch (_) {}
+              dockerAsync(["kill", containerName]).then(() => {
+                try {
+                  if (child.pid && !hasExited) killProcessTree(child.pid);
+                } catch (_) {}
+              });
               resolve();
               return;
             }
@@ -807,28 +832,24 @@ export function createContainerBot(options) {
           }
         }
 
-        // 3. Force kill container by name (terminates container cgroup and all child processes)
+        // 3. Force kill container by name (terminates container cgroup and all child processes). Asynchronous, so the
+        // clocks of games running next to this one are not held up.
         if (containerName) {
-          try {
-            spawnSync("docker", ["kill", containerName], {
-              shell: false,
-              windowsHide: true,
-              timeout: 2000
-            });
-          } catch (_) {}
-          try {
-            spawnSync("docker", ["rm", "-f", containerName], {
-              shell: false,
-              windowsHide: true,
-              timeout: 2000
-            });
-          } catch (_) {}
+          await dockerAsync(["kill", containerName]);
+          await dockerAsync(["rm", "-f", containerName]);
         }
 
-        // 4. Force kill host docker process tree
-        if (child.pid) {
+        // 4. End the host docker CLI if removing the container did not. The bot runs inside the container, which is gone
+        // by now, so the CLI has nothing of the bot under it: a plain kill is enough, and unlike the process-tree kill
+        // (synchronous taskkill/wmic on Windows) it does not block the event loop.
+        if (child.pid && !hasExited && exitPromise) {
+          let exitTimer = null;
+          await Promise.race([exitPromise, new Promise((resolve) => { exitTimer = setTimeout(resolve, 1000); })]);
+          if (exitTimer !== null) clearTimeout(exitTimer);
+        }
+        if (child.pid && !hasExited) {
           try {
-            killProcessTree(child.pid);
+            child.kill("SIGKILL");
           } catch (_) {}
         }
 

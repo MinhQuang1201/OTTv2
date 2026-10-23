@@ -166,6 +166,7 @@
   padding: var(--ui-space-3);
   border: 2px solid currentColor;
   font-size: var(--ui-text-sm);
+  overflow-wrap: anywhere;
 }
 
 .alert_error {
@@ -316,6 +317,34 @@
   outline-offset: 2px;
 }
 
+.fileField select {
+  max-width: 100%;
+  min-height: 40px;
+  padding: 0 var(--ui-space-2);
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.log {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--ui-space-3);
+  overflow: auto;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-surface-0);
+  font-size: var(--ui-text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .prose {
   max-width: 72ch;
   line-height: 1.6;
@@ -375,4 +404,28 @@
   .tab {
     flex: 1 1 40%;
   }
+}
+
+.checkDetail {
+  display: grid;
+  gap: var(--ui-space-2);
+}
+
+.smokeList {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: 0;
+  padding-left: var(--ui-space-5);
+}
+
+.kitLinks {
+  display: grid;
+  gap: var(--ui-space-1);
+  margin: var(--ui-space-2) 0 0;
+  padding-left: var(--ui-space-5);
+}
+
+.kitBox summary {
+  cursor: pointer;
+  font-weight: 600;
 }

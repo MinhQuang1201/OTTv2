@@ -73,7 +73,7 @@ describe("Bot Cup messages", () => {
     const codes = new Set<string>();
     for (const match of sources.matchAll(/HttpError\(\d+,\s*"([a-z_]+)"/g)) codes.add(match[1]);
     for (const match of sources.matchAll(/error: "([a-z_]+)"/g)) codes.add(match[1]);
-    for (const match of (sources + core).matchAll(/"((?:mssv|email|handle|display_name|full_name|password|otp|login|invite|submission)_[a-z_]+)"/g)) codes.add(match[1]);
+    for (const match of (sources + core).matchAll(/"((?:mssv|email|handle|display_name|full_name|password|otp|login|invite|submission|practice)_[a-z_]+)"/g)) codes.add(match[1]);
     for (const match of sources.matchAll(/\["[^"]+", "([a-z_]+)"\]/g)) codes.add(match[1]);
     for (const match of core.matchAll(/return "([a-z_]+)";/g)) codes.add(match[1]);
     expect(codes.size).toBeGreaterThan(20);

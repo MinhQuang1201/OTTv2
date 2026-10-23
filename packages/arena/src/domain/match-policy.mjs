@@ -12,6 +12,23 @@ export const DEFAULT_MATCH_POLICY = Object.freeze({
 });
 
 /**
+ * OTT Bot Cup policy (plan docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md §7.3): 500 ms a move, a 30 s bank per bot
+ * taken from the policy (not from the initial state's clock), a draw at 300 plies, and each bot's first move gets
+ * `firstMoveGraceMs` that is not charged to its bank (container start-up is measured inside the first move).
+ */
+export const BOT_CUP_POLICY_VERSION = "bot-cup-policy-v1";
+
+export const BOT_CUP_MATCH_POLICY = Object.freeze({
+  matchPolicyVersion: BOT_CUP_POLICY_VERSION,
+  maxPlies: 300,
+  initialTimeMs: 30000,
+  turnTimeLimitMs: 500,
+  firstMoveGraceMs: 5000,
+  clockBoundary: "strict_less_than_budget",
+  clockSource: "referee_monotonic"
+});
+
+/**
  * Pure helper to serialize match policy into canonical JSON string.
  */
 export function canonicalMatchPolicyJson(policy) {
@@ -27,11 +44,28 @@ export function validateMatchPolicy(policy) {
       errors: [{ path: "policy", code: "invalid_type", message: "Policy must be a non-null object" }]
     };
   }
-  if (policy.matchPolicyVersion !== MATCH_POLICY_VERSION) {
+  if (policy.matchPolicyVersion === BOT_CUP_POLICY_VERSION) {
+    // A version pins its numbers: different limits need a new version, not the same name.
+    for (const key of ["maxPlies", "initialTimeMs", "turnTimeLimitMs", "firstMoveGraceMs"]) {
+      if (policy[key] !== BOT_CUP_MATCH_POLICY[key]) {
+        errors.push({
+          path: `policy.${key}`,
+          code: "unsupported_policy_value",
+          message: `${BOT_CUP_POLICY_VERSION} requires ${key} = ${BOT_CUP_MATCH_POLICY[key]}, received ${policy[key]}`
+        });
+      }
+    }
+  } else if (policy.matchPolicyVersion !== MATCH_POLICY_VERSION) {
     errors.push({
       path: "policy.matchPolicyVersion",
       code: "unsupported_policy_version",
       message: `Unsupported matchPolicyVersion: ${policy.matchPolicyVersion}`
+    });
+  } else if (policy.firstMoveGraceMs !== undefined) {
+    errors.push({
+      path: "policy.firstMoveGraceMs",
+      code: "unsupported_first_move_grace",
+      message: "arena-policy-v1 has no first-move grace"
     });
   }
   // arena-policy-v1 strictly requires exact maxPlies of 400.

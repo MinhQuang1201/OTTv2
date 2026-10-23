@@ -8,16 +8,20 @@ import { botCupErrorMessage } from "./botCupMessages";
 import { BotCupAbout, BotCupFaq, BotCupRules, BotCupSchedule } from "./BotCupInfo";
 import { FormAlert } from "./formParts";
 import { InviteAccept } from "./InviteAccept";
+import { LeaderboardPanel } from "./LeaderboardPanel";
 import { LoginForm } from "./LoginForm";
 import { RegisterFlow } from "./RegisterFlow";
 import { TeamDashboard } from "./TeamDashboard";
 import uetLogo from "./assets/uet-logo.webp";
+import type { ReplayDocument } from "../../../../../packages/arena/src/contracts/index.d.mts";
+import { validateReplayDocument } from "../../../../../packages/arena/src/contracts/index.mjs";
 import styles from "./botCup.module.css";
 
-export type BotCupTab = "team" | "rules" | "schedule" | "faq";
+export type BotCupTab = "team" | "leaderboard" | "rules" | "schedule" | "faq";
 
 const TABS: ReadonlyArray<readonly [BotCupTab, string]> = [
   ["team", "Tham gia"],
+  ["leaderboard", "Bảng xếp hạng"],
   ["rules", "Thể lệ"],
   ["schedule", "Lịch"],
   ["faq", "Hỏi đáp"],
@@ -28,12 +32,14 @@ export interface BotCupScreenProps {
   readonly onLobby: () => void;
   /** Invite token from ?invite= in the email link, read once by the app. */
   readonly inviteToken?: string | null;
+  /** Opens a validated Arena replay document in the replay viewer. */
+  readonly onStartReplay?: (document: ReplayDocument) => void;
 }
 
 type Load = { readonly status: "loading" } | { readonly status: "error"; readonly message: string } | { readonly status: "ready"; readonly event: BotCupEvent; readonly team: TeamView | null };
 
 /** The Bot Cup flow (plan §4.1): event info for guests, registration and login, then the team page. */
-export function BotCupScreen({ gateway, onLobby, inviteToken = null }: BotCupScreenProps) {
+export function BotCupScreen({ gateway, onLobby, inviteToken = null, onStartReplay }: BotCupScreenProps) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [tab, setTab] = useState<BotCupTab>("team");
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
@@ -84,6 +90,13 @@ export function BotCupScreen({ gateway, onLobby, inviteToken = null }: BotCupScr
 
   const { event, team } = load;
   const showRules = () => setTab("rules");
+  // The API rebuilds replays with the real rules; check the document anyway before handing it to the viewer.
+  const openReplay = onStartReplay
+    ? (document: unknown) => {
+        if (validateReplayDocument(document).ok) onStartReplay(document as ReplayDocument);
+        else setNotice("Replay của trận này không hợp lệ. Hãy báo BTC.");
+      }
+    : undefined;
   return (
     <section className={styles.screen} aria-labelledby="bot-cup-title">
       {header}
@@ -100,7 +113,7 @@ export function BotCupScreen({ gateway, onLobby, inviteToken = null }: BotCupScr
           {invite ? (
             <InviteAccept gateway={gateway} token={invite} onShowRules={showRules} onDone={() => setInvite(null)} />
           ) : team ? (
-            <TeamDashboard gateway={gateway} event={event} team={team} onTeamChange={setTeam}
+            <TeamDashboard gateway={gateway} event={event} team={team} onTeamChange={setTeam} onOpenReplay={openReplay}
               onSignedOut={(message) => { setTeam(null); setAuthMode("login"); setNotice(message ?? null); }} />
           ) : (
             <div className={styles.guest}>
@@ -123,6 +136,7 @@ export function BotCupScreen({ gateway, onLobby, inviteToken = null }: BotCupScr
           )}
         </div>
       ) : null}
+      {tab === "leaderboard" ? <div className={styles.body}><LeaderboardPanel gateway={gateway} /></div> : null}
       {tab === "rules" ? <div className={styles.body}><BotCupRules event={event} /></div> : null}
       {tab === "schedule" ? <div className={styles.body}><BotCupSchedule event={event} /></div> : null}
       {tab === "faq" ? <div className={styles.body}><BotCupFaq /></div> : null}

@@ -218,6 +218,15 @@ export function createHeadlessMatchController(options) {
         });
       }
 
+      // A policy with a first-move grace (bot-cup-policy-v1) owns the bank: both clocks start at policy.initialTimeMs,
+      // and each seat's first move may take up to firstMoveGraceMs without being charged.
+      const firstMoveGraceMs = Number.isInteger(policy.firstMoveGraceMs) ? policy.firstMoveGraceMs : 0;
+      if (firstMoveGraceMs > 0) {
+        resolvedInitialState = engine.cloneState(resolvedInitialState);
+        resolvedInitialState.clock.remainingMs = { A: policy.initialTimeMs, B: policy.initialTimeMs };
+      }
+      const hasMoved = { A: false, B: false };
+
       // Authoritative clocks tracking
       const remainingMs = {
         A: resolvedInitialState.clock.remainingMs.A,
@@ -310,7 +319,12 @@ export function createHeadlessMatchController(options) {
 
           const ply = acceptedPlies + 1;
           const requestId = generateTurnRequestId(matchId, seat, ply);
-          const deadlineBudget = Math.min(policy.turnTimeLimitMs, remainingMs[seat]);
+          const graceTurn = firstMoveGraceMs > 0 && !hasMoved[seat];
+          const deadlineBudget = graceTurn ? firstMoveGraceMs : Math.min(policy.turnTimeLimitMs, remainingMs[seat]);
+          // The bank pays for every move except a grace move.
+          const charge = (ms) => {
+            if (!graceTurn) remainingMs[seat] = Math.max(0, remainingMs[seat] - ms);
+          };
 
           const wirePieces = currentCoreState.pieces.map((p) => ({
             id: p.id,
@@ -337,7 +351,7 @@ export function createHeadlessMatchController(options) {
             ply,
             turn: seat,
             timeRemainingMs: remainingMs[seat],
-            turnTimeLimitMs: policy.turnTimeLimitMs,
+            turnTimeLimitMs: graceTurn ? firstMoveGraceMs : policy.turnTimeLimitMs,
             board: wirePieces,
             legalMoves: wireLegalMoves
           };
@@ -438,7 +452,7 @@ export function createHeadlessMatchController(options) {
           const otherBot = seat === "A" ? botB : botA;
           const otherFault = getBotFault(otherBot);
           if (otherFault) {
-            remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+            charge(elapsedMs);
             const forfeitReason =
               otherFault.code === "output_limit" || otherFault.code === "protocol_error" || otherFault.code === "crash"
                 ? otherFault.code
@@ -458,7 +472,7 @@ export function createHeadlessMatchController(options) {
 
           const currentFault = getBotFault(currentBot);
           if (currentFault) {
-            remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+            charge(elapsedMs);
             const forfeitReason =
               currentFault.code === "output_limit" || currentFault.code === "protocol_error" || currentFault.code === "crash"
                 ? currentFault.code
@@ -478,12 +492,12 @@ export function createHeadlessMatchController(options) {
 
           // Evaluate timeout conditions
           // Priority: remaining <= turnTimeLimitMs => total_timeout; otherwise turn_timeout
-          const isTotalTimeout = remainingMs[seat] <= policy.turnTimeLimitMs;
+          const isTotalTimeout = !graceTurn && remainingMs[seat] <= policy.turnTimeLimitMs;
           const timeoutReason = isTotalTimeout ? "total_timeout" : "turn_timeout";
 
           // Clock boundary: elapsed >= deadlineBudget is timeout, response at exact deadline is NOT committed
           if (raceResult.kind === "timeout" || timedOut || elapsedMs >= deadlineBudget) {
-            remainingMs[seat] = Math.max(0, remainingMs[seat] - deadlineBudget);
+            charge(deadlineBudget);
             finalResult = createForfeitResult({
               winner: otherSeat,
               loser: seat,
@@ -526,7 +540,7 @@ export function createHeadlessMatchController(options) {
               break;
             }
 
-            remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+            charge(elapsedMs);
 
             let forfeitReason = "crash";
             if (err && typeof err === "object" && typeof err.code === "string") {
@@ -549,7 +563,7 @@ export function createHeadlessMatchController(options) {
           }
 
           // Deduct elapsed time from acting seat
-          remainingMs[seat] = Math.max(0, remainingMs[seat] - elapsedMs);
+          charge(elapsedMs);
 
           // Validate bot action format
           const action = raceResult.action;
@@ -586,6 +600,7 @@ export function createHeadlessMatchController(options) {
 
           // Move accepted!
           acceptedPlies += 1;
+          hasMoved[seat] = true;
           currentCoreState = moveResult.state;
           currentCoreState.clock.remainingMs.A = remainingMs.A;
           currentCoreState.clock.remainingMs.B = remainingMs.B;

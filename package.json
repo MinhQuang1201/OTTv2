@@ -31,10 +31,11 @@
     "arena:demo": "node scripts/arena-demo.js",
     "arena:worker": "node packages/arena-node/src/worker/job-worker.mjs",
     "arena:user": "node apps/arena-api/scripts/manage-user.mjs",
-    "test:bot-cup": "node --test tests/bot-cup-core.test.js tests/bot-cup-api.test.js tests/bot-cup-submissions.test.js tests/bot-cup-kit.test.js",
+    "test:bot-cup": "node --test tests/bot-cup-core.test.js tests/bot-cup-api.test.js tests/bot-cup-submissions.test.js tests/bot-cup-kit.test.js tests/bot-cup-policy.test.js tests/bot-cup-replay.test.js tests/bot-cup-runner-api.test.js tests/bot-cup-runner.test.js",
     "test:bot-cup:api": "node --test --test-timeout=180000 tests/bot-cup-api-worker.test.js",
     "bot-cup:api:dev": "node scripts/bot-cup/dev-api.mjs",
     "bot-cup:kit": "node scripts/bot-cup/build-kit.mjs",
+    "bot-cup:runner": "node apps/bot-cup-runner/src/main.mjs",
     "bot-cup:reference-hashes": "node scripts/bot-cup/reference-hashes.mjs"
   },
   "engines": {

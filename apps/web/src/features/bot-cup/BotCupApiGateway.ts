@@ -95,6 +95,76 @@ export interface SubmissionsView {
   readonly maxBytes: number;
 }
 
+export interface SmokeGame {
+  readonly id: string;
+  readonly mapId: string;
+  readonly seat: "A" | "B";
+  readonly opponent: string | null;
+  readonly status: MatchStatus;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  readonly plies: number | null;
+  readonly stderr: string | null;
+}
+
+export interface SubmissionDetail extends Submission {
+  readonly checkLog: string | null;
+  readonly smoke: readonly SmokeGame[];
+}
+
+export type MatchStatus = "queued" | "running" | "finished" | "failed" | "cancelled";
+export type MatchOutcome = "win" | "draw" | "forfeit";
+export type MatchStage = "smoke" | "practice" | "gate" | "round_robin" | "swiss" | "knockout";
+
+export interface MatchSeat {
+  readonly kind: "team" | "house";
+  readonly name: string;
+  readonly version?: number;
+  readonly house?: string;
+}
+
+export interface MatchView {
+  readonly id: string;
+  readonly stage: MatchStage;
+  readonly round: number | null;
+  readonly gameIndex: number;
+  readonly mapId: string;
+  readonly status: MatchStatus;
+  readonly seats: { readonly A: MatchSeat; readonly B: MatchSeat };
+  readonly mySeat: "A" | "B" | null;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  readonly plies: number | null;
+  readonly createdAt: number;
+  readonly finishedAt: number | null;
+}
+
+export interface MyMatches {
+  readonly matches: readonly MatchView[];
+  readonly practice: {
+    readonly gamesPerDay: number;
+    readonly usedToday: number;
+    readonly opponents: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+    readonly maps: readonly string[];
+  };
+}
+
+export interface LeaderboardRow {
+  readonly rank: number;
+  readonly displayName: string;
+  readonly games: number;
+  readonly points: number;
+  readonly opponents: Readonly<Record<string, { readonly played: number; readonly points: number }>>;
+}
+
+export interface Leaderboard {
+  readonly opponents: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly rows: readonly LeaderboardRow[];
+  readonly updatedAt: number;
+}
+
 export class BotCupApiError extends Error {
   constructor(
     readonly status: number,
@@ -199,6 +269,31 @@ export class BotCupApiGateway {
   /** `null` goes back to "the newest eligible version". */
   chooseFinalSubmission(submissionId: string | null): Promise<SubmissionsView> {
     return this.request("PUT", "/team/final-submission", { submissionId });
+  }
+
+  getSubmission(submissionId: string): Promise<{ readonly submission: SubmissionDetail }> {
+    return this.request("GET", `/submissions/${encodeURIComponent(submissionId)}`);
+  }
+
+  requestPractice(opponent: string, mapId: string): Promise<{ readonly matches: readonly MatchView[] }> {
+    return this.request("POST", "/practice", { opponent, mapId });
+  }
+
+  listMatches(signal?: AbortSignal): Promise<MyMatches> {
+    return this.request("GET", "/matches", undefined, signal);
+  }
+
+  getMatch(matchId: string): Promise<{ readonly match: MatchView & { readonly stderr: Readonly<Record<string, string>> } }> {
+    return this.request("GET", `/matches/${encodeURIComponent(matchId)}`);
+  }
+
+  /** The game as an Arena replay document, for the replay viewer. */
+  getMatchReplay(matchId: string): Promise<{ readonly replay: unknown; readonly sha256: string }> {
+    return this.request("GET", `/matches/${encodeURIComponent(matchId)}/replay`);
+  }
+
+  getLeaderboard(signal?: AbortSignal): Promise<Leaderboard> {
+    return this.request("GET", "/leaderboard", undefined, signal);
   }
 
   /** Same-origin link that downloads the team's own source of one version. */

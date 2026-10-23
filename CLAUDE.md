@@ -29,6 +29,7 @@ Node ≥ 22 (`.nvmrc`). Cổng mặc định 3000 (`PORT`).
 - `packages/game-core/src/ai.js` — `chooseMove(state, player, { level })` với level `easy`/`medium`/`hard` (mặc định `hard`): minimax cắt tỉa alpha-beta có giới hạn số nút. UI chạy nó trong Web Worker (`apps/web/src/sessions/ai/`). Thay file này khi gắn AI khác.
 - `packages/bot-cup-core/src/` — luật thuần của Bot Cup: điều kiện tham gia theo chế độ `demo`/`production`, đội, OTP, khung đăng ký. Không I/O. Kế hoạch: `docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md`.
 - `apps/bot-cup-api/` — Worker đăng ký Bot Cup (D1 binding `DB`, migration trong `migrations/`), phục vụ `/api/t/*` qua Vercel rewrite. Tách hẳn `apps/worker` và PlayHTML; mã bot của đội không bao giờ chạy ở Worker hay trình duyệt.
+- `apps/bot-cup-runner/` — runner Node trên máy BTC: kéo job từ `/runner/*` (token), chạy check và ván trong container sandbox theo `bot-cup-policy-v1`, gửi replay gọn; Worker chơi lại replay bằng `rules.js` (`bot-cup-core.verifyReplay`) trước khi ghi. Mã đội chỉ chạy trong container; không dọn container đồng bộ (làm sai đồng hồ ván khác).
 - `sdk/bot-cup/` — starter kit cho đội (template Python/JS, `judge.mjs` trọng tài cục bộ, `GUIDE.vi.md`); `npm run bot-cup:kit` đóng gói. Đổi template hoặc bot tham chiếu thì chạy `npm run bot-cup:reference-hashes` (test kiểm tra).
 - `apps/web/src/features/bot-cup/` — banner sảnh và màn hình giải (tải lười). Chỉ gọi `/api/t` qua `BotCupApiGateway`; mọi mã lỗi API phải có thông điệp trong `botCupMessages.ts` (có test).
 

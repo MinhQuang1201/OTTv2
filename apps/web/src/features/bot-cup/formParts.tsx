@@ -37,5 +37,22 @@ export function useTurnstileToken() {
   return { token, setToken, resetKey, consume };
 }
 
+/** Links to the starter kit the web build publishes at /bot-cup-kit/ (plan §6.4). */
+export function StarterKitLinks() {
+  const files: ReadonlyArray<readonly [string, string]> = [
+    ["GUIDE.vi.md", "Hướng dẫn"],
+    ["bot.py", "Bot mẫu Python"],
+    ["bot.mjs", "Bot mẫu JavaScript"],
+    ["judge.mjs", "Trọng tài chạy trên máy (Node 22)"],
+  ];
+  return (
+    <ul className={styles.kitLinks} aria-label="Bộ khởi đầu">
+      {files.map(([file, label]) => (
+        <li key={file}><a className={styles.link} href={`/bot-cup-kit/${file}`} download={file}>{label}</a> <code>{file}</code></li>
+      ))}
+    </ul>
+  );
+}
+
 export const MSSV_PATTERN = /^\d{8}$/;
 export const HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,22})[a-z0-9]$/;

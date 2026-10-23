@@ -55,6 +55,11 @@ export const BOT_CUP_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   submission_daily_limit: "Đội đã nộp đủ 10 lần hôm nay. Hạn mức đặt lại lúc 00:00.",
   submission_version_limit: "Đội đã nộp đủ 200 phiên bản.",
   submission_not_eligible: "Phiên bản này không qua kiểm tra nên không chọn làm Bản thi đấu được.",
+  practice_opponent_invalid: "Chọn một house bot để đấu.",
+  practice_map_invalid: "Bản đồ không hợp lệ.",
+  practice_no_submission: "Đội chưa có bài nộp nào để đấu luyện tập.",
+  practice_not_ready: "Bản thi đấu chưa qua kiểm tra. Chờ máy chấm kiểm tra xong rồi thử lại.",
+  practice_daily_limit: "Đội đã dùng hết 20 ván luyện tập hôm nay. Hạn mức đặt lại lúc 00:00.",
   server_misconfigured: "Máy chủ giải đấu đang bảo trì.",
   internal_error: "Máy chủ gặp sự cố. Hãy thử lại sau.",
 };

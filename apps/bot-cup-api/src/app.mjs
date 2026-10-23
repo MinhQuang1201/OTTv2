@@ -11,7 +11,13 @@
 import {
   OTP_POLICY,
   FINAL_ELIGIBLE_STATUSES,
+  HOUSE_BOT_LABELS,
   INVITE_TTL_MS,
+  MAPS,
+  PRACTICE_OPPONENTS,
+  PRACTICE_POLICY,
+  PUBLIC_STAGES,
+  SUBMISSION_STATUS,
   INVITE_MAX_SENDS_PER_HOUR,
   PENDING_CAPTAIN_TTL_MS,
   SESSION_TTL_MS,
@@ -25,6 +31,8 @@ import {
   deriveTeamStatus,
   effectiveFinalSubmission,
   eligibilityRules,
+  expandReplay,
+  gamePoints,
   evaluateOtpAttempt,
   finalSubmissionLocked,
   generateOtp,
@@ -33,17 +41,22 @@ import {
   maskEmail,
   normalizeMssv,
   normalizeSource,
+  practiceGames,
+  practiceLeaderboard,
   registrationOpen,
   submissionWindow,
   validateDisplayName,
   validateFullName,
   validateHandle,
   validatePassword,
+  validatePracticeRequest,
   vietnamDayStart
 } from "../../../packages/bot-cup-core/src/index.mjs";
 import { HttpError, clearedSessionCookie, clientIp, errorResponse, json, readCookie, readJson, readUpload, sessionCookie, SESSION_COOKIE } from "./http.mjs";
 import { inviteEmail, otpEmail } from "./mail.mjs";
+import { enqueueCheck, enqueuePractice, gunzipText } from "./queue.mjs";
 import { REFERENCE_HASHES } from "./reference-hashes.mjs";
+import { createRunnerApi } from "./runner/api.mjs";
 import { hashPassword, hmacHex, randomToken, sameDigest, sha256Hex, verifyPassword } from "./security.mjs";
 import { createStore, uniqueViolation } from "./store.mjs";
 
@@ -623,7 +636,9 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
           `INSERT OR IGNORE INTO submission_sources (sha256, content, size, created_at)
            SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM submissions WHERE id = ?)`,
           sha256, upload.bytes, upload.bytes.length, now(), id
-        )
+        ),
+        // The runner checks syntax in the container, then plays the smoke test (P4).
+        enqueueCheck(store, { eventId: event.id, submissionId: id, now: now() })
       ]);
     } catch (error) {
       const code = uniqueViolation(error);
@@ -648,7 +663,23 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
   async function getSubmission(request, id) {
     const { team } = await requireTeam(request);
     const submission = await ownSubmission(team, id);
-    return json({ submission: { ...submissionView(submission), checkLog: submission.check_log ?? null } });
+    const smoke = (await store.smokeMatches(submission.id)).map((match) => {
+      const seat = match.a_submission_id === submission.id ? "A" : "B";
+      return {
+        id: match.id,
+        mapId: match.map_id,
+        seat,
+        opponent: seat === "A" ? match.b_house : match.a_house,
+        status: match.status,
+        outcome: match.outcome,
+        winner: match.winner,
+        reason: match.reason,
+        plies: match.plies,
+        // Only this team's own bot's stderr (plan §4.1); the opponent here is a house bot anyway.
+        stderr: seat === "A" ? match.stderr_a : match.stderr_b
+      };
+    });
+    return json({ submission: { ...submissionView(submission), checkLog: submission.check_log ?? null, smoke } });
   }
 
   async function getSubmissionSource(request, id) {
@@ -683,6 +714,153 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     return submissionsOf(team);
   }
 
+  // ---------- practice, games, replays, leaderboard (plan §7.1, §11.2, P5) ----------
+
+  /** The current session's team, or null for a guest; never throws for a missing session. */
+  async function optionalTeam(request) {
+    const idHash = await sessionHash(request);
+    const team = idHash ? await store.getSessionTeam(idHash, now()) : null;
+    return team && team.event_id === config.eventId ? team : null;
+  }
+
+  function seatName(match, side) {
+    const house = match[`${side}_house`];
+    if (house) return { kind: "house", name: HOUSE_BOT_LABELS[house] ?? house, house };
+    return { kind: "team", name: match[`${side}_team_name`], version: match[`${side}_seq`] };
+  }
+
+  function mySeats(match, teamId) {
+    return ["A", "B"].filter((seat) => teamId && match[`${seat.toLowerCase()}_team_id`] === teamId);
+  }
+
+  function matchView(match, teamId) {
+    const mine = mySeats(match, teamId);
+    return {
+      id: match.id,
+      stage: match.stage,
+      round: match.round,
+      gameIndex: match.game_index,
+      mapId: match.map_id,
+      status: match.status,
+      seats: { A: seatName(match, "a"), B: seatName(match, "b") },
+      mySeat: mine.length === 1 ? mine[0] : null,
+      outcome: match.outcome,
+      winner: match.winner,
+      reason: match.reason,
+      plies: match.plies,
+      createdAt: match.created_at,
+      finishedAt: match.finished_at
+    };
+  }
+
+  /** Official games are public (plan §8.8); smoke and practice games only to the team that played them. */
+  async function visibleMatch(request, id) {
+    const match = typeof id === "string" && id.length <= 64 ? await store.getMatchWithTeams(id) : null;
+    if (!match || match.event_id !== config.eventId) throw new HttpError(404, "not_found");
+    const team = await optionalTeam(request);
+    if (!PUBLIC_STAGES.includes(match.stage) && mySeats(match, team?.id).length === 0) throw new HttpError(404, "not_found");
+    return { match, team };
+  }
+
+  async function requestPractice(request) {
+    const team = await requireActiveTeam(request);
+    const body = await readJson(request);
+    const event = await loadEvent();
+    const closed = submissionWindow(event, now());
+    if (closed) throw new HttpError(409, closed);
+    const practice = validatePracticeRequest(body);
+    if (!practice.ok) throw new HttpError(400, practice.error, { field: practice.error === "practice_map_invalid" ? "mapId" : "opponent" });
+
+    const fresh = await store.getTeam(team.id);
+    const rows = await store.listSubmissions(team.id);
+    const submission = body.submissionId ? rows.find((row) => row.id === body.submissionId) : effectiveFinalSubmission(rows, fresh.final_submission_id);
+    if (!submission) throw new HttpError(409, "practice_no_submission");
+    if (submission.status !== SUBMISSION_STATUS.READY) throw new HttpError(409, "practice_not_ready");
+
+    const dayStart = vietnamDayStart(now());
+    const { matchIds, statements } = enqueuePractice(store, {
+      eventId: event.id,
+      teamId: team.id,
+      games: practiceGames(submission.id, practice.opponent, practice.mapId),
+      dayStart,
+      gamesPerDay: PRACTICE_POLICY.gamesPerDay,
+      now: now()
+    });
+    const results = await store.batch(statements);
+    if (!results[0]?.meta?.changes) throw new HttpError(429, "practice_daily_limit", { retryAfterMs: dayStart + DAY - now() });
+    const matches = await Promise.all(matchIds.map((id) => store.getMatchWithTeams(id)));
+    return json({ matches: matches.map((match) => matchView(match, team.id)) }, 201);
+  }
+
+  async function listMyMatches(request) {
+    const { team } = await requireTeam(request);
+    const dayStart = vietnamDayStart(now());
+    const matches = await store.teamMatches(team.id);
+    return json({
+      matches: matches.map((match) => matchView(match, team.id)),
+      practice: {
+        gamesPerDay: PRACTICE_POLICY.gamesPerDay,
+        usedToday: matches.filter((match) => match.requested_by_team === team.id && match.created_at >= dayStart).length,
+        opponents: PRACTICE_OPPONENTS.map((id) => ({ id, name: HOUSE_BOT_LABELS[id] })),
+        maps: MAPS
+      }
+    });
+  }
+
+  async function getMatch(request, id) {
+    const { match, team } = await visibleMatch(request, id);
+    const view = matchView(match, team?.id);
+    // A team reads its own bot's stderr, never the opponent's (plan §4.1).
+    const stderr = Object.fromEntries(mySeats(match, team?.id).map((seat) => [seat, match[`stderr_${seat.toLowerCase()}`] ?? ""]));
+    return json({ match: { ...view, stderr } });
+  }
+
+  async function getMatchReplay(request, id) {
+    const { match } = await visibleMatch(request, id);
+    if (match.status !== "finished" || !match.replay_gz) throw new HttpError(404, "not_found");
+    const compact = JSON.parse(await gunzipText(new Uint8Array(match.replay_gz)));
+    const label = (side) => {
+      const seat = seatName(match, side);
+      return seat.kind === "house" ? seat.name : `${seat.name} (v${seat.version})`;
+    };
+    const document = await expandReplay(compact, {
+      matchId: match.id,
+      participants: {
+        A: { botId: match.a_submission_id ?? `house-${match.a_house}`, name: label("a") },
+        B: { botId: match.b_submission_id ?? `house-${match.b_house}`, name: label("b") }
+      }
+    });
+    return json({ replay: document, sha256: match.replay_sha256 });
+  }
+
+  /** Public practice leaderboard: each active team's current final submission against the house bots. */
+  async function leaderboard() {
+    const submissions = await store.activeTeamSubmissions(config.eventId);
+    const byTeam = new Map();
+    for (const row of submissions) {
+      const team = byTeam.get(row.team_id) ?? { displayName: row.display_name, finalId: row.final_submission_id, rows: [] };
+      team.rows.push(row);
+      byTeam.set(row.team_id, team);
+    }
+    const finalOwner = new Map();
+    for (const [teamId, team] of byTeam) {
+      const final = effectiveFinalSubmission(team.rows, team.finalId);
+      if (final) finalOwner.set(final.id, { teamId, displayName: team.displayName });
+    }
+    const games = [];
+    for (const game of await store.finishedPractice(config.eventId)) {
+      const seat = finalOwner.has(game.a_submission_id) ? "A" : finalOwner.has(game.b_submission_id) ? "B" : null;
+      if (!seat) continue;
+      const owner = finalOwner.get(seat === "A" ? game.a_submission_id : game.b_submission_id);
+      games.push({ ...owner, opponent: seat === "A" ? game.b_house : game.a_house, points: gamePoints(game, seat) });
+    }
+    return json({
+      opponents: PRACTICE_OPPONENTS.map((id) => ({ id, name: HOUSE_BOT_LABELS[id] })),
+      rows: practiceLeaderboard(games).map(({ teamId, ...row }, index) => ({ rank: index + 1, ...row })),
+      updatedAt: now()
+    });
+  }
+
   // ---------- routing ----------
 
   const routes = [
@@ -707,12 +885,29 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     ["GET", /^\/submissions\/([A-Za-z0-9-]+)$/, (request, match) => getSubmission(request, match[1])],
     ["GET", /^\/submissions\/([A-Za-z0-9-]+)\/source$/, (request, match) => getSubmissionSource(request, match[1])],
     ["PUT", /^\/team\/final-submission$/, (request) => chooseFinalSubmission(request)],
+    ["POST", /^\/practice$/, (request) => requestPractice(request)],
+    ["GET", /^\/matches$/, (request) => listMyMatches(request)],
+    ["GET", /^\/matches\/([A-Za-z0-9-]+)$/, (request, match) => getMatch(request, match[1])],
+    ["GET", /^\/matches\/([A-Za-z0-9-]+)\/replay$/, (request, match) => getMatchReplay(request, match[1])],
+    ["GET", /^\/leaderboard$/, () => leaderboard()],
     ["GET", /^\/_dev\/outbox$/, (request, match, url) => devOutbox(request, url)]
   ];
+
+  const runnerApi = createRunnerApi({ store, now, eventId: config.eventId, expectedImageId: config.runnerImageId ?? null });
 
   return {
     async fetch(request) {
       const url = new URL(request.url);
+      // Runners call the Worker directly (not through the Vercel rewrite) with a bearer token; no cookies, no Origin.
+      if (url.pathname.startsWith("/runner/")) {
+        try {
+          return await runnerApi.fetch(request, url.pathname);
+        } catch (error) {
+          if (error instanceof HttpError) return errorResponse(error);
+          console.error(JSON.stringify({ event: "bot_cup_runner_api_error", path: url.pathname, message: String(error?.message || error) }));
+          return json({ error: "internal_error" }, 500);
+        }
+      }
       if (!url.pathname.startsWith(`${PREFIX}/`)) return json({ error: "not_found" }, 404);
       const path = url.pathname.slice(PREFIX.length);
       try {

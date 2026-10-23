@@ -7,6 +7,7 @@ import type { BotCupApiGateway, BotCupEvent, TeamMember, TeamView } from "./BotC
 import { BOT_CUP_ERROR_MESSAGES, botCupErrorMessage, teamStatusLabel } from "./botCupMessages";
 import { formatDateTime } from "./botCupFormat";
 import { FormAlert, MSSV_PATTERN } from "./formParts";
+import { PracticePanel } from "./PracticePanel";
 import { SubmissionsPanel } from "./SubmissionsPanel";
 import styles from "./botCup.module.css";
 
@@ -16,6 +17,8 @@ export interface TeamDashboardProps {
   readonly team: TeamView;
   readonly onTeamChange: (team: TeamView) => void;
   readonly onSignedOut: (message?: string) => void;
+  /** Opens a game's replay in the replay viewer; without it the team page shows no replay button. */
+  readonly onOpenReplay?: (document: unknown) => void;
 }
 
 function nextStep(team: TeamView, event: BotCupEvent): string {
@@ -30,7 +33,7 @@ function nextStep(team: TeamView, event: BotCupEvent): string {
 }
 
 /** The signed-in team's page (plan §11.3): status, members, invites, submissions, settings. */
-export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut }: TeamDashboardProps) {
+export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut, onOpenReplay }: TeamDashboardProps) {
   const [alert, setAlert] = useState<{ message: string; tone: "error" | "success" } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const canChangeMembers = event.registrationOpen && team.kind === "group";
@@ -103,6 +106,7 @@ export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut 
       </Panel>
 
       <SubmissionsPanel gateway={gateway} event={event} team={team} onSignedOut={onSignedOut} />
+      {team.status === "active" ? <PracticePanel gateway={gateway} onSignedOut={onSignedOut} onOpenReplay={onOpenReplay} /> : null}
 
       <AccountSettings gateway={gateway} onSignedOut={onSignedOut} />
     </div>

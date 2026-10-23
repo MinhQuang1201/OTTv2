@@ -26,11 +26,11 @@ export function errorResponse(error) {
   return json({ error: error.code, ...error.details }, error.status);
 }
 
-export async function readJson(request) {
+export async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   const type = request.headers.get("content-type") || "";
   if (!type.toLowerCase().startsWith("application/json")) throw new HttpError(415, "invalid_request");
   const text = await request.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) throw new HttpError(413, "invalid_request");
+  if (new TextEncoder().encode(text).length > maxBytes) throw new HttpError(413, "invalid_request");
   try {
     const body = JSON.parse(text);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");

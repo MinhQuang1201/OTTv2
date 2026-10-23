@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Badge, type BadgeStatus } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { Panel } from "../../shared/ui/Panel";
-import type { BotCupApiGateway, BotCupEvent, Submission, SubmissionsView, TeamView } from "./BotCupApiGateway";
+import type { BotCupApiGateway, BotCupEvent, Submission, SubmissionDetail, SubmissionsView, TeamView } from "./BotCupApiGateway";
 import { BOT_CUP_ERROR_MESSAGES, botCupErrorMessage } from "./botCupMessages";
 import { formatDateTime } from "./botCupFormat";
-import { FormAlert } from "./formParts";
+import { FormAlert, StarterKitLinks } from "./formParts";
+import { resultLabel } from "./matchFormat";
 import styles from "./botCup.module.css";
 
 const ACCEPT = ".py,.js,.mjs";
+const REFRESH_MS = 5000;
 const MAX_BYTES = 200 * 1024;
 
 const STATUS: Readonly<Record<Submission["status"], { label: string; badge: BadgeStatus }>> = {
@@ -55,6 +57,7 @@ export function SubmissionsPanel({ gateway, event, team, onSignedOut }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [detail, setDetail] = useState<SubmissionDetail | null>(null);
 
   const fail = useCallback((error: unknown) => {
     if ((error as { code?: string }).code === "unauthorized") onSignedOut(BOT_CUP_ERROR_MESSAGES.unauthorized);
@@ -71,6 +74,16 @@ export function SubmissionsPanel({ gateway, event, team, onSignedOut }: {
     });
     return () => controller.abort();
   }, [gateway, team.status, onSignedOut]);
+
+  // A new version waits for the runner's syntax check and smoke test; check back until it is settled.
+  const checking = view?.submissions.some((submission) => submission.status === "checking") ?? false;
+  useEffect(() => {
+    if (!checking) return;
+    const timer = window.setInterval(() => {
+      gateway.listSubmissions().then(setView, () => undefined);
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [checking, gateway]);
 
   if (team.status !== "active") {
     return (
@@ -122,6 +135,18 @@ export function SubmissionsPanel({ gateway, event, team, onSignedOut }: {
     }
   };
 
+  const toggleDetail = async (submission: Submission) => {
+    if (detail?.id === submission.id) {
+      setDetail(null);
+      return;
+    }
+    try {
+      setDetail((await gateway.getSubmission(submission.id)).submission);
+    } catch (error) {
+      fail(error);
+    }
+  };
+
   const note = view ? windowNote(view) : null;
   const finalLocked = view?.window.finalLocked ?? false;
 
@@ -132,6 +157,10 @@ export function SubmissionsPanel({ gateway, event, team, onSignedOut }: {
         Mỗi đội nộp tối đa 10 lần mỗi ngày. Mã SHA-256 của từng phiên bản là biên nhận khi có tranh chấp.
         {event.codeFreezeAt ? ` Khóa code lúc ${formatDateTime(event.codeFreezeAt)}.` : ""}
       </p>
+      <details className={styles.kitBox}>
+        <summary>Bộ khởi đầu: bot mẫu và trọng tài chạy trên máy</summary>
+        <StarterKitLinks />
+      </details>
       {loadError ? <FormAlert message={loadError} /> : null}
       {!view && !loadError ? <p className={styles.hint} role="status">Đang tải danh sách bài nộp…</p> : null}
       {note ? <p className={styles.hint}>{note}</p> : null}
@@ -175,7 +204,23 @@ export function SubmissionsPanel({ gateway, event, team, onSignedOut }: {
                       <Button variant="secondary" disabled={busy !== null} onClick={() => void choose(submission)}>Chọn làm Bản thi đấu</Button>
                     ) : null}
                     <a className={styles.link} href={gateway.submissionSourceUrl(submission.id)} download>Tải mã</a>
+                    <Button variant="quiet" onClick={() => void toggleDetail(submission)} aria-expanded={detail?.id === submission.id}>Kết quả kiểm tra</Button>
                   </div>
+                  {detail?.id === submission.id ? (
+                    <div className={styles.checkDetail}>
+                      <pre className={styles.log}>{detail.checkLog ?? "Máy chấm chưa kiểm tra phiên bản này."}</pre>
+                      {detail.smoke.length ? (
+                        <ul className={styles.smokeList} aria-label="Ván chạy thử">
+                          {detail.smoke.map((game) => (
+                            <li key={game.id}>
+                              Ván chạy thử cầm {game.seat === "A" ? "Đỏ" : "Xanh"} với AI Dễ: {resultLabel({ ...game, mySeat: game.seat })}
+                              {game.stderr ? <pre className={styles.log}>{game.stderr}</pre> : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </li>
               );
             })}

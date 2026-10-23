@@ -595,7 +595,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
 
   if (state.status === "botCup") {
     if (!botCupGateway) return null;
-    return <Suspense fallback={screenFallback}><BotCupScreen gateway={botCupGateway} onLobby={onLobby} inviteToken={botCupInvite} /></Suspense>;
+    return <Suspense fallback={screenFallback}><BotCupScreen gateway={botCupGateway} onLobby={onLobby} inviteToken={botCupInvite} onStartReplay={onStartReplay} /></Suspense>;
   }
 
   // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
