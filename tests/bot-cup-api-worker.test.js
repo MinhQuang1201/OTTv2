@@ -96,7 +96,7 @@ test("Bot Cup API Worker registers a solo team end to end on local D1", { timeou
     const now = Date.now();
     await runWrangler([
       "d1", "execute", DATABASE, ...local, "--command",
-      `INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at) VALUES ('test-event', 'OTT Bot Cup Integration', 'demo', ${now - 3_600_000}, ${now + 86_400_000})`,
+      `INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at, practice_opens_at) VALUES ('test-event', 'OTT Bot Cup Integration', 'demo', ${now - 3_600_000}, ${now + 86_400_000}, ${now - 3_600_000})`,
     ]);
     worker = await startWorker(local);
     const { base } = worker;
@@ -141,6 +141,24 @@ test("Bot Cup API Worker registers a solo team end to end on local D1", { timeou
     const team = await me.json();
     assert.equal(team.status, "active");
     assert.equal(team.members[0].fullName, "Nguyễn Văn Test");
+
+    // P3: an upload is stored as a BLOB in D1 and comes back byte for byte.
+    const source = fs.readFileSync(path.join(root, "sdk/bot-cup/python/bot.py"));
+    const form = new FormData();
+    form.append("file", new Blob([source]), "bot.py");
+    const uploaded = await fetch(`${base}/api/t/submissions`, { method: "POST", headers: { origin: WEB, cookie }, body: form });
+    const uploadedBody = await uploaded.json();
+    assert.equal(uploaded.status, 201, JSON.stringify(uploadedBody));
+    assert.equal(uploadedBody.submission.sha256, require("node:crypto").createHash("sha256").update(source).digest("hex"));
+    assert.equal(uploadedBody.submission.status, "checking");
+    const downloaded = await fetch(`${base}/api/t/submissions/${uploadedBody.submission.id}/source`, { headers: { cookie } });
+    assert.equal(downloaded.status, 200);
+    assert.ok(Buffer.from(await downloaded.arrayBuffer()).equals(source));
+    const tooBig = new FormData();
+    tooBig.append("file", new Blob(["#".repeat(300 * 1024)]), "bot.py");
+    assert.equal((await fetch(`${base}/api/t/submissions`, { method: "POST", headers: { origin: WEB, cookie }, body: tooBig })).status, 413);
+    const listed = await (await fetch(`${base}/api/t/submissions`, { headers: { cookie } })).json();
+    assert.equal(listed.finalSubmissionId, uploadedBody.submission.id);
 
     assert.equal((await post("/logout", {}, { origin: "https://evil.test" })).status, 403);
   } finally {

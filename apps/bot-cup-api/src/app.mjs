@@ -10,10 +10,12 @@
  */
 import {
   OTP_POLICY,
+  FINAL_ELIGIBLE_STATUSES,
   INVITE_TTL_MS,
   INVITE_MAX_SENDS_PER_HOUR,
   PENDING_CAPTAIN_TTL_MS,
   SESSION_TTL_MS,
+  SUBMISSION_POLICY,
   MEMBER_STATUS,
   TEAM_KINDS,
   TEAM_STATUS,
@@ -21,24 +23,34 @@ import {
   cannotAddMember,
   checkStudent,
   deriveTeamStatus,
+  effectiveFinalSubmission,
   eligibilityRules,
   evaluateOtpAttempt,
+  finalSubmissionLocked,
   generateOtp,
+  inspectSource,
   loginLocked,
   maskEmail,
   normalizeMssv,
+  normalizeSource,
   registrationOpen,
+  submissionWindow,
   validateDisplayName,
   validateFullName,
   validateHandle,
-  validatePassword
+  validatePassword,
+  vietnamDayStart
 } from "../../../packages/bot-cup-core/src/index.mjs";
-import { HttpError, clearedSessionCookie, clientIp, errorResponse, json, readCookie, readJson, sessionCookie, SESSION_COOKIE } from "./http.mjs";
+import { HttpError, clearedSessionCookie, clientIp, errorResponse, json, readCookie, readJson, readUpload, sessionCookie, SESSION_COOKIE } from "./http.mjs";
 import { inviteEmail, otpEmail } from "./mail.mjs";
+import { REFERENCE_HASHES } from "./reference-hashes.mjs";
 import { hashPassword, hmacHex, randomToken, sameDigest, sha256Hex, verifyPassword } from "./security.mjs";
 import { createStore, uniqueViolation } from "./store.mjs";
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+// Room for the multipart boundary and headers around a file of SUBMISSION_POLICY.maxBytes.
+const UPLOAD_OVERHEAD_BYTES = 16 * 1024;
 const PREFIX = "/api/t";
 // Per hour and per client address. Generous on purpose: dormitories and campus Wi-Fi put many students behind one NAT
 // address; the limits that matter are per email, per OTP and per handle (plan §5.3).
@@ -500,6 +512,177 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     return json({ messages: await store.readOutbox(to) });
   }
 
+  // ---------- submissions (plan §6, P3) ----------
+
+  function submissionView(row) {
+    return {
+      id: row.id,
+      version: row.seq,
+      language: row.language,
+      filename: row.filename,
+      size: row.size,
+      sha256: row.sha256,
+      origin: row.origin,
+      status: row.status,
+      createdAt: row.created_at
+    };
+  }
+
+  async function requireActiveTeam(request) {
+    const { team } = await requireTeam(request);
+    if (team.status !== TEAM_STATUS.ACTIVE) throw new HttpError(403, "team_not_active");
+    return team;
+  }
+
+  async function ownSubmission(team, id) {
+    const submission = typeof id === "string" && id.length <= 64 ? await store.getSubmission(id) : null;
+    // Another team's submission answers exactly like a missing one.
+    if (!submission || submission.team_id !== team.id) throw new HttpError(404, "not_found");
+    return submission;
+  }
+
+  async function submissionsOf(team) {
+    const event = await loadEvent();
+    const fresh = await store.getTeam(team.id);
+    const rows = await store.listSubmissions(team.id);
+    const final = effectiveFinalSubmission(rows, fresh.final_submission_id);
+    const dayStart = vietnamDayStart(now());
+    const closed = fresh.status === TEAM_STATUS.ACTIVE ? submissionWindow(event, now()) : "team_not_active";
+    return json({
+      submissions: rows.map(submissionView),
+      finalSubmissionId: final?.id ?? null,
+      finalChosen: Boolean(final && final.id === fresh.final_submission_id),
+      window: {
+        open: closed === null,
+        reason: closed,
+        practiceOpensAt: event.practiceOpensAt,
+        codeFreezeAt: event.codeFreezeAt,
+        finalLocked: finalSubmissionLocked(event, now())
+      },
+      quota: {
+        perDay: SUBMISSION_POLICY.perDay,
+        usedToday: rows.filter((row) => row.created_at >= dayStart).length,
+        resetsAt: dayStart + DAY,
+        maxVersions: SUBMISSION_POLICY.maxVersions,
+        total: rows.length
+      },
+      maxBytes: SUBMISSION_POLICY.maxBytes
+    });
+  }
+
+  async function listSubmissions(request) {
+    const { team } = await requireTeam(request);
+    return submissionsOf(team);
+  }
+
+  /** Flags a submission whose normalised source equals another team's or a public reference file (plan §8.5). */
+  async function flagCopies(event, team, submissionId, normalizedHash) {
+    const flags = [];
+    const reference = REFERENCE_HASHES.get(normalizedHash);
+    if (reference) flags.push({ other: null, reference });
+    for (const match of await store.normalizedMatches(event.id, team.id, normalizedHash)) flags.push({ other: match.id, reference: null });
+    if (!flags.length) return;
+    await store.batch(flags.map((flag) => store.statement(
+      `INSERT INTO similarity_flags (id, event_id, kind, submission_id, other_submission_id, reference, score, created_at)
+       VALUES (?, ?, 'hash', ?, ?, ?, 1, ?)`,
+      crypto.randomUUID(), event.id, submissionId, flag.other, flag.reference, now()
+    )));
+  }
+
+  async function createSubmission(request) {
+    const team = await requireActiveTeam(request);
+    const event = await loadEvent();
+    const closed = submissionWindow(event, now());
+    if (closed) throw new HttpError(409, closed);
+
+    const upload = await readUpload(request, SUBMISSION_POLICY.maxBytes + UPLOAD_OVERHEAD_BYTES);
+    const source = inspectSource(upload.bytes, upload.filename);
+    if (!source.ok) throw new HttpError(source.error === "submission_too_large" ? 413 : 400, source.error, { field: "file" });
+    const sha256 = await sha256Hex(upload.bytes);
+    const existing = await store.findSubmissionBySha(team.id, sha256);
+    if (existing) throw new HttpError(409, "submission_duplicate", { version: existing.seq });
+    const normalizedHash = await sha256Hex(normalizeSource(source.text, source.language));
+
+    const id = crypto.randomUUID();
+    const dayStart = vietnamDayStart(now());
+    let results;
+    try {
+      // The limits are checked inside the INSERT, so two uploads racing each other cannot both slip past them.
+      results = await store.batch([
+        store.statement(
+          `INSERT INTO submissions (id, event_id, team_id, seq, language, filename, size, sha256, normalized_hash, created_at)
+           SELECT ?, ?, ?, stats.next_seq, ?, ?, ?, ?, ?, ?
+           FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq, COUNT(*) AS total,
+                        COUNT(CASE WHEN created_at >= ? THEN 1 END) AS today
+                 FROM submissions WHERE team_id = ?) AS stats
+           WHERE stats.total < ? AND stats.today < ?`,
+          id, event.id, team.id, source.language, source.filename, upload.bytes.length, sha256, normalizedHash, now(),
+          dayStart, team.id, SUBMISSION_POLICY.maxVersions, SUBMISSION_POLICY.perDay
+        ),
+        store.statement(
+          `INSERT OR IGNORE INTO submission_sources (sha256, content, size, created_at)
+           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM submissions WHERE id = ?)`,
+          sha256, upload.bytes, upload.bytes.length, now(), id
+        )
+      ]);
+    } catch (error) {
+      const code = uniqueViolation(error);
+      if (code) throw new HttpError(409, code);
+      throw error;
+    }
+    if (!results[0]?.meta?.changes) {
+      const counts = await store.countSubmissions(team.id, dayStart);
+      if (counts.total >= SUBMISSION_POLICY.maxVersions) throw new HttpError(409, "submission_version_limit");
+      throw new HttpError(429, "submission_daily_limit", { retryAfterMs: dayStart + DAY - now() });
+    }
+
+    try {
+      await flagCopies(event, team, id, normalizedHash);
+    } catch (error) {
+      // The submission is stored; a missing flag only weakens a later review, so the upload still succeeds.
+      console.error(JSON.stringify({ event: "bot_cup_flag_failed", submissionId: id, message: String(error?.message || error) }));
+    }
+    return json({ submission: submissionView(await store.getSubmission(id)) }, 201);
+  }
+
+  async function getSubmission(request, id) {
+    const { team } = await requireTeam(request);
+    const submission = await ownSubmission(team, id);
+    return json({ submission: { ...submissionView(submission), checkLog: submission.check_log ?? null } });
+  }
+
+  async function getSubmissionSource(request, id) {
+    const { team } = await requireTeam(request);
+    const submission = await ownSubmission(team, id);
+    const bytes = await store.getSourceBytes(submission.sha256);
+    if (!bytes) throw new HttpError(404, "not_found");
+    const extension = submission.language === "python" ? "py" : "mjs";
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "content-disposition": `attachment; filename="${team.handle}-v${submission.seq}.${extension}"`,
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      }
+    });
+  }
+
+  async function chooseFinalSubmission(request) {
+    const team = await requireActiveTeam(request);
+    const body = await readJson(request);
+    const event = await loadEvent();
+    if (finalSubmissionLocked(event, now())) throw new HttpError(409, "code_frozen");
+    if (body.submissionId === null) {
+      await store.setFinalSubmission(team.id, null);
+      return submissionsOf(team);
+    }
+    const submission = await ownSubmission(team, body.submissionId);
+    if (!FINAL_ELIGIBLE_STATUSES.includes(submission.status)) throw new HttpError(409, "submission_not_eligible");
+    await store.setFinalSubmission(team.id, submission.id);
+    return submissionsOf(team);
+  }
+
   // ---------- routing ----------
 
   const routes = [
@@ -519,6 +702,11 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     ["POST", /^\/password\/reset\/confirm$/, (request) => confirmReset(request)],
     ["POST", /^\/password\/change$/, (request) => changePassword(request)],
     ["POST", /^\/sessions\/revoke-all$/, (request) => revokeAllSessions(request)],
+    ["GET", /^\/submissions$/, (request) => listSubmissions(request)],
+    ["POST", /^\/submissions$/, (request) => createSubmission(request)],
+    ["GET", /^\/submissions\/([A-Za-z0-9-]+)$/, (request, match) => getSubmission(request, match[1])],
+    ["GET", /^\/submissions\/([A-Za-z0-9-]+)\/source$/, (request, match) => getSubmissionSource(request, match[1])],
+    ["PUT", /^\/team\/final-submission$/, (request) => chooseFinalSubmission(request)],
     ["GET", /^\/_dev\/outbox$/, (request, match, url) => devOutbox(request, url)]
   ];
 

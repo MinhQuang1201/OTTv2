@@ -7,6 +7,7 @@ import type { BotCupApiGateway, BotCupEvent, TeamMember, TeamView } from "./BotC
 import { BOT_CUP_ERROR_MESSAGES, botCupErrorMessage, teamStatusLabel } from "./botCupMessages";
 import { formatDateTime } from "./botCupFormat";
 import { FormAlert, MSSV_PATTERN } from "./formParts";
+import { SubmissionsPanel } from "./SubmissionsPanel";
 import styles from "./botCup.module.css";
 
 export interface TeamDashboardProps {
@@ -19,16 +20,16 @@ export interface TeamDashboardProps {
 
 function nextStep(team: TeamView, event: BotCupEvent): string {
   if (team.status === "active") {
-    return event.practiceOpensAt
-      ? `Đội đã đủ điều kiện. Nộp bài mở từ ${formatDateTime(event.practiceOpensAt)}.`
-      : "Đội đã đủ điều kiện. Ban tổ chức sẽ thông báo ngày mở nộp bài.";
+    if (!event.practiceOpensAt) return "Đội đã đủ điều kiện. Ban tổ chức sẽ thông báo ngày mở nộp bài.";
+    if (event.serverTime < event.practiceOpensAt) return `Đội đã đủ điều kiện. Nộp bài mở từ ${formatDateTime(event.practiceOpensAt)}.`;
+    return "Đội đã đủ điều kiện. Hãy nộp bot ở mục Nộp bài bên dưới.";
   }
   if (team.members.length < 2) return "Mời thêm 1–2 thành viên. Đội nhóm cần 2–3 người và mọi người phải xác nhận qua email.";
   const waiting = team.members.filter((member) => member.status === "pending").length;
   return `Còn ${waiting} thành viên chưa xác nhận. Nhắc họ mở email mời (xem cả Thư rác / Junk).`;
 }
 
-/** The signed-in team's page (plan §11.3): status, members, invites, settings. Submissions arrive in P3. */
+/** The signed-in team's page (plan §11.3): status, members, invites, submissions, settings. */
 export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut }: TeamDashboardProps) {
   const [alert, setAlert] = useState<{ message: string; tone: "error" | "success" } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -101,12 +102,7 @@ export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut 
         <FormAlert message={alert?.message ?? null} tone={alert?.tone} />
       </Panel>
 
-      <Panel heading="Nộp bài">
-        <p>
-          {event.practiceOpensAt ? `Nộp bài và luyện tập mở từ ${formatDateTime(event.practiceOpensAt)}.` : "Nộp bài sẽ mở khi giai đoạn luyện tập bắt đầu."}
-          {" "}Bot viết bằng Python 3.12 hoặc JavaScript (Node 22), một file, tối đa 200 KB.
-        </p>
-      </Panel>
+      <SubmissionsPanel gateway={gateway} event={event} team={team} onSignedOut={onSignedOut} />
 
       <AccountSettings gateway={gateway} onSignedOut={onSignedOut} />
     </div>

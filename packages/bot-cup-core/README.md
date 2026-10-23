@@ -6,5 +6,7 @@ no randomness of its own: callers pass `now` and a `getRandomValues` function.
 - `eligibility.mjs` — demo/production modes, MSSV and email checks, email masking
 - `team.mjs` — handle, display name and full-name validation, team status derived from members
 - `policy.mjs` — OTP, invite, session and login limits, registration window
+- `submission.mjs` — upload checks, submission window and daily limit, final-submission choice, source normalisation
+  for copy detection
 
 `apps/bot-cup-api` is the only consumer for now. Later phases add pairing, standings and replay verification here.

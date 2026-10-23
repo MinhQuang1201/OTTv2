@@ -28,7 +28,13 @@ function createD1() {
       for (const arg of args) {
         if (arg === undefined) throw new TypeError(`D1 cannot bind undefined (${this.sql.slice(0, 60)})`);
       }
-      return new Statement(this.sql, args);
+      // D1 binds typed arrays and ArrayBuffers as BLOBs; better-sqlite3 wants a Buffer.
+      const bound = args.map((arg) => {
+        if (arg instanceof ArrayBuffer) return Buffer.from(arg);
+        if (ArrayBuffer.isView(arg) && !Buffer.isBuffer(arg)) return Buffer.from(arg.buffer, arg.byteOffset, arg.byteLength);
+        return arg;
+      });
+      return new Statement(this.sql, bound);
     }
 
     execute() {

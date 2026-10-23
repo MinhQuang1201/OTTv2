@@ -28,9 +28,14 @@ function wranglerSync(args) {
 
 const now = Date.now();
 wranglerSync(["d1", "migrations", "apply", "ottv2-bot-cup-test", ...local]);
-wranglerSync(["d1", "execute", "ottv2-bot-cup-test", ...local, "--command",
-  `INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at, practice_opens_at) VALUES ('test-event', 'OTT Bot Cup (local)', 'demo', ${now - 86_400_000}, ${now + 30 * 86_400_000}, ${now + 7 * 86_400_000})
-   ON CONFLICT (id) DO UPDATE SET registration_opens_at = excluded.registration_opens_at, registration_closes_at = excluded.registration_closes_at, practice_opens_at = excluded.practice_opens_at`]);
+// One line: on Windows the command goes through cmd.exe, which cuts an argument at its first line break.
+// Practice (submissions) opened an hour ago so the whole team page works locally.
+wranglerSync(["d1", "execute", "ottv2-bot-cup-test", ...local, "--command", [
+  "INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at, practice_opens_at)",
+  `VALUES ('test-event', 'OTT Bot Cup (local)', 'demo', ${now - 86_400_000}, ${now + 30 * 86_400_000}, ${now - 3_600_000})`,
+  "ON CONFLICT (id) DO UPDATE SET registration_opens_at = excluded.registration_opens_at,",
+  "registration_closes_at = excluded.registration_closes_at, practice_opens_at = excluded.practice_opens_at"
+].join(" ")]);
 
 const dev = spawnLocalCommand(launcher.command, [
   ...launcher.argsPrefix, "dev", ...local, "--ip", "127.0.0.1", "--port", "8789", "--show-interactive-dev-session=false",

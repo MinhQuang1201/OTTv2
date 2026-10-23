@@ -66,6 +66,35 @@ export interface InvitePreview {
   readonly registrationOpen: boolean;
 }
 
+export type SubmissionStatus = "checking" | "ready" | "build_failed" | "smoke_failed";
+
+export interface Submission {
+  readonly id: string;
+  readonly version: number;
+  readonly language: "python" | "node";
+  readonly filename: string;
+  readonly size: number;
+  readonly sha256: string;
+  readonly origin: "upload" | "github";
+  readonly status: SubmissionStatus;
+  readonly createdAt: number;
+}
+
+export interface SubmissionsView {
+  readonly submissions: readonly Submission[];
+  readonly finalSubmissionId: string | null;
+  readonly finalChosen: boolean;
+  readonly window: {
+    readonly open: boolean;
+    readonly reason: string | null;
+    readonly practiceOpensAt: number | null;
+    readonly codeFreezeAt: number | null;
+    readonly finalLocked: boolean;
+  };
+  readonly quota: { readonly perDay: number; readonly usedToday: number; readonly resetsAt: number; readonly maxVersions: number; readonly total: number };
+  readonly maxBytes: number;
+}
+
 export class BotCupApiError extends Error {
   constructor(
     readonly status: number,
@@ -157,14 +186,36 @@ export class BotCupApiGateway {
     return this.request("POST", "/sessions/revoke-all", {});
   }
 
+  listSubmissions(signal?: AbortSignal): Promise<SubmissionsView> {
+    return this.request("GET", "/submissions", undefined, signal);
+  }
+
+  uploadSubmission(file: File): Promise<{ readonly submission: Submission }> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.request("POST", "/submissions", form);
+  }
+
+  /** `null` goes back to "the newest eligible version". */
+  chooseFinalSubmission(submissionId: string | null): Promise<SubmissionsView> {
+    return this.request("PUT", "/team/final-submission", { submissionId });
+  }
+
+  /** Same-origin link that downloads the team's own source of one version. */
+  submissionSourceUrl(submissionId: string): string {
+    return `${this.baseUrl}/submissions/${encodeURIComponent(submissionId)}/source`;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     let response: Response;
+    const multipart = typeof FormData !== "undefined" && body instanceof FormData;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
         credentials: "same-origin",
-        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        // The browser sets the multipart boundary itself.
+        headers: body === undefined || multipart ? undefined : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : multipart ? (body as FormData) : JSON.stringify(body),
         signal,
       });
     } catch (error) {

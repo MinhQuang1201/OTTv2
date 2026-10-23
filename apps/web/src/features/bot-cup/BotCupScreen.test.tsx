@@ -40,6 +40,14 @@ function fakeGateway(overrides: Partial<Record<keyof BotCupApiGateway, unknown>>
     confirmPasswordReset: vi.fn(),
     changePassword: vi.fn(),
     revokeAllSessions: vi.fn(),
+    listSubmissions: vi.fn().mockResolvedValue({
+      submissions: [], finalSubmissionId: null, finalChosen: false,
+      window: { open: false, reason: "submissions_not_open", practiceOpensAt: null, codeFreezeAt: null, finalLocked: false },
+      quota: { perDay: 10, usedToday: 0, resetsAt: NOW, maxVersions: 200, total: 0 }, maxBytes: 204800,
+    }),
+    uploadSubmission: vi.fn(),
+    chooseFinalSubmission: vi.fn(),
+    submissionSourceUrl: vi.fn((id: string) => `/api/t/submissions/${id}/source`),
     ...overrides,
   };
   return gateway as unknown as BotCupApiGateway & Record<string, ReturnType<typeof vi.fn>>;

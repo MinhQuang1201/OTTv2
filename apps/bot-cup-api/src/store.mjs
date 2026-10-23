@@ -7,7 +7,8 @@ const UNIQUE_ERRORS = [
   ["teams.event_id, teams.handle", "handle_taken"],
   ["teams.event_id, teams.display_key", "display_name_taken"],
   ["members.event_id, members.mssv", "mssv_taken"],
-  ["members.event_id, members.email", "email_taken"]
+  ["members.event_id, members.email", "email_taken"],
+  ["submissions.team_id, submissions.sha256", "submission_duplicate"]
 ];
 
 /** @returns {string|null} the API error code for a UNIQUE constraint failure, or null for any other error. */
@@ -174,6 +175,52 @@ export function createStore(db) {
         bucket, windowStart
       );
       return row.count;
+    },
+
+    // ---------- submissions (P3) ----------
+
+    /** Every version of a team, newest first, without the source bytes. */
+    listSubmissions(teamId) {
+      return all(
+        `SELECT id, seq, language, filename, size, sha256, origin, created_at, status FROM submissions
+         WHERE team_id = ? ORDER BY seq DESC`,
+        teamId
+      );
+    },
+
+    getSubmission(id) {
+      return first("SELECT * FROM submissions WHERE id = ?", id);
+    },
+
+    findSubmissionBySha(teamId, sha256) {
+      return first("SELECT id, seq FROM submissions WHERE team_id = ? AND sha256 = ?", teamId, sha256);
+    },
+
+    async getSourceBytes(sha256) {
+      const row = await first("SELECT content FROM submission_sources WHERE sha256 = ?", sha256);
+      // D1 returns a BLOB as an array of numbers, better-sqlite3 as a Buffer.
+      return row ? new Uint8Array(row.content) : null;
+    },
+
+    countSubmissions(teamId, since) {
+      return first(
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN created_at >= ? THEN 1 END) AS today FROM submissions WHERE team_id = ?",
+        since, teamId
+      );
+    },
+
+    /** Submissions of other teams with the same normalised source, one (the earliest) per team. */
+    normalizedMatches(eventId, teamId, normalizedHash, limit = 20) {
+      return all(
+        `SELECT team_id, MIN(id) AS id FROM submissions
+         WHERE event_id = ? AND normalized_hash = ? AND team_id <> ?
+         GROUP BY team_id LIMIT ?`,
+        eventId, normalizedHash, teamId, limit
+      );
+    },
+
+    setFinalSubmission(teamId, submissionId) {
+      return run("UPDATE teams SET final_submission_id = ? WHERE id = ?", submissionId, teamId);
     },
 
     readOutbox(toEmail) {
