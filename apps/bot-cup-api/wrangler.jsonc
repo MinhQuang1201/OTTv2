@@ -53,6 +53,7 @@
       "vars": {
         "BOT_CUP_EVENT_ID": "test-event",
         "BOT_CUP_WEB_ORIGIN": "http://localhost:5173",
+        "BOT_CUP_ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
         "BOT_CUP_EMAIL_MODE": "outbox",
         "BOT_CUP_TURNSTILE_BYPASS": "true"
       },

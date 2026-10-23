@@ -124,6 +124,10 @@ jobs:
           VITE_OTT_PLAYHTML_CONTROL_ENDPOINT: ${{ vars.WORKER_URL }}
           # Must match OTT_SPECTATOR_ENABLED in apps/worker/wrangler.jsonc; without it the lobby hides live matches.
           VITE_OTT_SPECTATOR_ENABLED: "true"
+          # Bot Cup (docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md): on only in a GitHub environment that sets
+          # BOT_CUP_API_URL to its apps/bot-cup-api Worker; the build then writes the /api/t rewrite into vercel.json.
+          OTT_BOT_CUP_API_ORIGIN: ${{ vars.BOT_CUP_API_URL }}
+          VITE_OTT_BOT_CUP_ENABLED: ${{ vars.BOT_CUP_API_URL != '' && 'true' || 'false' }}
         run: npm run build:web
 
       - name: Deploy frontend to Vercel

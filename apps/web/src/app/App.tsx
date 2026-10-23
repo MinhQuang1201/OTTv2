@@ -22,7 +22,8 @@ import { createRuntimeBridge, type RuntimeBridge } from "../sessions/online/runt
 import { resumeStore as defaultResumeStore, type PendingOnlineGame, type ResumeStore } from "../sessions/online/resumeStore";
 import { joinCodeFromUrl } from "../sessions/online/roomCode";
 import { ArenaApiGateway } from "../features/arena/ArenaApiGateway";
-import { isArenaAvailable, isSpectatorEnabled, resolveArenaDiscoveryEndpoint, resolveArenaEndpoint } from "../runtime-config";
+import { isArenaAvailable, isBotCupEnabled, isSpectatorEnabled, resolveArenaDiscoveryEndpoint, resolveArenaEndpoint, resolveBotCupApiBase } from "../runtime-config";
+import { BotCupApiGateway } from "../features/bot-cup/BotCupApiGateway";
 import { AppProviders } from "./AppProviders";
 import { ScreenBoundary } from "./ScreenBoundary";
 import { AppLifecycleCoordinator, type AppLifecycleOptions } from "./AppLifecycleCoordinator";
@@ -35,6 +36,7 @@ const defaultOnlineGateway = new OnlineLobbyGateway();
 // Arena and replay are opened by few players; keep them out of the first download.
 const ArenaScreen = lazy(() => import("../features/arena/ArenaScreen").then((module) => ({ default: module.ArenaScreen })));
 const ReplayScreen = lazy(() => import("../features/replay/ReplayScreen").then((module) => ({ default: module.ReplayScreen })));
+const BotCupScreen = lazy(() => import("../features/bot-cup/BotCupScreen").then((module) => ({ default: module.BotCupScreen })));
 const screenFallback = <Panel className={styles.screen}><Spinner label="Đang tải" /></Panel>;
 
 export type AppState =
@@ -44,6 +46,7 @@ export type AppState =
   | { readonly status: "playing"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot; readonly scenario: DemoScenario }
   | { readonly status: "finished"; readonly generation: number; readonly session: GameSession; readonly snapshot: GameSnapshot & { readonly result?: GameResultView | null }; readonly scenario: DemoScenario }
   | { readonly status: "arena"; readonly generation: number }
+  | { readonly status: "botCup"; readonly generation: number }
   | { readonly status: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly error: SessionErrorView; readonly scenario: DemoScenario };
 
 export type SessionFactory = (scenario: DemoScenario) => GameSession;
@@ -104,6 +107,7 @@ function stateForSnapshot(session: GameSession, scenario: DemoScenario, snapshot
 type LifecycleAction =
   | { readonly type: "boot"; readonly generation: number }
   | { readonly type: "arena"; readonly generation: number }
+  | { readonly type: "botCup"; readonly generation: number }
   | { readonly type: "snapshot"; readonly generation: number; readonly session: GameSession; readonly scenario: DemoScenario; readonly snapshot: GameSnapshot }
   | { readonly type: "error"; readonly generation: number; readonly session: GameSession | null; readonly snapshot: GameSnapshot | null; readonly scenario: DemoScenario; readonly error: SessionErrorView };
 
@@ -111,6 +115,7 @@ function appStateReducer(_state: AppState, action: LifecycleAction): AppState {
   if (action.generation < _state.generation) return _state;
   if (action.type === "boot") return _state.status === "boot" ? _state : { status: "boot", generation: action.generation };
   if (action.type === "arena") return { status: "arena", generation: action.generation };
+  if (action.type === "botCup") return { status: "botCup", generation: action.generation };
   if (action.type === "error") return { status: "error", generation: action.generation, session: action.session, snapshot: action.snapshot, error: action.error, scenario: action.scenario };
   return stateForSnapshot(action.session, action.scenario, action.snapshot, action.generation);
 }
@@ -131,6 +136,39 @@ export interface AppProps {
   readonly onStateChange?: (state: AppState) => void;
   readonly onWatchMatch?: (identity: PublicMatchIdentity) => void;
   readonly resumeStore?: ResumeStore;
+  readonly botCupEnabled?: boolean;
+  readonly botCupGateway?: BotCupApiGateway;
+}
+
+/**
+ * Reads the Bot Cup link once: `?view=bot-cup` opens the event screen, `&invite=<token>` comes from an invite email.
+ * The token leaves the address bar at once so it is not kept in history or shared by copying the URL.
+ */
+function takeBotCupLinkFromLocation(): { readonly open: boolean; readonly invite: string | null } {
+  if (typeof window === "undefined") return { open: false, invite: null };
+  const params = new URLSearchParams(window.location.search);
+  const invite = params.get("invite");
+  const open = params.get("view") === "bot-cup" || invite !== null;
+  if (invite !== null) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("invite");
+      url.searchParams.set("view", "bot-cup");
+      window.history.replaceState(window.history.state, "", url.toString());
+    } catch { /* keep the token even if the URL cannot be rewritten */ }
+  }
+  return { open, invite };
+}
+
+/** Keeps `?view=bot-cup` in the address bar while the event screen is open, so a reload returns to it. */
+function setBotCupView(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    const url = new URL(window.location.href);
+    if (open) url.searchParams.set("view", "bot-cup");
+    else url.searchParams.delete("view");
+    if (url.toString() !== window.location.href) window.history.replaceState(window.history.state, "", url.toString());
+  } catch { /* the screen still opens; only the URL is not updated */ }
 }
 
 /** Reads `?join=` once and drops it from the address bar so a reload does not re-join. */
@@ -146,7 +184,7 @@ function takeJoinCodeFromLocation(): string | undefined {
   return code;
 }
 
-export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, spectatorEnabled, demoEnabled, onStateChange, onWatchMatch = () => undefined, resumeStore = defaultResumeStore }: AppProps) {
+export function App({ initialScenario, sessionFactory = createDemoSession, onlineGateway = defaultOnlineGateway, onlineSessionFactory, spectatorSessionFactory, replaySessionFactory, arenaGateway, arenaAvailable, runtime: runtimeDependency, onlineLobbyStreamFactory, spectatorEnabled, demoEnabled, onStateChange, onWatchMatch = () => undefined, resumeStore = defaultResumeStore, botCupEnabled, botCupGateway }: AppProps) {
   const demo = useDemoScenario(initialScenario);
   const isDemo = demoEnabled ?? demo.enabled;
   const effectiveSpectatorEnabled = spectatorEnabled ?? isSpectatorEnabled();
@@ -179,6 +217,11 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const observedSnapshot = useSessionSnapshot(activeSession?.session ?? null);
   const [pendingGame, setPendingGame] = useState<PendingOnlineGame | null>(() => resumeStore.read());
   const [initialRoomCode] = useState(takeJoinCodeFromLocation);
+  const effectiveBotCupEnabled = botCupEnabled ?? isBotCupEnabled();
+  const [botCupGatewayInstance] = useState(() => botCupGateway ?? new BotCupApiGateway({ baseUrl: resolveBotCupApiBase() }));
+  const [botCupLink] = useState(takeBotCupLinkFromLocation);
+  const [botCupInvite, setBotCupInvite] = useState<string | null>(botCupLink.invite);
+  const botCupLinkHandledRef = useRef(false);
 
   // Re-read on every return to the lobby: a game may have finished, been left or been saved meanwhile.
   useEffect(() => {
@@ -365,6 +408,8 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
 
   const aiLevelRef = useRef<AiLevel>(DEFAULT_AI_LEVEL);
   const onLobby = () => {
+    setBotCupInvite(null);
+    setBotCupView(false);
     setRestartToken((value) => value + 1);
     demo.setScenario("lobby-default");
   };
@@ -427,6 +472,25 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     void coordinatorRef.current?.releaseCurrentSession().catch(() => undefined);
   };
 
+  const onOpenBotCup = () => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    dispatch({ type: "botCup", generation });
+    setActiveSession(null);
+    lobbyStreamUnsubscribeRef.current?.();
+    lobbyStreamUnsubscribeRef.current = null;
+    setLobbyStreamSnapshot(null);
+    setBotCupView(true);
+    void coordinatorRef.current?.releaseCurrentSession().catch(() => undefined);
+  };
+
+  // A Bot Cup link (?view=bot-cup, invite emails) opens the event screen once the lobby is ready.
+  useEffect(() => {
+    if (botCupLinkHandledRef.current || appState.status !== "lobby") return;
+    botCupLinkHandledRef.current = true;
+    if (effectiveBotCupEnabled && botCupLink.open) onOpenBotCup();
+  }, [appState.status]);
+
   return (
     <AppProviders>
       <main className={styles.app} aria-label="OTTv2">
@@ -469,6 +533,9 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 onResumeOnline={onResumeOnline}
                 onDiscardResume={onDiscardResume}
                 initialRoomCode={initialRoomCode}
+                botCupGateway={effectiveBotCupEnabled ? botCupGatewayInstance : undefined}
+                onOpenBotCup={onOpenBotCup}
+                botCupInvite={botCupInvite}
               />
             </ScreenBoundary>
           </div>
@@ -478,7 +545,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway, pendingGame, onResumeOnline, onDiscardResume, initialRoomCode }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway, pendingGame, onResumeOnline, onDiscardResume, initialRoomCode, botCupGateway, onOpenBotCup, botCupInvite }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -501,7 +568,11 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly onResumeOnline: () => void;
   readonly onDiscardResume: () => void;
   readonly initialRoomCode?: string;
+  readonly botCupGateway?: BotCupApiGateway;
+  readonly onOpenBotCup: () => void;
+  readonly botCupInvite: string | null;
 }) {
+  const botCupProps = botCupGateway ? { botCupGateway, onOpenBotCup } : {};
   const resumeProps = {
     pendingGame: pendingGame ? { alias: pendingGame.alias, seat: pendingGame.seat } : null,
     onResumeOnline,
@@ -520,6 +591,11 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
 
   if (state.status === "arena") {
     return <Suspense fallback={screenFallback}><ArenaScreen gateway={arenaGateway} onLobby={onLobby} onStartReplay={onStartReplay} /></Suspense>;
+  }
+
+  if (state.status === "botCup") {
+    if (!botCupGateway) return null;
+    return <Suspense fallback={screenFallback}><BotCupScreen gateway={botCupGateway} onLobby={onLobby} inviteToken={botCupInvite} /></Suspense>;
   }
 
   // Replay mode MUST route BEFORE phase checks; never render GameScreen or live ResultDialog
@@ -542,6 +618,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     arenaAvailable={arenaAvailable}
     onlineGateway={onlineGateway}
     {...resumeProps}
+    {...botCupProps}
     onCancelConnecting={onLobby}
   />;
   if (state.status === "lobby") return <LobbyScreen
@@ -559,6 +636,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
     arenaAvailable={arenaAvailable}
     onlineGateway={onlineGateway}
     {...resumeProps}
+    {...botCupProps}
   />;
   if (state.status === "playing" || state.status === "finished") return <GameScreen session={state.session} snapshot={state.snapshot} onLobby={onLobby} />;
   return <PlaceholderScreen heading="Kết quả" state={state} detail="Màn hình kết quả đang chuẩn bị." />;
@@ -589,7 +667,7 @@ function publicMatchState(snapshot: GameSnapshot, demoEnabled: boolean, scenario
   return { status: "unavailable", message: "Danh sách trận đang diễn ra hiện không khả dụng." };
 }
 
-function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" } | { status: "arena" }> }) {
+function PlaceholderScreen({ heading, detail, state }: { readonly heading: string; readonly detail: string; readonly state: Exclude<AppState, { status: "boot" } | { status: "error" } | { status: "arena" } | { status: "botCup" }> }) {
   return (
     <Panel className={styles.screen}>
       <h1>{heading}</h1>

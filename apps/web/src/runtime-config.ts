@@ -5,6 +5,8 @@ type PublicRuntimeEnv = {
   VITE_OTT_ARENA_API_ENDPOINT?: string;
   VITE_OTT_ARENA_DISCOVERY_ENDPOINT?: string;
   VITE_OTT_SPECTATOR_ENABLED?: string | boolean;
+  VITE_OTT_BOT_CUP_ENABLED?: string | boolean;
+  VITE_OTT_BOT_CUP_API_BASE?: string;
 };
 
 export interface WebRuntimeConfig {
@@ -79,6 +81,21 @@ export function isArenaAvailable(endpointOrEnv?: string | PublicRuntimeEnv | nul
     return resolveArenaEndpoint(endpointOrEnv).length > 0 || resolveArenaDiscoveryEndpoint(endpointOrEnv).length > 0;
   }
   return resolveArenaEndpoint().length > 0 || resolveArenaDiscoveryEndpoint().length > 0;
+}
+
+/** Bot Cup banner and screens (plan P2). Off unless the build sets VITE_OTT_BOT_CUP_ENABLED=true. */
+export function isBotCupEnabled(env?: PublicRuntimeEnv): boolean {
+  const sourceEnv = env ?? (typeof import.meta !== "undefined" ? (import.meta.env as PublicRuntimeEnv) : undefined);
+  const value = sourceEnv?.VITE_OTT_BOT_CUP_ENABLED;
+  if (typeof value === "boolean") return value;
+  const normalized = valueOf(value).toLowerCase();
+  return normalized === "true" || normalized === "1";
+}
+
+/** Same-origin path of the Bot Cup API: the Vercel rewrite in deployments, the Vite proxy in development. */
+export function resolveBotCupApiBase(env?: PublicRuntimeEnv): string {
+  const sourceEnv = env ?? (typeof import.meta !== "undefined" ? (import.meta.env as PublicRuntimeEnv) : undefined);
+  return valueOf(sourceEnv?.VITE_OTT_BOT_CUP_API_BASE) || "/api/t";
 }
 
 export function resolveWebRuntimeConfig(env: PublicRuntimeEnv): WebRuntimeConfig | null {
