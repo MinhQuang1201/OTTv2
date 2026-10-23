@@ -205,6 +205,25 @@ export function validatePublicMatchCatalog(value: unknown): ParseResult<PublicMa
   return { ok: true, value: value as PublicMatchCatalogMessage };
 }
 
+/**
+ * Keep the leading matches that fit one catalog message (match count and byte limit), in order.
+ * A full catalog is cut instead of rejected, so one busy moment cannot hide every live match.
+ */
+export function fitPublicMatchCatalog(catalogRevision: number, matches: readonly PublicMatchView[]): PublicMatchView[] {
+  const envelope = { __ott: true, type: "ott:active-matches", catalogRevision, matches: [] };
+  let bytes = byteLength(JSON.stringify(envelope));
+  const kept: PublicMatchView[] = [];
+  for (const match of matches) {
+    if (kept.length >= MAX_PUBLIC_MATCHES) break;
+    // Each further element adds its JSON plus one separating comma.
+    const added = byteLength(JSON.stringify(match)) + (kept.length ? 1 : 0);
+    if (bytes + added > MAX_OTT_PAYLOAD_BYTES) break;
+    bytes += added;
+    kept.push(match);
+  }
+  return kept;
+}
+
 function parseJson(value: string): ParseResult<Record<string, unknown>> {
   if (typeof value !== "string" || byteLength(value) > MAX_OTT_PAYLOAD_BYTES) {
     return { ok: false, error: "invalid_payload" };
