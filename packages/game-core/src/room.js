@@ -328,6 +328,14 @@ class Room {
     const timer = this.reconnectTimers.get(seat);
     if (timer !== undefined) this.cancel(timer);
     this.reconnectTimers.delete(seat);
+    if (this.status === "waiting") {
+      // Nobody holds the other seat yet: the room closes without a winner.
+      this.state.reason = "leave";
+      this.state.eliminatedPlayer = null;
+      this.commitStateChange();
+      this.finishTerminal();
+      return { seat, name: player.name, reason: "leave", result: { ok: true, state: this.state, events: [] } };
+    }
     this.state.winner = other;
     this.state.reason = "leave";
     this.state.eliminatedPlayer = null;

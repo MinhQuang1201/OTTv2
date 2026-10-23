@@ -350,6 +350,21 @@ describe("room", () => {
     assert.equal(room.nextEventId, 2);
   });
 
+  it("closes a waiting room without a winner when its creator leaves", () => {
+    const clock = fakeClock(0);
+    const room = new Room("waiting-leave", clock);
+    const a = fakeConnection();
+    room.addPlayer(a, "Alice");
+    const result = room.leavePlayer(a);
+    assert.equal(result.reason, "leave");
+    assert.equal(room.status, "done");
+    assert.equal(room.state.winner, null);
+    assert.equal(room.state.reason, "leave");
+    assert.equal(room.state.clock.runningSeat, null);
+    assert.deepEqual(room.lastEvents, []);
+    assert.equal(room.addPlayer(fakeConnection(), "Bob").ok, false);
+  });
+
   it("exposes the authoritative revision in snapshots", () => {
     const clock = fakeClock(0);
     const { room } = roomWithPlayers(clock);
