@@ -61,6 +61,8 @@ const SESSION_ERROR_CODES: ReadonlySet<SessionErrorView["code"]> = new Set([
   "reconnect_failed", "room_unavailable", "session_failed",
 ]);
 const GENERIC_SESSION_ERROR = "Không thể xử lý phiên chơi.";
+/** Waiting rooms have no push channel; the lobby re-reads them at this pace while it is visible. */
+export const WAITING_ROOMS_REFRESH_MS = 10_000;
 
 export function safeSessionError(error: unknown): SessionErrorView {
   const isPlainObject = error !== null && typeof error === "object" && !(
@@ -216,6 +218,12 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
     };
   }, []);
 
+  const onLobbyScreen = appState.status === "lobby";
+  const pollWaitingRooms = onLobbyScreen && !isDemo && onlineGateway.available;
+  // A waiting room leaves the list when its game starts, and the public catalog announces exactly that.
+  const publicMatchSet = lobbyStreamSnapshot?.matches.map((match) => match.allocationId).sort().join(",") ?? "";
+  const [waitingRoomsRefresh, setWaitingRoomsRefresh] = useState(0);
+
   useEffect(() => {
     if (isDemo) {
       setWaitingRooms({ status: "ready", rooms: [] });
@@ -225,15 +233,30 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
       setWaitingRooms({ status: "unavailable", message: "Online hiện không khả dụng." });
       return;
     }
+    if (!onLobbyScreen) return;
     let active = true;
-    setWaitingRooms({ status: "loading" });
+    // A background refresh keeps the last list on screen instead of flashing the loading state.
+    setWaitingRooms((current) => current.status === "ready" ? current : { status: "loading" });
     void onlineGateway.listRooms().then((result) => {
       if (active) setWaitingRooms({ status: "ready", rooms: result.rooms });
     }).catch(() => {
-      if (active) setWaitingRooms({ status: "error", message: "Không thể tải danh sách phòng." });
+      if (active) setWaitingRooms((current) => current.status === "ready" ? current : { status: "error", message: "Không thể tải danh sách phòng." });
     });
     return () => { active = false; };
-  }, [isDemo, demo.scenario, onlineGateway]);
+  }, [isDemo, demo.scenario, onlineGateway, onLobbyScreen, publicMatchSet, waitingRoomsRefresh]);
+
+  useEffect(() => {
+    if (!pollWaitingRooms) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") setWaitingRoomsRefresh((value) => value + 1);
+    };
+    const timer = window.setInterval(refresh, WAITING_ROOMS_REFRESH_MS);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [pollWaitingRooms]);
 
   useEffect(() => {
     onStateChange?.(appState);

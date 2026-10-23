@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App, createDemoSession, safeSessionError, type AppState, type SessionFactory } from "./App";
+import { App, WAITING_ROOMS_REFRESH_MS, createDemoSession, safeSessionError, type AppState, type SessionFactory } from "./App";
+import type { PublicMatchView } from "../../../../packages/protocol/src/index";
 import { ScreenBoundary } from "./ScreenBoundary";
 import type { GameSession, GameSnapshot } from "../sessions/contract";
 import { DemoSession } from "../sessions/demo/DemoSession";
@@ -1503,6 +1504,108 @@ describe("App shell lifecycle", () => {
         expect(onlineLobbyStreamFactory).toHaveBeenCalledTimes(1);
         expect(startSpy).toHaveBeenCalledTimes(1);
       });
+    });
+  });
+
+  describe("Waiting room refresh", () => {
+    const room = (roomId: string) => ({ roomId, hostName: `host-${roomId}`, createdAt: 1 });
+
+    function gatewayReturning(...lists: ReturnType<typeof room>[][]) {
+      let call = 0;
+      const listRooms = vi.fn(async () => ({ available: true, rooms: lists[Math.min(call++, lists.length - 1)] }));
+      return { listRooms, gateway: { available: true, listRooms } as unknown as OnlineLobbyGateway };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("shows a room created after the lobby opened on the next periodic refresh", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      const { listRooms, gateway } = gatewayReturning([], [room("room-late")]);
+      render(<App demoEnabled={false} spectatorEnabled={false} onlineGateway={gateway} />);
+      await waitFor(() => expect(listRooms).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText("room-late")).not.toBeInTheDocument();
+
+      await act(async () => { vi.advanceTimersByTime(WAITING_ROOMS_REFRESH_MS); });
+
+      expect(await screen.findByText("room-late")).toBeInTheDocument();
+      expect(listRooms).toHaveBeenCalledTimes(2);
+    });
+
+    it("re-reads waiting rooms when the tab becomes visible again", async () => {
+      const { listRooms, gateway } = gatewayReturning([], [room("room-back")]);
+      render(<App demoEnabled={false} spectatorEnabled={false} onlineGateway={gateway} />);
+      await waitFor(() => expect(listRooms).toHaveBeenCalledTimes(1));
+
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+
+      expect(await screen.findByText("room-back")).toBeInTheDocument();
+    });
+
+    it("does not refresh while the tab is hidden", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      const { listRooms, gateway } = gatewayReturning([]);
+      render(<App demoEnabled={false} spectatorEnabled={false} onlineGateway={gateway} />);
+      await waitFor(() => expect(listRooms).toHaveBeenCalledTimes(1));
+
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await act(async () => { vi.advanceTimersByTime(WAITING_ROOMS_REFRESH_MS * 3); });
+
+      expect(listRooms).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a filled room as soon as the public catalog announces its game", async () => {
+      let streamSnapshot = { status: "ready" as const, matches: [] as PublicMatchView[], catalogRevision: 1 };
+      let notify: () => void = () => undefined;
+      const fakeStream = {
+        start: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
+        subscribe: vi.fn((listener: () => void) => { notify = listener; return () => undefined; }),
+        getSnapshot: vi.fn(() => streamSnapshot),
+      };
+      const { listRooms, gateway } = gatewayReturning([room("room-filled")], []);
+      render(<App demoEnabled={false} spectatorEnabled={true} onlineGateway={gateway} onlineLobbyStreamFactory={() => fakeStream as any} />);
+      expect(await screen.findByText("room-filled")).toBeInTheDocument();
+      await waitFor(() => expect(fakeStream.subscribe).toHaveBeenCalled());
+
+      streamSnapshot = {
+        status: "ready",
+        catalogRevision: 2,
+        matches: [{
+          allocationId: "alloc-filled",
+          roomId: "room-filled",
+          status: "playing",
+          players: {
+            A: { seat: "A", name: "Alice", connected: true, remainingMs: 600_000 },
+            B: { seat: "B", name: "Bob", connected: true, remainingMs: 600_000 },
+          },
+          spectatorCount: 0,
+          serverNow: 1,
+          runningSeat: "A",
+        }],
+      };
+      act(() => notify());
+
+      await waitFor(() => expect(screen.queryByText("room-filled")).not.toBeInTheDocument());
+      expect(listRooms).toHaveBeenCalledTimes(2);
+    });
+
+    it("re-reads waiting rooms when a player returns to the lobby", async () => {
+      const user = userEvent.setup();
+      const { listRooms, gateway } = gatewayReturning([room("room-stale")], []);
+      render(<App demoEnabled={false} spectatorEnabled={false} onlineGateway={gateway} />);
+      expect(await screen.findByText("room-stale")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Chơi cùng máy/i }));
+      await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "playing"));
+      expect(listRooms).toHaveBeenCalledTimes(1);
+
+      await user.click(screen.getByRole("button", { name: /Rời bàn/i }));
+      await waitFor(() => expect(screen.getByTestId("app-state")).toHaveAttribute("data-state", "lobby"));
+      await waitFor(() => expect(screen.queryByText("room-stale")).not.toBeInTheDocument());
+      expect(listRooms).toHaveBeenCalledTimes(2);
     });
   });
 
