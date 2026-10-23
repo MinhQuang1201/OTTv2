@@ -30,7 +30,9 @@
     "arena:api": "node apps/arena-api/src/main.mjs",
     "arena:demo": "node scripts/arena-demo.js",
     "arena:worker": "node packages/arena-node/src/worker/job-worker.mjs",
-    "arena:user": "node apps/arena-api/scripts/manage-user.mjs"
+    "arena:user": "node apps/arena-api/scripts/manage-user.mjs",
+    "test:bot-cup": "node --test tests/bot-cup-core.test.js tests/bot-cup-api.test.js",
+    "test:bot-cup:api": "node --test --test-timeout=180000 tests/bot-cup-api-worker.test.js"
   },
   "engines": {
     "node": ">=22"

@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, "..");
 const INTEGRATION_TESTS = [
   "tests/worker-runtime.test.js",
   "tests/worker-test-harness-runtime.test.js",
+  "tests/bot-cup-api-worker.test.js",
 ];
 
 // Opt-in browser tests; they need Playwright Chromium and are driven by their own scripts.

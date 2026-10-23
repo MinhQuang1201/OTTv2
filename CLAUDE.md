@@ -27,6 +27,8 @@ Node ≥ 22 (`.nvmrc`). Cổng mặc định 3000 (`PORT`).
 - `apps/web/src/sessions/` — local, AI, demo, and online session boundaries. Online chỉ gửi lệnh và vẽ snapshot authoritative.
 - `apps/web/static/playhtml-game.html` — retained adapter diagnostic page; không phải game UI thứ hai.
 - `packages/game-core/src/ai.js` — `chooseMove(state, player, { level })` với level `easy`/`medium`/`hard` (mặc định `hard`): minimax cắt tỉa alpha-beta có giới hạn số nút. UI chạy nó trong Web Worker (`apps/web/src/sessions/ai/`). Thay file này khi gắn AI khác.
+- `packages/bot-cup-core/src/` — luật thuần của Bot Cup: điều kiện tham gia theo chế độ `demo`/`production`, đội, OTP, khung đăng ký. Không I/O. Kế hoạch: `docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md`.
+- `apps/bot-cup-api/` — Worker đăng ký Bot Cup (D1 binding `DB`, migration trong `migrations/`), phục vụ `/api/t/*` qua Vercel rewrite. Tách hẳn `apps/worker` và PlayHTML; mã bot của đội không bao giờ chạy ở Worker hay trình duyệt.
 
 ## Thuật ngữ
 
@@ -60,6 +62,8 @@ npm run typecheck:web
 npm run typecheck:worker
 npm run test:integration # wrangler dev --local, có timeout
 npm run test:e2e         # Playwright hai context trên Worker local
+npm run test:bot-cup     # Bot Cup: lõi + API trên SQLite (nằm trong test:unit)
+npm run test:bot-cup:api # Bot Cup Worker qua wrangler dev --local + D1 local (nằm trong test:integration)
 ```
 
 React parity/accessibility tests dùng feature/session contracts; board phải expose
