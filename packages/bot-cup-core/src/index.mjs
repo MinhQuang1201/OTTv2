@@ -7,3 +7,5 @@ export * from "./jobs.mjs";
 export * from "./practice.mjs";
 export * from "./audit.mjs";
 export * from "./tournament.mjs";
+export * from "./fingerprint.mjs";
+export * from "./anomaly.mjs";

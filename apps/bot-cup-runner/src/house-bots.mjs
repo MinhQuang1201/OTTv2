@@ -1,6 +1,8 @@
 /**
  * Sources of the house bots (plan §1, §7.4) as single files a container can run with `node bot.mjs`:
  * easy/medium/hard bundle ai.js with the rules; sentinel and strategist are already standalone; first-legal is a few lines.
+ * The two starter templates are reference bots for behaviour fingerprints only (plan §8.5); the Python one runs with the
+ * Python profile, so it is given as { source, profileId }.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -35,7 +37,7 @@ async function bundleAi(level) {
   return result.outputFiles[0].text;
 }
 
-/** @returns {Promise<Record<string, string>>} house bot name -> ES module source */
+/** @returns {Promise<Record<string, string | { source: string, profileId: string }>>} house bot name -> source */
 export async function houseBotSources() {
   return {
     "first-legal": FIRST_LEGAL,
@@ -43,6 +45,8 @@ export async function houseBotSources() {
     medium: await bundleAi("medium"),
     hard: await bundleAi("hard"),
     sentinel: fs.readFileSync(path.join(ROOT, "bots/sentinel.mjs"), "utf8"),
-    strategist: fs.readFileSync(path.join(ROOT, "bots/strategist.mjs"), "utf8")
+    strategist: fs.readFileSync(path.join(ROOT, "bots/strategist.mjs"), "utf8"),
+    "template-python": { source: fs.readFileSync(path.join(ROOT, "sdk/bot-cup/python/bot.py"), "utf8"), profileId: "python" },
+    "template-js": fs.readFileSync(path.join(ROOT, "sdk/bot-cup/js/bot.mjs"), "utf8")
   };
 }

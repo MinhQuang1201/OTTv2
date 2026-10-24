@@ -4,7 +4,7 @@
 
 const MINUTE = 60 * 1000;
 
-/** Higher runs first (plan §9.1): knockout > gate/qualifying > smoke > practice. */
+/** Higher runs first (plan §9.1): knockout > gate/qualifying > smoke > probe > practice. */
 export const JOB_PRIORITY = Object.freeze({
   knockout: 40,
   gate: 30,
@@ -12,6 +12,8 @@ export const JOB_PRIORITY = Object.freeze({
   swiss: 30,
   check: 20,
   smoke: 20,
+  /** Behaviour fingerprints (plan §8.5): after code freeze, below the games of the event. */
+  probe: 15,
   practice: 10
 });
 

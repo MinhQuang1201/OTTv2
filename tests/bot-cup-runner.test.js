@@ -100,7 +100,7 @@ describe("bot-cup runner loop", () => {
 });
 
 describe("bot-cup runner executor", () => {
-  function setup({ source = "x", sourceBytes } = {}) {
+  function setup({ source = "x", sourceBytes, probeSets, chooseTeam } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bot-cup-exec-"));
     const bytes = Buffer.from(source);
     const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
@@ -109,7 +109,7 @@ describe("bot-cup runner executor", () => {
     const createBot = (options) => {
       created.push({ profileId: options.profileId, artifactDigest: options.artifactDigest, image: options.image });
       const house = options.artifactDigest !== `sha256:${sha256}`;
-      return functionBot.createFunctionBot({ botId: options.botId, chooseFn: (turn) => (house ? turn.legalMoves.at(-1) : turn.legalMoves[0]) });
+      return functionBot.createFunctionBot({ botId: options.botId, chooseFn: (turn) => (house ? turn.legalMoves.at(-1) : (chooseTeam ?? ((t) => t.legalMoves[0]))(turn)) });
     };
     const executor = executorMod.createExecutor({
       artifactStore: artifacts.createArtifactStore({ storageDir: dir }),
@@ -118,6 +118,7 @@ describe("bot-cup runner executor", () => {
       probe: () => ({ available: true, imageId: "sha256:img" }),
       fetchSource: async () => sourceBytes ?? bytes,
       houseSources: { easy: "// house easy\n" },
+      probeSets,
       createBot,
       runCheckProcess: async (request) => (Buffer.from(request.sourceBase64, "base64").toString().includes("(:")
         ? { status: "FAILED", error: "compile_failure", logs: "  File \"/bot/source.py\", line 1\nSyntaxError: invalid syntax" }
@@ -135,6 +136,38 @@ describe("bot-cup runner executor", () => {
       assert.equal(core.verifyReplay(replay, { mapId: "flanks" }).ok, true);
       assert.deepEqual(t.created.map((bot) => bot.profileId), ["python", "node"]);
       assert.equal(t.created[0].artifactDigest, `sha256:${t.sha256}`);
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("answers a secret probe set with one bot per colour; a crash or a hang costs one position", async () => {
+    const positions = core.generateProbePositions({ count: 24, random: core.seededRandom(5) });
+    const set = "c".repeat(64);
+    let calls = 0;
+    const t = setup({
+      probeSets: new Map([[set, positions]]),
+      chooseTeam: async (turn) => {
+        calls += 1;
+        if (calls === 3) throw new Error("bot crashed");
+        if (calls === 6) await new Promise((resolve) => setTimeout(resolve, 1500));
+        return turn.legalMoves[0];
+      }
+    });
+    try {
+      const policy = { ...core.BOT_CUP_POLICY, turnTimeLimitMs: 200, firstMoveGraceMs: 400 };
+      const job = { jobId: "probe-job-1", attempt: 1, kind: "probe", probe: { set, policy, submission: { sha256: t.sha256, language: "node" } } };
+      const result = await t.executor.runProbe(job);
+      assert.equal(result.moves.length, 24);
+      assert.equal(result.answered, 22, "the crashed and the timed-out position stay empty");
+      assert.equal(result.restarts, 2);
+      const expected = positions.map((position) => core.moveKey(core.legalMovesOf(position)[0]));
+      result.moves.forEach((move, index) => assert.ok(move === null || move === expected[index]));
+      // Bots started: one per colour, plus one restart after each failure.
+      assert.equal(t.created.length, 4);
+      const house = await t.executor.runProbe({ ...job, jobId: "probe-job-2", probe: { set, policy, house: "easy" } });
+      assert.deepEqual(house.moves, positions.map((position) => core.moveKey(core.legalMovesOf(position).at(-1))));
+      await assert.rejects(t.executor.runProbe({ ...job, probe: { ...job.probe, set: "d".repeat(64) } }), /not on this runner/);
     } finally {
       t.cleanup();
     }

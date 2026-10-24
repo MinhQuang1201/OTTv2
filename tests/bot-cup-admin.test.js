@@ -74,7 +74,7 @@ describe("bot-cup admin: who gets in", () => {
     t.addAdmin("boss@uet.test");
     assert.equal((await t.admin("GET", "/me")).status, 401);
     const me = await t.admin("GET", "/me", { as: "Boss@UET.test" });
-    assert.deepEqual(me.body, { email: "boss@uet.test", role: "admin", authMode: "access", fourEyes: ["team.disqualify", "match.set_result"] });
+    assert.deepEqual(me.body, { email: "boss@uet.test", role: "admin", authMode: "access", fourEyes: ["team.disqualify", "match.set_result", "flag.confirm"] });
     assert.deepEqual([(await t.admin("GET", "/me", { as: "student@vnu.edu.vn" })).status, (await t.admin("GET", "/me", { as: "student@vnu.edu.vn" })).body.error], [403, "not_an_admin"]);
 
     const call = async (token) => (await t.api.fetch(new Request(`${ADMIN_ORIGIN}/admin-api/me`, { headers: { "cf-access-jwt-assertion": token } }))).status;

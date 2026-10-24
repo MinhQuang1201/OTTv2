@@ -114,3 +114,7 @@ pre { max-height: 360px; overflow: auto; padding: 8px; background: var(--bg); bo
 .badge.ok { color: var(--ok); }
 .badge.bad { color: var(--danger); }
 .badge.warn { color: var(--warn); }
+
+/* Side-by-side code of a flagged pair. */
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.compare pre { max-height: 70vh; overflow: auto; margin: 0; }

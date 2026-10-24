@@ -88,6 +88,16 @@ export function enqueueMatches(store, { eventId, games, now }) {
 export { bulkInsert };
 
 /**
+ * Behaviour-fingerprint jobs (plan §8.5) for submissions and house bots against one secret set. Targets that already
+ * have a fingerprint or a live job for that set are left out by the caller.
+ * @param {Array<{ submissionId?: string, house?: string }>} targets
+ */
+export function enqueueProbes(store, { eventId, probeSet, targets, now }) {
+  const rows = targets.map((target) => [crypto.randomUUID(), eventId, "probe", JOB_PRIORITY.probe, target.submissionId ?? null, target.house ?? null, probeSet, now, now]);
+  return bulkInsert(store, "jobs", ["id", "event_id", "kind", "priority", "submission_id", "probe_house", "probe_set", "created_at", "updated_at"], rows);
+}
+
+/**
  * A practice request: two games (one per colour) and their jobs, created only while the team has room in today's limit.
  * The first INSERT carries the limit check; everything else exists only if that row does, so the batch is all or nothing
  * even with two requests racing.

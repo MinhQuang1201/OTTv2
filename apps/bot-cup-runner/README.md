@@ -34,6 +34,15 @@ games at once makes the clocks unfair on Docker Desktop, P0), `BOT_CUP_RUNNER_PO
 `BOT_CUP_RUNNER_ONCE=true` (exit when the queue is empty). Logs are JSON lines on stdout. Stop with Ctrl+C: jobs in hand
 finish first. Revoke a machine with `node scripts/bot-cup/runner-token.mjs <name> --revoke --env staging`.
 
+## Behaviour fingerprints (`probe` jobs, plan §8.5)
+
+`npm run bot-cup:probe-set -- --count 100` writes a secret position set to `var/bot-cup/probe-sets/` (outside git) and
+prints its SHA-256. The runner loads every set in that folder (`BOT_CUP_PROBE_DIR` to change it) and logs only the first
+12 characters of each hash. An organiser pastes the full hash on the admin page (Cờ gian lận → Vân tay hành vi); each
+probe job then asks one bot — a team's code, ai.js easy/medium/hard or a starter template — for its move in every
+position, in a container, one per colour. A runner without that set reports an infrastructure error. Never commit,
+publish or copy the set file to another place than the runner machines.
+
 ## Tests
 
 `tests/bot-cup-runner.test.js` (loop and executor, no Docker), `tests/bot-cup-runner-api.test.js` (API side),
