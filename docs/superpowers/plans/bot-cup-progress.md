@@ -18,12 +18,15 @@ tag, không merge `main`.
 | P5 | ✅ [D] (Elo ladder [T] chưa làm) | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p5.md` |
 | P6 | ✅ | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p6.md` |
 | P7 | ✅ [D] (runner offline [T] chưa làm) | `feat/bot-cup-p3` (PR #32 đã merge) | `docs/evidence/2026-10-24-bot-cup-p7.md` |
-| P8 | ✅ | `feat/bot-cup-p8` | `docs/evidence/2026-10-24-bot-cup-p8.md` |
-| P9 | ⏳ tiếp theo | — | — |
+| P8 | ✅ | `feat/bot-cup-p8` (PR #33 đã merge) | `docs/evidence/2026-10-24-bot-cup-p8.md` |
+| P9 | 🟡 [D] một phần: diễn tập chưa chạy | `feat/bot-cup-p9` | `docs/evidence/2026-10-24-bot-cup-p9.md` |
 
 ## Điểm dừng
 
-2026-10-24: P7 đã merge (PR #32). P8 xong trên `feat/bot-cup-p8`; dừng để báo cáo, chờ chủ dự án cho tiếp P9.
+2026-10-24: P8 đã merge (PR #33). P9 làm một phần; chủ dự án quyết định để buổi diễn tập lại sau (dự án cá nhân, chưa có ngày thi).
+Tiếp tục diễn tập: `npm run bot-cup:rehearsal -- seed --freeze-in 20` → runner nối `https://ottv2-bot-cup-api-rehearsal.opticsquang.workers.dev`
+→ các bước ở `docs/bot-cup/runbook.vi.md` §2 (admin `btc-check` + `btc-check2` trên `https://ottv2-bot-cup-admin-rehearsal.opticsquang.workers.dev`)
+→ trình chiếu: Vite với `OTT_BOT_CUP_API_ORIGIN=<rehearsal API>` rồi mở `?view=bot-cup&screen=projector`.
 
 ## Ghi chú cho phiên sau
 
@@ -43,5 +46,4 @@ tag, không merge `main`.
   `59a900f4…` đã dùng trên staging).
 - Git Bash đổi đối số bắt đầu bằng `/` thành đường dẫn Windows: đặt `MSYS_NO_PATHCONV=1` khi truyền đường dẫn API cho script.
 - `npm run bot-cup:api:dev` từng tự thoát hai lần trong P8 (cổng 8789); chạy lại là được.
-- P9 cần: rà bảo mật (IDOR, CSRF, rate limit, BLOB), diễn tập Demo 8 bot (1 hỏng, 1 cặp chép, 1 bản dịch ai.js sang Python —
-  chưa viết) trên staging với sự kiện riêng, trình chiếu `?view=bot-cup&screen=projector`, runbook.
+- Bot diễn tập: `var/bot-cup/rehearsal/bots/` (8 file; không commit vì repo công khai). Sự kiện `rehearsal-demo` đã seed với giờ khóa 03:30Z 24/10 (đã qua): seed lại để có giờ khóa mới.

@@ -44,6 +44,22 @@
         }
       ]
     },
+    "rehearsal": {
+      // P9 rehearsal: the organisers' site for the rehearsal event (same staging database and admin accounts).
+      "name": "ottv2-bot-cup-admin-rehearsal",
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "vars": { "BOT_CUP_EVENT_ID": "rehearsal-demo", "ADMIN_AUTH_MODE": "password" },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-staging",
+          "database_id": "c82abd1a-c2d0-4b69-a995-67d626f4c6fb",
+          "migrations_dir": "../bot-cup-api/migrations"
+        }
+      ]
+    },
     "test": {
       "name": "ottv2-bot-cup-admin-test",
       "vars": { "BOT_CUP_EVENT_ID": "test-event", "ADMIN_AUTH_MODE": "password" },

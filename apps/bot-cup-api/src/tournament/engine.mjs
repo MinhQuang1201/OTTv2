@@ -338,6 +338,8 @@ export function createTournament({ store, now, eventId, random = defaultRandom }
     const state = await interviewState();
     if (state.standings.rows.length < 4) throw new HttpError(409, "knockout_not_possible", { teams: state.standings.rows.length });
     if (!state.ready) throw new HttpError(409, "interviews_pending", { waitingFor: state.waitingFor });
+    // Interviews can leave fewer than 4 teams: then the event ends on the qualifying table (finish).
+    if (state.seeded.length < 4) throw new HttpError(409, "knockout_not_possible", { teams: state.seeded.length });
     const byTeam = new Map((await entrants()).map((entrant) => [entrant.team_id, entrant]));
     const statements = [setPhase("knockout")];
     state.seeded.forEach((teamId, index) => statements.push(store.statement("UPDATE entrants SET seed = ? WHERE event_id = ? AND team_id = ?", index + 1, eventId, teamId)));
@@ -416,7 +418,10 @@ export function createTournament({ store, now, eventId, random = defaultRandom }
       placed.push(bySlot.get("F").winnerEntry.team, bySlot.get("F").loserEntry.team);
       if (bySlot.has("3RD")) placed.push(bySlot.get("3RD").winnerEntry.team, bySlot.get("3RD").loserEntry.team);
     }
-    const rest = standings.rows.map((row) => row.teamId).filter((teamId) => !placed.includes(teamId));
+    // Teams that failed their code interview win nothing (plan §8.6): they come after everyone else.
+    const failed = (teamId) => info.get(teamId)?.interview === "fail";
+    const others = standings.rows.map((row) => row.teamId).filter((teamId) => !placed.includes(teamId));
+    const rest = [...others.filter((teamId) => !failed(teamId)), ...others.filter(failed)];
     return publishStatement("final", {
       event: ev.name,
       stage: "final",
@@ -437,8 +442,12 @@ export function createTournament({ store, now, eventId, random = defaultRandom }
   async function planFinishWithoutKnockout() {
     const ev = await event();
     requirePhase(ev.phase, "verification");
-    const standings = await qualifyingStandings();
-    if (standings.rows.length >= 4) throw new HttpError(409, "knockout_expected");
+    const state = await interviewState();
+    if (state.standings.rows.length >= 4) {
+      // A knockout is due unless interviews left fewer than 4 teams; either way the interviews must be done.
+      if (!state.ready) throw new HttpError(409, "interviews_pending", { waitingFor: state.waitingFor });
+      if (state.seeded.length >= 4) throw new HttpError(409, "knockout_expected");
+    }
     const final = await finalDocument(ev, []);
     return { statements: [final.statement, setPhase("finished")], summary: { finished: true, sha256: final.sha256 } };
   }

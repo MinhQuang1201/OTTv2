@@ -53,6 +53,19 @@ describe("App Bot Cup route", () => {
     expect(window.location.search).toBe("?view=bot-cup");
   });
 
+  it("opens the finals projector from ?view=bot-cup&screen=projector and leaves it for the lobby", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?view=bot-cup&screen=projector");
+    const gateway = fakeBotCupGateway();
+    gateway.getTournament = vi.fn().mockResolvedValue({ phase: "knockout", documents: [], standings: { format: null, rows: [] }, knockout: [] });
+    render(<App initialScenario="lobby-default" botCupEnabled botCupGateway={gateway} />);
+
+    expect(await screen.findByRole("region", { name: "Trình chiếu chung kết OTT Bot Cup" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Thoát" }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).has("view")).toBe(false));
+    expect(new URLSearchParams(window.location.search).has("screen")).toBe(false);
+  });
+
   it("shows no banner when the Bot Cup is off", async () => {
     render(<App initialScenario="lobby-default" botCupEnabled={false} botCupGateway={fakeBotCupGateway()} />);
     expect(await screen.findByRole("heading", { name: /OTTv2/ })).toBeInTheDocument();

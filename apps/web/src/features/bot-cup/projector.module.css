@@ -1,0 +1,174 @@
+/* Finals projector (plan §11.5): read from the back of a hall — large type, the board as big as the screen allows. */
+.stage {
+  display: grid;
+  gap: var(--ui-space-4);
+  width: min(100%, 1600px);
+  margin: 0 auto;
+  padding: var(--ui-space-4);
+  box-sizing: border-box;
+  min-height: 100vh;
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.kicker {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--ui-font-display);
+  font-size: clamp(1.75rem, 4vw, 3rem);
+}
+
+.actions {
+  display: flex;
+  gap: var(--ui-space-2);
+}
+
+.actions button,
+.games button {
+  font: inherit;
+  cursor: pointer;
+  border: 2px solid var(--ui-line-strong);
+  background: var(--ui-surface-2);
+  color: var(--ui-text);
+  padding: var(--ui-space-2) var(--ui-space-3);
+}
+
+.scoreboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-space-4);
+  font-size: clamp(1.5rem, 3.5vw, 2.75rem);
+  font-weight: 700;
+}
+
+.scoreboard .team:first-child {
+  text-align: right;
+}
+
+.team {
+  overflow-wrap: anywhere;
+}
+
+.team small {
+  display: block;
+  font-size: 0.45em;
+  font-weight: 400;
+  color: var(--ui-text-muted);
+}
+
+.score {
+  font-family: var(--ui-font-display);
+  font-size: 1.4em;
+  white-space: nowrap;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: var(--ui-space-5);
+  align-items: start;
+}
+
+.boardArea {
+  display: grid;
+  gap: var(--ui-space-3);
+  justify-items: center;
+  min-width: 0;
+}
+
+.board {
+  width: min(100%, 72vh);
+}
+
+.gameLine {
+  margin: 0;
+  font-size: clamp(1rem, 2vw, 1.5rem);
+  text-align: center;
+}
+
+.red {
+  color: var(--ui-seat-a-strong);
+  font-weight: 700;
+}
+
+.blue {
+  color: var(--ui-seat-b-strong);
+  font-weight: 700;
+}
+
+.result,
+.winner {
+  margin: 0;
+  font-size: clamp(1.25rem, 2.5vw, 2rem);
+  font-weight: 700;
+  text-align: center;
+}
+
+.games ol {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.games button {
+  display: grid;
+  width: 100%;
+  text-align: left;
+  gap: 2px;
+}
+
+.games button span {
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-sm);
+}
+
+.games li[aria-current="true"] button {
+  border-color: var(--ui-uet-blue);
+  outline: 3px solid var(--ui-uet-blue);
+}
+
+.hint {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: 1.25rem;
+}
+
+.error {
+  margin: 0;
+  color: var(--ui-danger);
+  font-weight: 700;
+}
+
+.keys {
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-sm);
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .board {
+    width: 100%;
+  }
+}

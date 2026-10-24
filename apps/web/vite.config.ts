@@ -46,7 +46,8 @@ export default defineConfig({
   server: {
     proxy: {
       // `npm run bot-cup:api:dev` serves the API on this port.
-      "/api/t": { target: botCupApiOrigin || "http://127.0.0.1:8789" },
+      // A remote Worker routes by Host, so the proxy must send its own host there; the local dev API does not care.
+      "/api/t": { target: botCupApiOrigin || "http://127.0.0.1:8789", changeOrigin: Boolean(botCupApiOrigin) },
     },
   },
   build: {
