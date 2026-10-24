@@ -26,11 +26,11 @@ export function errorResponse(error) {
   return json({ error: error.code, ...error.details }, error.status);
 }
 
-export async function readJson(request) {
+export async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   const type = request.headers.get("content-type") || "";
   if (!type.toLowerCase().startsWith("application/json")) throw new HttpError(415, "invalid_request");
   const text = await request.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) throw new HttpError(413, "invalid_request");
+  if (new TextEncoder().encode(text).length > maxBytes) throw new HttpError(413, "invalid_request");
   try {
     const body = JSON.parse(text);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");
@@ -38,6 +38,49 @@ export async function readJson(request) {
   } catch {
     throw new HttpError(400, "invalid_request");
   }
+}
+
+/**
+ * The `file` part of a multipart/form-data upload, reading at most `maxBodyBytes` of body.
+ * @returns {Promise<{ filename: string, bytes: Uint8Array }>}
+ */
+export async function readUpload(request, maxBodyBytes) {
+  const type = request.headers.get("content-type") || "";
+  if (!type.toLowerCase().startsWith("multipart/form-data")) throw new HttpError(415, "invalid_request");
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBodyBytes) throw new HttpError(413, "submission_too_large");
+
+  const chunks = [];
+  let total = 0;
+  if (request.body) {
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBodyBytes) {
+        await reader.cancel();
+        throw new HttpError(413, "submission_too_large");
+      }
+      chunks.push(value);
+    }
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  let form;
+  try {
+    form = await new Response(body, { headers: { "content-type": type } }).formData();
+  } catch {
+    throw new HttpError(400, "invalid_request");
+  }
+  const file = form.get("file");
+  if (!file || typeof file === "string") throw new HttpError(400, "invalid_request", { field: "file" });
+  return { filename: file.name || "", bytes: new Uint8Array(await file.arrayBuffer()) };
 }
 
 export function readCookie(request, name) {

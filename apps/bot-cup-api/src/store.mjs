@@ -7,7 +7,8 @@ const UNIQUE_ERRORS = [
   ["teams.event_id, teams.handle", "handle_taken"],
   ["teams.event_id, teams.display_key", "display_name_taken"],
   ["members.event_id, members.mssv", "mssv_taken"],
-  ["members.event_id, members.email", "email_taken"]
+  ["members.event_id, members.email", "email_taken"],
+  ["submissions.team_id, submissions.sha256", "submission_duplicate"]
 ];
 
 /** @returns {string|null} the API error code for a UNIQUE constraint failure, or null for any other error. */
@@ -16,6 +17,14 @@ export function uniqueViolation(error) {
   if (!message.includes("UNIQUE constraint failed")) return null;
   return UNIQUE_ERRORS.find(([columns]) => message.includes(columns))?.[1] ?? "conflict";
 }
+
+// A game with, for each seat, the team (if a submission played there) and the version number.
+const MATCH_WITH_TEAMS = `
+  SELECT m.*, sa.team_id AS a_team_id, sa.seq AS a_seq, ta.display_name AS a_team_name,
+         sb.team_id AS b_team_id, sb.seq AS b_seq, tb.display_name AS b_team_name
+  FROM matches m
+    LEFT JOIN submissions sa ON sa.id = m.a_submission_id LEFT JOIN teams ta ON ta.id = sa.team_id
+    LEFT JOIN submissions sb ON sb.id = m.b_submission_id LEFT JOIN teams tb ON tb.id = sb.team_id`;
 
 function mapEvent(row) {
   if (!row) return null;
@@ -174,6 +183,90 @@ export function createStore(db) {
         bucket, windowStart
       );
       return row.count;
+    },
+
+    // ---------- submissions (P3) ----------
+
+    /** Every version of a team, newest first, without the source bytes. */
+    listSubmissions(teamId) {
+      return all(
+        `SELECT id, seq, language, filename, size, sha256, origin, created_at, status FROM submissions
+         WHERE team_id = ? ORDER BY seq DESC`,
+        teamId
+      );
+    },
+
+    getSubmission(id) {
+      return first("SELECT * FROM submissions WHERE id = ?", id);
+    },
+
+    findSubmissionBySha(teamId, sha256) {
+      return first("SELECT id, seq FROM submissions WHERE team_id = ? AND sha256 = ?", teamId, sha256);
+    },
+
+    async getSourceBytes(sha256) {
+      const row = await first("SELECT content FROM submission_sources WHERE sha256 = ?", sha256);
+      // D1 returns a BLOB as an array of numbers, better-sqlite3 as a Buffer.
+      return row ? new Uint8Array(row.content) : null;
+    },
+
+    countSubmissions(teamId, since) {
+      return first(
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN created_at >= ? THEN 1 END) AS today FROM submissions WHERE team_id = ?",
+        since, teamId
+      );
+    },
+
+    /** Submissions of other teams with the same normalised source, one (the earliest) per team. */
+    normalizedMatches(eventId, teamId, normalizedHash, limit = 20) {
+      return all(
+        `SELECT team_id, MIN(id) AS id FROM submissions
+         WHERE event_id = ? AND normalized_hash = ? AND team_id <> ?
+         GROUP BY team_id LIMIT ?`,
+        eventId, normalizedHash, teamId, limit
+      );
+    },
+
+    smokeMatches(submissionId) {
+      return all(
+        `SELECT id, map_id, game_index, a_submission_id, b_submission_id, a_house, b_house, status, outcome, winner, reason, plies,
+                stderr_a, stderr_b
+         FROM matches WHERE stage = 'smoke' AND status <> 'cancelled' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
+        submissionId, submissionId
+      );
+    },
+
+    // ---------- games (P5) ----------
+
+    getMatchWithTeams(matchId) {
+      return first(`${MATCH_WITH_TEAMS} WHERE m.id = ?`, matchId);
+    },
+
+    /** Games where one of the team's submissions played, newest first. */
+    teamMatches(teamId, limit = 50) {
+      return all(`${MATCH_WITH_TEAMS} WHERE sa.team_id = ? OR sb.team_id = ? ORDER BY m.created_at DESC, m.game_index DESC LIMIT ?`, teamId, teamId, limit);
+    },
+
+    finishedPractice(eventId) {
+      return all(
+        `SELECT m.a_submission_id, m.b_submission_id, m.a_house, m.b_house, m.outcome, m.winner, m.loser
+         FROM matches m WHERE m.event_id = ? AND m.stage = 'practice' AND m.status = 'finished'`,
+        eventId
+      );
+    },
+
+    /** Every submission of the event's active teams, for working out each team's final submission. */
+    activeTeamSubmissions(eventId) {
+      return all(
+        `SELECT s.id, s.team_id, s.seq, s.status, t.display_name, t.final_submission_id
+         FROM submissions s JOIN teams t ON t.id = s.team_id
+         WHERE t.event_id = ? AND t.status = 'active' AND t.disqualified_at IS NULL`,
+        eventId
+      );
+    },
+
+    setFinalSubmission(teamId, submissionId) {
+      return run("UPDATE teams SET final_submission_id = ? WHERE id = ?", submissionId, teamId);
     },
 
     readOutbox(toEmail) {

@@ -613,20 +613,22 @@ export function validateReplayDocument(doc, options = {}) {
   const acceptedPlies = doc.result?.acceptedPlies;
   const isAcceptedPliesValidInt = Number.isInteger(acceptedPlies) && acceptedPlies >= 0;
 
-  if (isAcceptedPliesValidInt && acceptedPlies > 400) {
+  // The cap comes from the (already validated) policy: 400 for arena-policy-v1, 300 for bot-cup-policy-v1.
+  const maxPlies = policyVal.ok ? doc.matchPolicy.maxPlies : 400;
+  if (isAcceptedPliesValidInt && acceptedPlies > maxPlies) {
     errors.push({
       path: "document.result.acceptedPlies",
       code: "accepted_plies_exceeded",
-      message: `acceptedPlies ${acceptedPlies} exceeds maxPlies limit of 400`
+      message: `acceptedPlies ${acceptedPlies} exceeds maxPlies limit of ${maxPlies}`
     });
   }
 
   if (doc.result && doc.result.outcome === "draw") {
-    if (acceptedPlies !== 400) {
+    if (acceptedPlies !== maxPlies) {
       errors.push({
         path: "document.result.acceptedPlies",
         code: "invalid_draw_plies",
-        message: `Draw outcome under arena-policy-v1 requires acceptedPlies to reach 400 cap, got ${acceptedPlies}`
+        message: `Draw outcome under ${doc.matchPolicy?.matchPolicyVersion} requires acceptedPlies to reach ${maxPlies} cap, got ${acceptedPlies}`
       });
     }
   }

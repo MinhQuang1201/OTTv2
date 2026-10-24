@@ -128,3 +128,71 @@ describe("bot-cup-core policy", () => {
     assert.equal(core.registrationOpen(event, 20), false);
   });
 });
+
+describe("bot-cup-core submissions", () => {
+  const bytes = (text) => new TextEncoder().encode(text);
+
+  it("inspects uploads: language from the extension, size, binary bytes, encoding", () => {
+    assert.deepEqual(core.inspectSource(bytes("print(1)\n"), "C:\\Users\\me\\bot.py"), { ok: true, language: "python", filename: "bot.py", text: "print(1)\n" });
+    assert.equal(core.inspectSource(bytes("x\n"), "Bot.MJS").language, "node");
+    assert.equal(core.inspectSource(bytes("x\n"), "bot.js").language, "node");
+    assert.equal(core.inspectSource(bytes("x\n"), "bot.ts").error, "submission_extension");
+    assert.equal(core.inspectSource(new Uint8Array(200 * 1024 + 1).fill(0x23), "bot.py").error, "submission_too_large");
+    assert.equal(core.inspectSource(new Uint8Array([0x61, 0x0b]), "bot.py").error, "submission_binary");
+    assert.equal(core.inspectSource(new Uint8Array([0xff, 0xfe]), "bot.py").error, "submission_encoding");
+    assert.equal(core.inspectSource(bytes("\t\r\n\f"), "bot.py").error, "submission_empty");
+    assert.equal(core.cleanFilename(`${"a".repeat(80)}.py`).length, 64);
+    assert.ok(core.cleanFilename(`${"a".repeat(80)}.py`).endsWith(".py"));
+  });
+
+  it("opens uploads with practice and closes them at code freeze, on the server clock", () => {
+    const event = { practiceOpensAt: 1000, codeFreezeAt: 2000 };
+    assert.equal(core.submissionWindow(event, 999), "submissions_not_open");
+    assert.equal(core.submissionWindow(event, 1000), null);
+    assert.equal(core.submissionWindow(event, 2000), "code_frozen");
+    assert.equal(core.submissionWindow({ practiceOpensAt: null, codeFreezeAt: null }, 5), "submissions_not_open");
+    assert.equal(core.finalSubmissionLocked(event, 500), false);
+    assert.equal(core.finalSubmissionLocked(event, 2000), true);
+  });
+
+  it("counts days from midnight in Vietnam", () => {
+    const midnightVn = Date.UTC(2026, 10, 30, 17, 0);
+    assert.equal(core.vietnamDayStart(midnightVn), midnightVn);
+    assert.equal(core.vietnamDayStart(midnightVn - 1), midnightVn - 24 * 3600 * 1000);
+    assert.equal(core.vietnamDayStart(midnightVn + 23 * 3600 * 1000), midnightVn);
+  });
+
+  it("picks the chosen final submission while eligible, else the newest eligible one", () => {
+    const list = [
+      { id: "a", seq: 1, status: "ready" },
+      { id: "b", seq: 2, status: "checking" },
+      { id: "c", seq: 3, status: "smoke_failed" }
+    ];
+    assert.equal(core.effectiveFinalSubmission(list, null).id, "b");
+    assert.equal(core.effectiveFinalSubmission(list, "a").id, "a");
+    assert.equal(core.effectiveFinalSubmission(list, "c").id, "b");
+    assert.equal(core.effectiveFinalSubmission([], null), null);
+  });
+
+  it("normalises away names, comments, strings, numbers and layout but not structure", () => {
+    const a = "def f(x):\n    # comment\n    return x + 1  # one\n";
+    const b = "def   g( y ) :\n  '''doc'''\n  return y+2\n";
+    const c = "def f(x):\n    return x - 1\n";
+    assert.equal(core.normalizeSource(a, "python"), core.normalizeSource(b, "python"));
+    assert.notEqual(core.normalizeSource(a, "python"), core.normalizeSource(c, "python"));
+    assert.equal(core.normalizeSource("x = f'a{b}' + rb\"\"\"q\"\"\"\n", "python"), "python:I = +");
+
+    const js1 = "let best = (moves) => moves[0]; // first\n/* block */ log(`turn ${n}`);\n";
+    const js2 = "let  pick=(m)=>m[ 7 ];\nlog('x');";
+    assert.equal(core.normalizeSource(js1, "node"), core.normalizeSource(js2, "node"));
+    assert.notEqual(core.normalizeSource("let a = b;", "node"), core.normalizeSource("const a = b;", "node"));
+  });
+
+  it("ships reference hashes that match the reference files", async () => {
+    const { computeReferenceHashes, renderModule, OUTPUT } = await import("../scripts/bot-cup/reference-hashes.mjs");
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const current = fs.readFileSync(path.join(__dirname, "..", OUTPUT), "utf8").replace(/\r\n/g, "\n");
+    assert.equal(current, renderModule(computeReferenceHashes()), "run node scripts/bot-cup/reference-hashes.mjs");
+  });
+});

@@ -1,0 +1,60 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Bot Cup admin site (plan docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md §4.2, P6). Own hostname, same D1 as
+  // apps/bot-cup-api (migrations live there). Production sits behind Cloudflare Access (ADMIN_AUTH_MODE=access).
+  "name": "ottv2-bot-cup-admin",
+  "main": "src/index.mjs",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  // run_worker_first: every response, static ones too, goes through the Worker and gets the security headers.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "vars": {
+    "BOT_CUP_EVENT_ID": "uet-k71-2026",
+    "ADMIN_AUTH_MODE": "access"
+    // ACCESS_TEAM_DOMAIN (https://<team>.cloudflareaccess.com) and ACCESS_AUD are set when the Access application exists.
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ottv2-bot-cup",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../bot-cup-api/migrations"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "ottv2-bot-cup-admin-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "vars": {
+        "BOT_CUP_EVENT_ID": "staging-demo",
+        // Cloudflare Access is not set up on the account yet: password + TOTP for admins created with
+        // scripts/bot-cup/admin-user.mjs. Switch to "access" once the Access application exists.
+        "ADMIN_AUTH_MODE": "password"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-staging",
+          "database_id": "c82abd1a-c2d0-4b69-a995-67d626f4c6fb",
+          "migrations_dir": "../bot-cup-api/migrations"
+        }
+      ]
+    },
+    "test": {
+      "name": "ottv2-bot-cup-admin-test",
+      "vars": { "BOT_CUP_EVENT_ID": "test-event", "ADMIN_AUTH_MODE": "password" },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-test",
+          "database_id": "00000000-0000-0000-0000-000000000001",
+          "migrations_dir": "../bot-cup-api/migrations"
+        }
+      ]
+    }
+  }
+}

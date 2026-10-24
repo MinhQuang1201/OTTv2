@@ -23,11 +23,26 @@ function botCupVercelRewrite(): Plugin {
   };
 }
 
+// The Bot Cup starter kit (sdk/bot-cup, bundled judge) is published with the site at /bot-cup-kit/<file>.
+function botCupStarterKit(): Plugin {
+  return {
+    name: "ott-bot-cup-starter-kit",
+    apply: "build",
+    async generateBundle() {
+      // @ts-expect-error: a plain ES module script without type declarations.
+      const { kitFiles } = (await import("../../scripts/bot-cup/build-kit.mjs")) as { kitFiles: () => Promise<Record<string, string>> };
+      for (const [name, source] of Object.entries(await kitFiles())) {
+        this.emitFile({ type: "asset", fileName: `bot-cup-kit/${name}`, source });
+      }
+    },
+  };
+}
+
 export default defineConfig({
   root: "apps/web",
   envDir: "../..",
   publicDir: "static",
-  plugins: [react(), botCupVercelRewrite()],
+  plugins: [react(), botCupVercelRewrite(), botCupStarterKit()],
   server: {
     proxy: {
       // `npm run bot-cup:api:dev` serves the API on this port.

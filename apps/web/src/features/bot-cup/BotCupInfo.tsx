@@ -1,4 +1,5 @@
 import type { BotCupEvent } from "./BotCupApiGateway";
+import { StarterKitLinks } from "./formParts";
 import { formatDateTime } from "./botCupFormat";
 import styles from "./botCup.module.css";
 
@@ -50,6 +51,9 @@ export function BotCupRules({ event }: { readonly event: BotCupEvent }) {
         <li>Chỉ dùng thư viện chuẩn; bot chạy trong sandbox không có mạng, 1 CPU, 256 MiB RAM.</li>
         <li>Mã phải đọc được: cấm làm rối mã, cấm nhúng mã nhị phân hay payload mã hóa.</li>
       </ul>
+      <h3>Bộ khởi đầu</h3>
+      <p>Bot mẫu và trọng tài để thử bot trên máy trước khi nộp: <code>node judge.mjs bot.py easy</code>.</p>
+      <StarterKitLinks />
       <h3>Chống gian lận</h3>
       <ul>
         <li>Cấm chép code của đội khác hoặc nộp lại bot có sẵn của trò chơi (<code>ai.js</code>, bot mẫu). Hệ thống so trùng mã và so cách chọn nước.</li>

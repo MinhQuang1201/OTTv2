@@ -44,6 +44,8 @@ export interface TeamView {
   readonly status: TeamStatus;
   readonly createdAt: number;
   readonly activeAt: number | null;
+  readonly disqualified?: boolean;
+  readonly dqReason?: string | null;
   readonly members: readonly TeamMember[];
 }
 
@@ -64,6 +66,170 @@ export interface InvitePreview {
   readonly fullName: string;
   readonly email: string;
   readonly registrationOpen: boolean;
+}
+
+export type SubmissionStatus = "checking" | "ready" | "build_failed" | "smoke_failed";
+
+export interface Submission {
+  readonly id: string;
+  readonly version: number;
+  readonly language: "python" | "node";
+  readonly filename: string;
+  readonly size: number;
+  readonly sha256: string;
+  readonly origin: "upload" | "github";
+  readonly status: SubmissionStatus;
+  readonly createdAt: number;
+}
+
+export interface SubmissionsView {
+  readonly submissions: readonly Submission[];
+  readonly finalSubmissionId: string | null;
+  readonly finalChosen: boolean;
+  readonly window: {
+    readonly open: boolean;
+    readonly reason: string | null;
+    readonly practiceOpensAt: number | null;
+    readonly codeFreezeAt: number | null;
+    readonly finalLocked: boolean;
+  };
+  readonly quota: { readonly perDay: number; readonly usedToday: number; readonly resetsAt: number; readonly maxVersions: number; readonly total: number };
+  readonly maxBytes: number;
+}
+
+export interface SmokeGame {
+  readonly id: string;
+  readonly mapId: string;
+  readonly seat: "A" | "B";
+  readonly opponent: string | null;
+  readonly status: MatchStatus;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  readonly plies: number | null;
+  readonly stderr: string | null;
+}
+
+export interface SubmissionDetail extends Submission {
+  readonly checkLog: string | null;
+  readonly smoke: readonly SmokeGame[];
+}
+
+export type MatchStatus = "queued" | "running" | "finished" | "failed" | "cancelled";
+export type MatchOutcome = "win" | "draw" | "forfeit";
+export type MatchStage = "smoke" | "practice" | "gate" | "round_robin" | "swiss" | "knockout";
+
+export interface MatchSeat {
+  readonly kind: "team" | "house";
+  readonly name: string;
+  readonly version?: number;
+  readonly house?: string;
+}
+
+export interface MatchView {
+  readonly id: string;
+  readonly stage: MatchStage;
+  readonly round: number | null;
+  readonly gameIndex: number;
+  readonly mapId: string;
+  readonly status: MatchStatus;
+  readonly seats: { readonly A: MatchSeat; readonly B: MatchSeat };
+  readonly mySeat: "A" | "B" | null;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  readonly plies: number | null;
+  readonly createdAt: number;
+  readonly finishedAt: number | null;
+}
+
+export interface MyMatches {
+  readonly matches: readonly MatchView[];
+  readonly practice: {
+    readonly gamesPerDay: number;
+    readonly usedToday: number;
+    readonly opponents: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+    readonly maps: readonly string[];
+  };
+}
+
+export interface LeaderboardRow {
+  readonly rank: number;
+  readonly displayName: string;
+  readonly games: number;
+  readonly points: number;
+  readonly opponents: Readonly<Record<string, { readonly played: number; readonly points: number }>>;
+}
+
+export interface Leaderboard {
+  readonly opponents: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly rows: readonly LeaderboardRow[];
+  readonly updatedAt: number;
+}
+
+export interface Announcement {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly publishedAt: number;
+}
+
+export type TournamentPhase = "registration" | "practice" | "frozen" | "gate" | "qualifying" | "verification" | "knockout" | "finished";
+export type ResultStage = "sealed" | "gate" | "qualifying" | "final";
+export type AppealStage = "gate" | "qualifying" | "final";
+
+export interface StandingRow {
+  readonly rank: number;
+  readonly displayName: string;
+  readonly points: number;
+  readonly wins: number;
+  readonly games: number;
+  readonly byes?: number;
+  readonly sb?: number;
+  readonly buchholzCut1?: number;
+}
+
+export interface KnockoutGame {
+  readonly id: string;
+  readonly mapId: string;
+  readonly gameIndex: number;
+  readonly status: MatchStatus;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  /** Which side of the pairing (a = higher seed) held Red in this game. */
+  readonly red: "a" | "b";
+}
+
+export interface KnockoutPairing {
+  readonly round: number;
+  readonly slot: string;
+  readonly red: string;
+  readonly blue: string;
+  readonly seeds: readonly [number, number];
+  readonly points: readonly [number, number];
+  readonly tiebreaks: number;
+  readonly winner: string | null;
+  readonly decidedBySeed: boolean;
+  readonly games: readonly KnockoutGame[];
+}
+
+export interface TournamentView {
+  readonly phase: TournamentPhase;
+  readonly documents: ReadonlyArray<{ readonly stage: ResultStage; readonly sha256: string; readonly publishedAt: number }>;
+  readonly standings: { readonly format: "round_robin" | "swiss" | null; readonly rows: readonly StandingRow[] };
+  readonly knockout: readonly KnockoutPairing[];
+}
+
+export interface Appeal {
+  readonly id: string;
+  readonly stage: AppealStage;
+  readonly matchId: string | null;
+  readonly body: string;
+  readonly status: "open" | "answered";
+  readonly response: string | null;
+  readonly createdAt: number;
+  readonly answeredAt: number | null;
 }
 
 export class BotCupApiError extends Error {
@@ -157,14 +323,96 @@ export class BotCupApiGateway {
     return this.request("POST", "/sessions/revoke-all", {});
   }
 
+  listSubmissions(signal?: AbortSignal): Promise<SubmissionsView> {
+    return this.request("GET", "/submissions", undefined, signal);
+  }
+
+  uploadSubmission(file: File): Promise<{ readonly submission: Submission }> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.request("POST", "/submissions", form);
+  }
+
+  /** `null` goes back to "the newest eligible version". */
+  chooseFinalSubmission(submissionId: string | null): Promise<SubmissionsView> {
+    return this.request("PUT", "/team/final-submission", { submissionId });
+  }
+
+  getSubmission(submissionId: string): Promise<{ readonly submission: SubmissionDetail }> {
+    return this.request("GET", `/submissions/${encodeURIComponent(submissionId)}`);
+  }
+
+  requestPractice(opponent: string, mapId: string): Promise<{ readonly matches: readonly MatchView[] }> {
+    return this.request("POST", "/practice", { opponent, mapId });
+  }
+
+  listMatches(signal?: AbortSignal): Promise<MyMatches> {
+    return this.request("GET", "/matches", undefined, signal);
+  }
+
+  getMatch(matchId: string): Promise<{ readonly match: MatchView & { readonly stderr: Readonly<Record<string, string>> } }> {
+    return this.request("GET", `/matches/${encodeURIComponent(matchId)}`);
+  }
+
+  /** The game as an Arena replay document, for the replay viewer. */
+  getMatchReplay(matchId: string): Promise<{ readonly replay: unknown; readonly sha256: string }> {
+    return this.request("GET", `/matches/${encodeURIComponent(matchId)}/replay`);
+  }
+
+  getLeaderboard(signal?: AbortSignal): Promise<Leaderboard> {
+    return this.request("GET", "/leaderboard", undefined, signal);
+  }
+
+  getAnnouncements(signal?: AbortSignal): Promise<{ readonly announcements: readonly Announcement[] }> {
+    return this.request("GET", "/announcements", undefined, signal);
+  }
+
+  getTournament(signal?: AbortSignal): Promise<TournamentView> {
+    return this.request("GET", "/tournament", undefined, signal);
+  }
+
+  /** Public link to a published result document (the exact bytes behind its SHA-256). */
+  resultDocumentUrl(stage: ResultStage): string {
+    return `${this.baseUrl}/results/${encodeURIComponent(stage)}`;
+  }
+
+  /** Downloads a published result document and checks its SHA-256 in the browser. */
+  async verifyResultDocument(stage: ResultStage, expectedSha256: string): Promise<boolean> {
+    let response: Response;
+    try {
+      response = await fetch(this.resultDocumentUrl(stage), { credentials: "same-origin" });
+    } catch {
+      throw new BotCupApiError(0, "network_error");
+    }
+    if (!response.ok) throw new BotCupApiError(response.status, response.status === 404 ? "not_found" : "internal_error");
+    const digest = await crypto.subtle.digest("SHA-256", await response.arrayBuffer());
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return hex === expectedSha256;
+  }
+
+  listAppeals(signal?: AbortSignal): Promise<{ readonly appeals: readonly Appeal[] }> {
+    return this.request("GET", "/appeals", undefined, signal);
+  }
+
+  createAppeal(stage: AppealStage, body: string, matchId?: string): Promise<{ readonly id: string; readonly status: "open" }> {
+    return this.request("POST", "/appeals", { stage, body, ...(matchId ? { matchId } : {}) });
+  }
+
+  /** Same-origin link that downloads the team's own source of one version. */
+  submissionSourceUrl(submissionId: string): string {
+    return `${this.baseUrl}/submissions/${encodeURIComponent(submissionId)}/source`;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     let response: Response;
+    const multipart = typeof FormData !== "undefined" && body instanceof FormData;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
         credentials: "same-origin",
-        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        // The browser sets the multipart boundary itself.
+        headers: body === undefined || multipart ? undefined : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : multipart ? (body as FormData) : JSON.stringify(body),
         signal,
       });
     } catch (error) {

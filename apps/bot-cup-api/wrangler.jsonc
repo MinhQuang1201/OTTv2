@@ -36,7 +36,9 @@
         "BOT_CUP_EMAIL_MODE": "brevo",
         "BOT_CUP_EMAIL_SENDER_NAME": "OTT Bot Cup (staging)",
         // Cloudflare's always-pass test site key; the matching secret is set with `wrangler secret put TURNSTILE_SECRET`.
-        "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+        "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+        // Runners must report this sandbox image (the one that passed the isolation tests in P0); others get no work.
+        "BOT_CUP_RUNNER_IMAGE_ID": "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5"
       },
       "d1_databases": [
         {

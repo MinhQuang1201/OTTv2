@@ -7,6 +7,7 @@
  *   node scripts/bot-cup/p0-benchmark.mjs throughput --games 24 --concurrency 4
  *   node scripts/bot-cup/p0-benchmark.mjs jitter --sleep 450 --plies 300 --concurrency 4 --lang node
  *   node scripts/bot-cup/p0-benchmark.mjs throughput --games 48 --concurrency 8 --referee-limit 5000 --bot-budget 175
+ *   node scripts/bot-cup/p0-benchmark.mjs jitter --sleep 450 --plies 300 --concurrency 4 --lang python --policy bot-cup
  *
  * --referee-limit raises the referee's per-turn limit (default 500) and --bot-budget pins the house bots' thinking
  * time, so a run can measure cold-start latency and throughput without the first turn being judged a timeout.
@@ -30,7 +31,7 @@ import { createNodeClock } from "../../packages/arena-node/src/clock/node-clock.
 import { createArtifactStore } from "../../packages/arena-node/src/artifacts/artifact-store.mjs";
 import { createCurrentRulesetSnapshot } from "../../packages/arena/src/contracts/index.mjs";
 import { computeRulesetHash } from "../../packages/arena-node/src/core/ruleset-identity.mjs";
-import { DEFAULT_MATCH_POLICY } from "../../packages/arena/src/domain/match-policy.mjs";
+import { BOT_CUP_MATCH_POLICY, DEFAULT_MATCH_POLICY } from "../../packages/arena/src/domain/match-policy.mjs";
 import { createMapState } from "../../packages/arena/src/domain/maps/index.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -39,6 +40,7 @@ const MAPS = ["classic", "flanks", "center"];
 // Bot Cup policy (plan §7.3). The controller takes clocks from the initial state, so the bank is set there too.
 // arena-policy-v1 only accepts maxPlies 400; the planned 300 needs bot-cup-policy-v1 (P4), so P0 measures with 400.
 const BANK_MS = 30000;
+let RUNTIME_PROBE = null;
 let POLICY = { ...DEFAULT_MATCH_POLICY, turnTimeLimitMs: 500, initialTimeMs: BANK_MS };
 
 function parseArgs(argv) {
@@ -47,7 +49,7 @@ function parseArgs(argv) {
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i].replace(/^--/, "");
     const value = rest[i + 1];
-    opts[key.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = key === "lang" ? value : Number(value);
+    opts[key.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = key === "lang" || key === "policy" ? value : Number(value);
   }
   if (!["throughput", "jitter"].includes(opts.mode)) {
     throw new Error("Usage: p0-benchmark.mjs <throughput|jitter> [--games N] [--concurrency C] [--sleep MS] [--plies N] [--lang node|python]");
@@ -109,7 +111,9 @@ async function playOne({ index, artifactStore, a, b, mapId, onMove }) {
     artifactStore,
     artifactDigest: artifact.artifactDigest,
     expectedManifest: artifact.manifest,
-    clock
+    clock,
+    // The runner probes Docker once and reuses it; probing per game would block the event loop (P4).
+    probe: () => RUNTIME_PROBE
   });
   const moves = [];
   const initialState = createMapState(mapId);
@@ -147,12 +151,16 @@ async function playOne({ index, artifactStore, a, b, mapId, onMove }) {
   };
 }
 
+// --stagger-ms N: at most one game launch every N ms, as the Bot Cup runner does (P4).
+let LAUNCH_GATE = null;
+
 async function pool(total, concurrency, task) {
   const results = [];
   let next = 0;
   async function worker() {
     while (next < total) {
       const index = next++;
+      if (LAUNCH_GATE) await LAUNCH_GATE();
       results.push(await task(index));
     }
   }
@@ -170,8 +178,16 @@ const countBy = (items, key) => items.reduce((acc, item) => ({ ...acc, [item[key
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  // --policy bot-cup: the real bot-cup-policy-v1 (P4): 5 s first-move grace off the bank, 300 plies.
+  if (opts.policy === "bot-cup") POLICY = BOT_CUP_MATCH_POLICY;
   if (opts.refereeLimit) POLICY = { ...POLICY, turnTimeLimitMs: opts.refereeLimit };
   const probe = probeContainerRuntime({ image: PINNED_RUNNER_IMAGE });
+  RUNTIME_PROBE = probe;
+  if (opts.staggerMs) {
+    const { createLaunchGate, warmUpContainer } = await import("../../apps/bot-cup-runner/src/executor.mjs");
+    LAUNCH_GATE = createLaunchGate(opts.staggerMs);
+    await warmUpContainer(probe.imageId);
+  }
   if (!probe.available) throw new Error(`container runtime unavailable: ${probe.reason}`);
 
   const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), "bot-cup-p0-"));
@@ -224,7 +240,8 @@ async function main() {
         acceptedTurns: overheads.length,
         overheadMs: { p50: round(percentile(overheads, 50)), p95: round(percentile(overheads, 95)), p99: round(percentile(overheads, 99)), max: round(Math.max(...overheads)) },
         gamesEndedByTimeout: timeouts.length, gameCount: games.length,
-        outcomes: countBy(games, "outcome"), reasons: countBy(games, "reason")
+        outcomes: countBy(games, "outcome"), reasons: countBy(games, "reason"),
+        games: games.map(({ index, reason, plies, firstTurnsMs, seconds }) => ({ index, reason, plies, firstTurnsMs, seconds: round(seconds) }))
       };
     }
   } finally {

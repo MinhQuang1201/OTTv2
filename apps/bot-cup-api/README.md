@@ -1,7 +1,7 @@
 # `apps/bot-cup-api`
 
-Cloudflare Worker for Bot Cup registration (plan `docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md`, P1):
-team accounts, email OTP, member invites, login sessions, password reset. Rules live in `packages/bot-cup-core`.
+Cloudflare Worker for the Bot Cup (plan `docs/superpowers/plans/2026-10-23-uet-k71-bot-cup.md`): team accounts, email
+OTP, member invites, login sessions, password reset (P1); bot submissions (P3). Rules live in `packages/bot-cup-core`.
 The browser reaches it as `/api/t/*` through a Vercel rewrite, so the session cookie is first-party.
 
 ## Endpoints (`/api/t`)
@@ -24,6 +24,16 @@ The browser reaches it as `/api/t/*` through a Vercel rewrite, so the session co
 | POST | `/password/change` | `{currentPassword, newPassword}` → ends the other sessions |
 | POST | `/sessions/revoke-all` | Logs out everywhere |
 | GET | `/_dev/outbox?to=` | Only with `Authorization: Bearer $BOT_CUP_DEV_TOKEN`; reads mail in `outbox` mode |
+| GET | `/submissions` | The team's versions (newest first), effective final submission, upload window, daily quota |
+| POST | `/submissions` | `multipart/form-data`, field `file`: one `.py` / `.js` / `.mjs`, ≤ 200 KB, UTF-8 text. Active teams, from `practice_opens_at` until `code_freeze_at`, 10 per Vietnamese day, 200 in total |
+| GET | `/submissions/:id`, `/submissions/:id/source` | Own team only (another team's id answers 404) |
+| PUT | `/team/final-submission` | `{submissionId}` or `{submissionId: null}` for "newest eligible"; 409 `code_frozen` after `code_freeze_at` |
+
+Submissions are append-only (D1 triggers); the bytes live in `submission_sources` keyed by SHA-256. Each upload's
+normalised source (`bot-cup-core.normalizeSource`) is compared with other teams' submissions and with the public reference
+files in `src/reference-hashes.mjs` (regenerate with `npm run bot-cup:reference-hashes`); a match adds a row to
+`similarity_flags`, which teams never see. New submissions wait in `checking` until the runner (P4) checks syntax and
+runs the smoke test.
 
 Errors are `{ "error": "<code>", "field"?: "<field>" }`; the web app maps codes to Vietnamese messages.
 Every non-GET request must carry an `Origin` listed in `BOT_CUP_ALLOWED_ORIGINS` (defaults to `BOT_CUP_WEB_ORIGIN`).

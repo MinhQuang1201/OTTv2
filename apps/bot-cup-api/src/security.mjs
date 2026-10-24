@@ -24,8 +24,9 @@ export function randomToken(bytes = 32) {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 
+/** SHA-256 of a string (as UTF-8) or of raw bytes, as lower-case hex. */
 export async function sha256Hex(value) {
-  return toHex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+  return toHex(await crypto.subtle.digest("SHA-256", typeof value === "string" ? encoder.encode(value) : value));
 }
 
 /** HMAC-SHA256 with a server-side pepper, for short secrets (OTP codes) that a leaked table must not reveal. */

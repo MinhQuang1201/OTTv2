@@ -4,7 +4,8 @@
  * Bindings: DB (D1).
  * Vars:     BOT_CUP_EVENT_ID, BOT_CUP_WEB_ORIGIN, BOT_CUP_ALLOWED_ORIGINS (comma-separated), BOT_CUP_EMAIL_MODE
  *           ("brevo" | "outbox"), BOT_CUP_EMAIL_SENDER, BOT_CUP_EMAIL_SENDER_NAME, TURNSTILE_SITE_KEY,
- *           BOT_CUP_TURNSTILE_BYPASS ("true" only in the local test env).
+ *           BOT_CUP_TURNSTILE_BYPASS ("true" only in the local test env), BOT_CUP_RUNNER_IMAGE_ID (optional: runners whose
+ *           heartbeat reports another image get no work).
  * Secrets:  OTP_PEPPER, BREVO_API_KEY (brevo mode), TURNSTILE_SECRET (unless bypassed), BOT_CUP_DEV_TOKEN (optional;
  *           enables GET /api/t/_dev/outbox for whoever holds it).
  */
@@ -52,7 +53,8 @@ export function apiFromEnv(env) {
         webOrigin: env.BOT_CUP_WEB_ORIGIN.replace(/\/$/, ""),
         allowedOrigins,
         turnstileSiteKey: env.TURNSTILE_SITE_KEY || null,
-        devToken: env.BOT_CUP_DEV_TOKEN || null
+        devToken: env.BOT_CUP_DEV_TOKEN || null,
+        runnerImageId: env.BOT_CUP_RUNNER_IMAGE_ID || null
       }
     })
   };

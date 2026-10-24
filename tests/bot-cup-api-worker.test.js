@@ -96,8 +96,12 @@ test("Bot Cup API Worker registers a solo team end to end on local D1", { timeou
     const now = Date.now();
     await runWrangler([
       "d1", "execute", DATABASE, ...local, "--command",
-      `INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at) VALUES ('test-event', 'OTT Bot Cup Integration', 'demo', ${now - 3_600_000}, ${now + 86_400_000})`,
+      `INSERT INTO events (id, name, mode, registration_opens_at, registration_closes_at, practice_opens_at) VALUES ('test-event', 'OTT Bot Cup Integration', 'demo', ${now - 3_600_000}, ${now + 86_400_000}, ${now - 3_600_000})`,
     ]);
+    const runnerToken = "integration-runner-token-0123456789abcdef";
+    const runnerHash = require("node:crypto").createHash("sha256").update(runnerToken).digest("hex");
+    await runWrangler(["d1", "execute", DATABASE, ...local, "--command",
+      `INSERT INTO runners (id, name, token_hash, created_at) VALUES ('runner-1', 'integration', '${runnerHash}', ${now})`]);
     worker = await startWorker(local);
     const { base } = worker;
     log(`ready at ${base}`);
@@ -141,6 +145,51 @@ test("Bot Cup API Worker registers a solo team end to end on local D1", { timeou
     const team = await me.json();
     assert.equal(team.status, "active");
     assert.equal(team.members[0].fullName, "Nguyễn Văn Test");
+
+    // P3: an upload is stored as a BLOB in D1 and comes back byte for byte.
+    const source = fs.readFileSync(path.join(root, "sdk/bot-cup/python/bot.py"));
+    const form = new FormData();
+    form.append("file", new Blob([source]), "bot.py");
+    const uploaded = await fetch(`${base}/api/t/submissions`, { method: "POST", headers: { origin: WEB, cookie }, body: form });
+    const uploadedBody = await uploaded.json();
+    assert.equal(uploaded.status, 201, JSON.stringify(uploadedBody));
+    assert.equal(uploadedBody.submission.sha256, require("node:crypto").createHash("sha256").update(source).digest("hex"));
+    assert.equal(uploadedBody.submission.status, "checking");
+    const downloaded = await fetch(`${base}/api/t/submissions/${uploadedBody.submission.id}/source`, { headers: { cookie } });
+    assert.equal(downloaded.status, 200);
+    assert.ok(Buffer.from(await downloaded.arrayBuffer()).equals(source));
+    const tooBig = new FormData();
+    tooBig.append("file", new Blob(["#".repeat(300 * 1024)]), "bot.py");
+    assert.equal((await fetch(`${base}/api/t/submissions`, { method: "POST", headers: { origin: WEB, cookie }, body: tooBig })).status, 413);
+    const listed = await (await fetch(`${base}/api/t/submissions`, { headers: { cookie } })).json();
+    assert.equal(listed.finalSubmissionId, uploadedBody.submission.id);
+
+    // P4: a runner claims the check (UPDATE … RETURNING on D1), passes it, plays the two smoke games with real replays.
+    const runner = async (pathname, body) => {
+      const response = await fetch(`${base}/runner/${pathname}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${runnerToken}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const { playCompactGame } = require("./bot-cup/games");
+    for (let round = 0; round < 3; round++) {
+      const { body } = await runner("claim", { slots: 4 });
+      for (const job of body.jobs) {
+        const report = job.kind === "check"
+          ? { jobId: job.jobId, attempt: job.attempt, ok: true, log: "ok" }
+          : { jobId: job.jobId, attempt: job.attempt, replay: await playCompactGame({ mapId: job.match.mapId }), stderr: { A: "a", B: "b" } };
+        const done = await runner("complete", report);
+        assert.equal(done.status, 200, JSON.stringify(done.body));
+      }
+    }
+    const detail = await (await fetch(`${base}/api/t/submissions/${uploadedBody.submission.id}`, { headers: { cookie } })).json();
+    assert.equal(detail.submission.status, "ready", JSON.stringify(detail));
+    const games = await (await fetch(`${base}/api/t/matches`, { headers: { cookie } })).json();
+    const smoke = games.matches.find((match) => match.stage === "smoke");
+    const replay = await (await fetch(`${base}/api/t/matches/${smoke.id}/replay`, { headers: { cookie } })).json();
+    assert.equal(replay.replay.frames.length, smoke.plies + 1, "the gzip BLOB comes back from D1 and expands");
 
     assert.equal((await post("/logout", {}, { origin: "https://evil.test" })).status, 403);
   } finally {
