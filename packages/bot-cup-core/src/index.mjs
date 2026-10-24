@@ -5,3 +5,4 @@ export * from "./submission.mjs";
 export * from "./replay.mjs";
 export * from "./jobs.mjs";
 export * from "./practice.mjs";
+export * from "./audit.mjs";

@@ -51,6 +51,7 @@ function fakeGateway(overrides: Partial<Record<keyof BotCupApiGateway, unknown>>
     requestPractice: vi.fn(),
     getMatch: vi.fn(),
     getMatchReplay: vi.fn(),
+    getAnnouncements: vi.fn().mockResolvedValue({ announcements: [] }),
     getLeaderboard: vi.fn().mockResolvedValue({ opponents: [], rows: [], updatedAt: NOW }),
     chooseFinalSubmission: vi.fn(),
     submissionSourceUrl: vi.fn((id: string) => `/api/t/submissions/${id}/source`),

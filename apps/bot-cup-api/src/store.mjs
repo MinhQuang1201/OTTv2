@@ -231,7 +231,7 @@ export function createStore(db) {
       return all(
         `SELECT id, map_id, game_index, a_submission_id, b_submission_id, a_house, b_house, status, outcome, winner, reason, plies,
                 stderr_a, stderr_b
-         FROM matches WHERE stage = 'smoke' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
+         FROM matches WHERE stage = 'smoke' AND status <> 'cancelled' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
         submissionId, submissionId
       );
     },
@@ -259,7 +259,8 @@ export function createStore(db) {
     activeTeamSubmissions(eventId) {
       return all(
         `SELECT s.id, s.team_id, s.seq, s.status, t.display_name, t.final_submission_id
-         FROM submissions s JOIN teams t ON t.id = s.team_id WHERE t.event_id = ? AND t.status = 'active'`,
+         FROM submissions s JOIN teams t ON t.id = s.team_id
+         WHERE t.event_id = ? AND t.status = 'active' AND t.disqualified_at IS NULL`,
         eventId
       );
     },

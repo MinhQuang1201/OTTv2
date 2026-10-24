@@ -1,0 +1,330 @@
+// Bot Cup admin page (plan §11.4). Plain DOM: every value from the API is set as text, never as HTML.
+const API = "/admin-api";
+const view = document.getElementById("view");
+const statusLine = document.getElementById("status");
+let me = null;
+let currentTab = "overview";
+
+function h(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === undefined || value === null || value === false) continue;
+    if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : String(value));
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+const time = (ms) => (ms ? new Date(ms).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }) : "—");
+const short = (text, n = 12) => (text ? String(text).slice(0, n) : "—");
+
+function say(message, error = false) {
+  statusLine.textContent = message;
+  statusLine.className = error ? "status error" : "status";
+}
+
+async function api(method, path, body) {
+  const response = await fetch(`${API}${path}`, {
+    method,
+    credentials: "same-origin",
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const type = response.headers.get("content-type") || "";
+  const payload = type.includes("json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const error = new Error(payload?.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+/** Runs a write after asking for the reason that goes into the audit log. */
+async function act(label, path, body = {}, { needsReason = true, confirmText } = {}) {
+  if (confirmText && !window.confirm(confirmText)) return;
+  let reason;
+  if (needsReason) {
+    reason = window.prompt(`${label}\nLý do (ghi vào audit log):`);
+    if (!reason) return;
+  }
+  try {
+    const result = await api("POST", path, { ...body, ...(reason ? { reason } : {}) });
+    say(result?.pendingId ? `${label}: đã gửi, chờ admin thứ hai duyệt.` : `${label}: xong.`);
+    await show(currentTab);
+  } catch (error) {
+    say(`${label}: lỗi ${error.message}`, true);
+  }
+}
+
+const writer = () => me?.role === "admin";
+
+function table(headers, rows) {
+  return h("div", { class: "table-wrap" }, h("table", {},
+    h("thead", {}, h("tr", {}, headers.map((title) => h("th", { scope: "col" }, title)))),
+    h("tbody", {}, rows.length ? rows : [h("tr", {}, h("td", { colspan: headers.length }, "Không có dữ liệu."))])
+  ));
+}
+
+const badge = (text, kind) => h("span", { class: `badge ${kind ?? ""}` }, text);
+const button = (label, onclick, kind) => (writer() ? h("button", { type: "button", class: kind, onclick }, label) : null);
+
+// ---------- tabs ----------
+
+const TABS = {
+  async overview() {
+    const data = await api("GET", "/overview");
+    const card = (label, value, alert) => h("div", { class: `card${alert && value ? " alert" : ""}` }, h("strong", {}, value ?? 0), label);
+    const sum = (object) => Object.values(object ?? {}).reduce((a, b) => a + b, 0);
+    return h("section", {},
+      h("h2", {}, data.event?.name ?? "Giải"),
+      h("p", { class: "muted" }, `Chế độ: ${data.event?.mode} · Giờ máy chủ: ${time(data.serverTime)} · Khóa code: ${time(data.event?.codeFreezeAt)}`),
+      h("div", { class: "cards" },
+        card("Đội (mọi trạng thái)", sum(data.teams)),
+        card("Đội đủ điều kiện", data.teams?.active ?? 0),
+        card("Đội bị loại", data.disqualifiedTeams),
+        card("Bài nộp 24 giờ qua", data.submissionsLast24h),
+        card("Bài sẵn sàng", data.submissions?.ready ?? 0),
+        card("Job đang chờ", data.jobs?.queued ?? 0),
+        card("Job đang chạy", data.jobs?.leased ?? 0),
+        card("Runner online", data.runnersOnline),
+        card("Runner nghi vấn", data.alerts.suspectRunners, true),
+        card("Job lỗi", data.alerts.failedJobs, true),
+        card("Cờ chưa xử lý", data.alerts.openFlags, true),
+        card("Chờ duyệt", data.alerts.pendingApprovals, true)
+      ));
+  },
+
+  async teams() {
+    const { teams } = await api("GET", "/teams");
+    const detail = h("div");
+    const open = async (id) => {
+      const data = await api("GET", `/teams/${id}`);
+      detail.replaceChildren(h("section", {},
+        h("h2", {}, `${data.team.display_name} (${data.team.handle})`),
+        data.team.disqualified_at ? h("p", {}, badge("Đã bị loại", "bad"), ` ${data.team.dq_reason}`) : null,
+        table(["MSSV", "Họ tên", "Email", "Vai trò", "Trạng thái", ""], data.members.map((member) => h("tr", {},
+          h("td", {}, member.mssv), h("td", {}, member.full_name), h("td", {}, member.email), h("td", {}, member.role),
+          h("td", {}, member.status),
+          h("td", {}, member.status === "pending" ? button("Xác minh tay", () => act("Xác minh thủ công", `/teams/${id}/members/${member.mssv}/confirm`)) : null)
+        ))),
+        h("h3", {}, "Bài nộp"),
+        table(["Bản", "Ngôn ngữ", "Trạng thái", "SHA-256", "Nộp lúc"], data.submissions.map((s) => h("tr", {},
+          h("td", {}, `v${s.seq}${s.id === data.finalSubmissionId ? " ★" : ""}`), h("td", {}, s.language), h("td", {}, s.status),
+          h("td", {}, h("code", {}, s.sha256)), h("td", {}, time(s.created_at))
+        )))
+      ));
+    };
+    return h("div", {},
+      h("section", {},
+        h("h2", {}, `Đội (${teams.length})`),
+        h("p", {}, h("a", { href: `${API}/export/teams.csv` }, "Xuất CSV đội và thành viên (có dữ liệu cá nhân, được ghi audit)")),
+        table(["Tên đăng nhập", "Tên đội", "Loại", "Trạng thái", "TV", "Bài", ""], teams.map((team) => h("tr", {},
+          h("td", {}, team.handle), h("td", {}, team.display_name), h("td", {}, team.kind),
+          h("td", {}, team.disqualified_at ? badge("bị loại", "bad") : team.status), h("td", {}, team.members), h("td", {}, team.submissions),
+          h("td", {}, h("div", { class: "row-actions" },
+            h("button", { type: "button", class: "quiet", onclick: () => open(team.id) }, "Chi tiết"),
+            button("Đổi tên", () => {
+              const displayName = window.prompt("Tên đội mới:", team.display_name);
+              if (displayName) act("Đổi tên đội", `/teams/${team.id}/rename`, { displayName });
+            }, "quiet"),
+            team.disqualified_at ? null : button("Loại đội", () => act("Loại đội (cần admin thứ hai duyệt)", `/teams/${team.id}/disqualify`, {}, { confirmText: `Đề nghị loại đội ${team.display_name}?` }), "danger")
+          ))
+        )))),
+      detail);
+  },
+
+  async submissions() {
+    const { submissions } = await api("GET", "/submissions");
+    const source = h("div");
+    return h("div", {}, h("section", {},
+      h("h2", {}, `Bài nộp (${submissions.length} gần nhất)`),
+      table(["Đội", "Bản", "File", "Trạng thái", "Cờ", "SHA-256", "Nộp lúc", ""], submissions.map((s) => h("tr", {},
+        h("td", {}, s.display_name), h("td", {}, `v${s.seq}`), h("td", {}, s.filename),
+        h("td", {}, s.status), h("td", {}, s.open_flags ? badge(String(s.open_flags), "bad") : "0"),
+        h("td", {}, h("code", { title: s.sha256 }, short(s.sha256))), h("td", {}, time(s.created_at)),
+        h("td", {}, h("div", { class: "row-actions" },
+          h("button", { type: "button", class: "quiet", onclick: async () => {
+            source.replaceChildren(h("section", {}, h("h2", {}, `${s.display_name} v${s.seq} — ${s.filename}`), h("pre", {}, await api("GET", `/submissions/${s.id}/source`))));
+            source.scrollIntoView();
+          } }, "Xem mã"),
+          button("Kiểm tra lại", () => act("Kiểm tra lại bài nộp", `/submissions/${s.id}/recheck`), "quiet")
+        ))
+      )))), source);
+  },
+
+  async flags() {
+    const { flags } = await api("GET", "/flags?status=open");
+    return h("section", {},
+      h("h2", {}, `Cờ nghi vấn đang mở (${flags.length})`),
+      h("p", { class: "muted" }, "Cờ chỉ là nghi vấn: xem mã của cả hai bên trước khi kết luận (plan §8.8)."),
+      table(["Loại", "Đội", "Trùng với", "Điểm", "Lúc", ""], flags.map((flag) => h("tr", {},
+        h("td", {}, flag.kind), h("td", {}, `${flag.team_name} v${flag.seq}`),
+        h("td", {}, flag.reference ? h("code", {}, flag.reference) : `${flag.other_team_name} v${flag.other_seq}`),
+        h("td", {}, flag.score ?? "—"), h("td", {}, time(flag.created_at)),
+        h("td", {}, h("div", { class: "row-actions" },
+          button("Bỏ cờ", () => act("Bỏ cờ", `/flags/${flag.id}`, { status: "cleared" }), "quiet"),
+          button("Xác nhận vi phạm", () => act("Xác nhận vi phạm", `/flags/${flag.id}`, { status: "confirmed" }), "danger")
+        ))
+      ))));
+  },
+
+  async matches() {
+    const { matches } = await api("GET", "/matches");
+    return h("section", {},
+      h("h2", {}, `Trận (${matches.length} gần nhất)`),
+      h("p", {}, h("a", { href: `${API}/export/results.csv` }, "Xuất CSV kết quả")),
+      table(["Giai đoạn", "Vòng", "Bản đồ", "Đỏ (A)", "Xanh (B)", "Trạng thái", "Kết quả", ""], matches.map((match) => h("tr", {},
+        h("td", {}, match.stage), h("td", {}, match.round ?? "—"), h("td", {}, match.map_id),
+        h("td", {}, match.a_name), h("td", {}, match.b_name), h("td", {}, match.status),
+        h("td", {}, match.outcome ? `${match.outcome} ${match.winner ?? ""} · ${match.reason ?? ""} · ${match.plies ?? 0} nước` : "—"),
+        h("td", {}, h("div", { class: "row-actions" },
+          button("Chạy lại", () => act("Chạy lại trận", `/matches/${match.id}/rerun`), "quiet"),
+          button("Sửa kết quả", () => {
+            const answer = window.prompt("Kết quả mới: A (Đỏ thắng), B (Xanh thắng) hoặc D (hòa)");
+            if (!answer) return;
+            const value = answer.trim().toUpperCase();
+            const body = value === "D" ? { outcome: "draw" } : { outcome: "win", winner: value === "A" ? "A" : "B" };
+            act("Sửa kết quả (cần admin thứ hai duyệt)", `/matches/${match.id}/result`, body);
+          }, "danger")
+        ))
+      ))));
+  },
+
+  async tournament() {
+    if (!window.botCupTournamentTab) return h("section", {}, h("h2", {}, "Điều phối giải"), h("p", {}, "Chưa có."));
+    return window.botCupTournamentTab({ api, act, h, table, badge, button, time, writer });
+  },
+
+  async pending() {
+    const { pending } = await api("GET", "/pending");
+    return h("section", {},
+      h("h2", {}, "Chờ duyệt (quy tắc hai người)"),
+      table(["Việc", "Đối tượng", "Lý do", "Người đề nghị", "Lúc", "Trạng thái", ""], pending.map((item) => h("tr", {},
+        h("td", {}, item.action), h("td", {}, item.target), h("td", {}, item.reason), h("td", {}, item.requested_by),
+        h("td", {}, time(item.requested_at)),
+        h("td", {}, item.status === "pending" ? badge("chờ", "warn") : `${item.status} · ${item.decided_by}`),
+        h("td", {}, item.status === "pending" && item.requested_by !== me.email ? h("div", { class: "row-actions" },
+          button("Duyệt", () => act("Duyệt", `/pending/${item.id}/approve`, {}, { needsReason: false, confirmText: `Duyệt: ${item.action} ${item.target}?` })),
+          button("Từ chối", () => act("Từ chối", `/pending/${item.id}/reject`), "quiet")
+        ) : null)
+      ))));
+  },
+
+  async runners() {
+    const [{ runners }, { jobs }] = await Promise.all([api("GET", "/runners"), api("GET", "/jobs?status=failed")]);
+    return h("div", {},
+      h("section", {},
+        h("h2", {}, "Runner"),
+        table(["Tên", "Trạng thái", "Lần cuối", "Image", "Slot", "Nghi vấn", ""], runners.map((runner) => h("tr", {},
+          h("td", {}, runner.name),
+          h("td", {}, runner.revoked_at ? badge("thu hồi", "bad") : runner.online ? badge("online", "ok") : badge("offline", "warn")),
+          h("td", {}, time(runner.last_seen_at)), h("td", {}, h("code", {}, short(runner.image_id, 19))),
+          h("td", {}, `${runner.active ?? 0}/${runner.slots ?? 0}`), h("td", {}, runner.suspect_reason ?? "—"),
+          h("td", {}, h("div", { class: "row-actions" },
+            runner.suspect_at ? button("Bỏ nghi vấn", () => act("Bỏ nghi vấn runner", `/runners/${runner.id}/clear-suspect`), "quiet") : null,
+            runner.revoked_at ? null : button("Thu hồi", () => act("Thu hồi runner", `/runners/${runner.id}/revoke`, {}, { confirmText: `Thu hồi token của ${runner.name}?` }), "danger")
+          ))
+        )))),
+      h("section", {},
+        h("h2", {}, `Job lỗi (${jobs.length})`),
+        table(["Loại", "Giai đoạn", "Lần chạy", "Lỗi cuối", "Cập nhật", ""], jobs.map((job) => h("tr", {},
+          h("td", {}, job.kind), h("td", {}, job.stage ?? "check"), h("td", {}, job.attempts), h("td", {}, h("code", {}, job.last_error ?? "")),
+          h("td", {}, time(job.updated_at)), h("td", {}, button("Đưa lại hàng đợi", () => act("Đưa job lại hàng đợi", `/jobs/${job.id}/requeue`), "quiet"))
+        )))));
+  },
+
+  async announcements() {
+    const { announcements } = await api("GET", "/announcements");
+    const form = writer() ? h("form", { onsubmit: async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      try {
+        await api("POST", "/announcements", { title: data.get("title"), body: data.get("body"), publish: data.get("publish") === "on" });
+        say("Đã tạo thông báo.");
+        await show("announcements");
+      } catch (error) {
+        say(`Lỗi: ${error.message}`, true);
+      }
+    } },
+      h("label", {}, "Tiêu đề", h("input", { name: "title", required: true, maxlength: 120 })),
+      h("label", {}, "Nội dung", h("textarea", { name: "body", required: true, rows: 4, maxlength: 4000 })),
+      h("label", {}, h("input", { type: "checkbox", name: "publish" }), " Đăng ngay"),
+      h("button", { type: "submit" }, "Tạo thông báo")) : null;
+    return h("section", {},
+      h("h2", {}, "Thông báo cho người chơi"), form,
+      table(["Tiêu đề", "Nội dung", "Trạng thái", ""], announcements.map((item) => h("tr", {},
+        h("td", {}, item.title), h("td", {}, item.body),
+        h("td", {}, item.withdrawn_at ? "đã gỡ" : item.published_at ? `đăng ${time(item.published_at)}` : "nháp"),
+        h("td", {}, item.published_at && !item.withdrawn_at
+          ? button("Gỡ", () => act("Gỡ thông báo", `/announcements/${item.id}/withdraw`, {}, { needsReason: false }), "quiet")
+          : button("Đăng", () => act("Đăng thông báo", `/announcements/${item.id}/publish`, {}, { needsReason: false })))
+      ))));
+  },
+
+  async audit() {
+    const [{ rows }, check] = await Promise.all([api("GET", "/audit"), api("GET", "/audit/verify")]);
+    return h("section", {},
+      h("h2", {}, "Audit log"),
+      h("p", {}, check.ok ? badge(`Chuỗi băm hợp lệ · ${check.rows} dòng · đầu chuỗi ${short(check.head, 16)}`, "ok") : badge(`Chuỗi băm SAI ở dòng ${check.seq} (${check.error})`, "bad")),
+      table(["#", "Lúc", "Ai", "Việc", "Đối tượng", "Lý do", "Hash"], rows.map((row) => h("tr", {},
+        h("td", {}, row.seq), h("td", {}, time(row.at)), h("td", {}, row.actor_email), h("td", {}, row.action),
+        h("td", {}, row.target ?? ""), h("td", {}, row.reason ?? ""), h("td", {}, h("code", { title: row.hash }, short(row.hash)))
+      ))));
+  }
+};
+
+async function show(tab) {
+  currentTab = tab;
+  for (const button of document.querySelectorAll("[data-tab]")) button.setAttribute("aria-pressed", String(button.dataset.tab === tab));
+  try {
+    view.replaceChildren(await TABS[tab]());
+  } catch (error) {
+    if (error.status === 401) return start();
+    say(`Không tải được: ${error.message}`, true);
+  }
+}
+
+async function start() {
+  try {
+    me = await api("GET", "/me");
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) {
+      document.getElementById("app").hidden = true;
+      document.getElementById("login").hidden = false;
+      say(error.status === 403 ? "Tài khoản này không phải BTC." : "");
+      return;
+    }
+    say(`Không kết nối được API: ${error.message}`, true);
+    return;
+  }
+  document.getElementById("login").hidden = true;
+  document.getElementById("app").hidden = false;
+  document.getElementById("who").textContent = `${me.email} · ${me.role === "admin" ? "admin" : "chỉ xem"}`;
+  document.getElementById("logout").hidden = me.authMode !== "password";
+  await show(currentTab);
+}
+
+document.getElementById("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(event.target);
+  try {
+    await api("POST", "/login", { email: data.get("email"), password: data.get("password"), totp: data.get("totp") });
+    event.target.reset();
+    await start();
+  } catch (error) {
+    say(error.message === "login_locked" ? "Sai quá nhiều lần, thử lại sau 15 phút." : "Sai email, mật khẩu hoặc mã TOTP.", true);
+  }
+});
+document.getElementById("logout").addEventListener("click", async () => {
+  await api("POST", "/logout", {}).catch(() => {});
+  me = null;
+  await start();
+});
+for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => show(button.dataset.tab));
+
+start();

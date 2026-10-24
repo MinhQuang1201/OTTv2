@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>BTC · OTT Bot Cup</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <header class="top">
+    <h1>OTT Bot Cup · Ban tổ chức</h1>
+    <span id="who" class="muted"></span>
+    <button id="logout" type="button" hidden>Đăng xuất</button>
+  </header>
+
+  <section id="login" class="panel" hidden aria-labelledby="login-title">
+    <h2 id="login-title">Đăng nhập BTC</h2>
+    <form id="login-form">
+      <label>Email <input name="email" type="email" autocomplete="username" required></label>
+      <label>Mật khẩu <input name="password" type="password" autocomplete="current-password" required></label>
+      <label>Mã TOTP (6 số) <input name="totp" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" required></label>
+      <button type="submit">Đăng nhập</button>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <nav class="tabs" aria-label="Mục quản trị">
+      <button type="button" data-tab="overview">Tổng quan</button>
+      <button type="button" data-tab="teams">Đội</button>
+      <button type="button" data-tab="submissions">Bài nộp</button>
+      <button type="button" data-tab="flags">Cờ gian lận</button>
+      <button type="button" data-tab="matches">Trận</button>
+      <button type="button" data-tab="tournament">Điều phối giải</button>
+      <button type="button" data-tab="pending">Chờ duyệt</button>
+      <button type="button" data-tab="runners">Runner &amp; job</button>
+      <button type="button" data-tab="announcements">Thông báo</button>
+      <button type="button" data-tab="audit">Audit log</button>
+    </nav>
+    <div id="status" role="status" class="status"></div>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
+  <script src="/admin.js" type="module"></script>
+</body>
+</html>

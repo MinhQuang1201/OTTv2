@@ -44,6 +44,7 @@ export const BOT_CUP_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   method_not_allowed: "Thao tác không được hỗ trợ.",
   conflict: "Thông tin trùng với một đội khác.",
   team_not_active: "Đội cần đủ thành viên xác nhận trước khi nộp bài.",
+  team_disqualified: "Đội đã bị Ban tổ chức loại khỏi giải.",
   submissions_not_open: "Chưa tới giờ mở nộp bài.",
   code_frozen: "Đã khóa code: không nộp thêm hay đổi Bản thi đấu được nữa.",
   submission_too_large: "File quá 200 KB.",

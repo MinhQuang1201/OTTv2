@@ -72,7 +72,9 @@ export function TeamDashboard({ gateway, event, team, onTeamChange, onSignedOut,
           <span>{team.kind === "group" ? "Đội nhóm" : "Đội cá nhân"}</span>
           <Badge status={team.status === "active" ? "success" : "warning"}>{teamStatusLabel(team.status)}</Badge>
         </p>
-        <p>{nextStep(team, event)}</p>
+        {team.disqualified
+          ? <FormAlert message={`Đội đã bị Ban tổ chức loại khỏi giải${team.dqReason ? `: ${team.dqReason}` : "."}`} />
+          : <p>{nextStep(team, event)}</p>}
       </Panel>
 
       <Panel heading="Thành viên">

@@ -16,6 +16,7 @@ function fakeBotCupGateway() {
       turnstileSiteKey: null, serverTime: NOW,
     }),
     me: vi.fn().mockResolvedValue(null),
+    getAnnouncements: vi.fn().mockResolvedValue({ announcements: [] }),
     previewInvite: vi.fn().mockResolvedValue({ eventName: "OTT Bot Cup Thử", teamName: "Đội Beta", fullName: "Trần B", email: "26****02@vnu.edu.vn", registrationOpen: true }),
   } as unknown as BotCupApiGateway & Record<string, ReturnType<typeof vi.fn>>;
 }

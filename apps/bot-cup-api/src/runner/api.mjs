@@ -168,7 +168,7 @@ export function createRunnerApi({ store, now, eventId, expectedImageId = null })
     const submissionId = match.a_submission_id ?? match.b_submission_id;
     const games = await all(
       `SELECT status, outcome, loser, reason, map_id, CASE WHEN a_submission_id = ? THEN 'A' ELSE 'B' END AS seat
-       FROM matches WHERE stage = 'smoke' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
+       FROM matches WHERE stage = 'smoke' AND status <> 'cancelled' AND (a_submission_id = ? OR b_submission_id = ?) ORDER BY game_index`,
       submissionId, submissionId, submissionId
     );
     const verdict = smokeVerdict(games.map((game) => ({ ...game, mapId: game.map_id })));

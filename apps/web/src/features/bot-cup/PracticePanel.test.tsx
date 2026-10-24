@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BotCupApiError, type BotCupApiGateway, type Leaderboard, type MatchView, type MyMatches } from "./BotCupApiGateway";
+import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { LeaderboardPanel } from "./LeaderboardPanel";
 import { PracticePanel } from "./PracticePanel";
 import { resultLabel } from "./matchFormat";
@@ -104,5 +105,20 @@ describe("LeaderboardPanel", () => {
   it("says so when nobody has practised yet", async () => {
     render(<LeaderboardPanel gateway={gatewayWith({ getLeaderboard: vi.fn().mockResolvedValue({ opponents, rows: [], updatedAt: NOW }) })} />);
     expect(await screen.findByText("Chưa có đội nào đấu luyện tập.")).toBeInTheDocument();
+  });
+});
+
+describe("AnnouncementsPanel", () => {
+  afterEach(cleanup);
+
+  it("lists the organisers' announcements as text, and stays hidden when there are none", async () => {
+    const getAnnouncements = vi.fn().mockResolvedValue({ announcements: [{ id: "a1", title: "Lịch vòng tròn", body: "<b>Thứ Hai</b> 7/12", publishedAt: NOW }] });
+    render(<AnnouncementsPanel gateway={gatewayWith({ getAnnouncements })} />);
+    expect(await screen.findByRole("heading", { name: "Lịch vòng tròn" })).toBeInTheDocument();
+    expect(screen.getByText("<b>Thứ Hai</b> 7/12")).toBeInTheDocument();
+    cleanup();
+    const { container } = render(<AnnouncementsPanel gateway={gatewayWith({ getAnnouncements: vi.fn().mockResolvedValue({ announcements: [] }) })} />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(container).toBeEmptyDOMElement();
   });
 });

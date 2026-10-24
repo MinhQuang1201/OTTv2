@@ -429,3 +429,17 @@
   cursor: pointer;
   font-weight: 600;
 }
+
+.announcements {
+  display: grid;
+  gap: var(--ui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.announcementBody {
+  margin: var(--ui-space-1) 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

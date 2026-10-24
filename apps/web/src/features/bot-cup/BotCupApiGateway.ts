@@ -44,6 +44,8 @@ export interface TeamView {
   readonly status: TeamStatus;
   readonly createdAt: number;
   readonly activeAt: number | null;
+  readonly disqualified?: boolean;
+  readonly dqReason?: string | null;
   readonly members: readonly TeamMember[];
 }
 
@@ -163,6 +165,13 @@ export interface Leaderboard {
   readonly opponents: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly rows: readonly LeaderboardRow[];
   readonly updatedAt: number;
+}
+
+export interface Announcement {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly publishedAt: number;
 }
 
 export class BotCupApiError extends Error {
@@ -294,6 +303,10 @@ export class BotCupApiGateway {
 
   getLeaderboard(signal?: AbortSignal): Promise<Leaderboard> {
     return this.request("GET", "/leaderboard", undefined, signal);
+  }
+
+  getAnnouncements(signal?: AbortSignal): Promise<{ readonly announcements: readonly Announcement[] }> {
+    return this.request("GET", "/announcements", undefined, signal);
   }
 
   /** Same-origin link that downloads the team's own source of one version. */

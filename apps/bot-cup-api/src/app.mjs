@@ -171,6 +171,8 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
       status: team.status,
       createdAt: team.created_at,
       activeAt: team.active_at,
+      disqualified: Boolean(team.disqualified_at),
+      dqReason: team.disqualified_at ? team.dq_reason : null,
       members: members.map((member) => ({
         mssv: member.mssv,
         fullName: member.full_name,
@@ -544,6 +546,7 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
   async function requireActiveTeam(request) {
     const { team } = await requireTeam(request);
     if (team.status !== TEAM_STATUS.ACTIVE) throw new HttpError(403, "team_not_active");
+    if (team.disqualified_at) throw new HttpError(403, "team_disqualified");
     return team;
   }
 
@@ -861,6 +864,15 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     });
   }
 
+  /** Announcements the organisers published (plan §4.1), newest first. Public. */
+  async function announcements() {
+    const rows = await store.statement(
+      "SELECT id, title, body, published_at FROM announcements WHERE event_id = ? AND published_at IS NOT NULL AND withdrawn_at IS NULL ORDER BY published_at DESC LIMIT 20",
+      config.eventId
+    ).all();
+    return json({ announcements: rows.results.map((row) => ({ id: row.id, title: row.title, body: row.body, publishedAt: row.published_at })) });
+  }
+
   // ---------- routing ----------
 
   const routes = [
@@ -890,6 +902,7 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     ["GET", /^\/matches\/([A-Za-z0-9-]+)$/, (request, match) => getMatch(request, match[1])],
     ["GET", /^\/matches\/([A-Za-z0-9-]+)\/replay$/, (request, match) => getMatchReplay(request, match[1])],
     ["GET", /^\/leaderboard$/, () => leaderboard()],
+    ["GET", /^\/announcements$/, () => announcements()],
     ["GET", /^\/_dev\/outbox$/, (request, match, url) => devOutbox(request, url)]
   ];
 

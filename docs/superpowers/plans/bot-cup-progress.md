@@ -16,7 +16,8 @@ tag, không merge `main`.
 | P3 | ✅ [D] | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p3.md` |
 | P4 | ✅ | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p4.md` |
 | P5 | ✅ [D] (Elo ladder [T] chưa làm) | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p5.md` |
-| P6 | ⏳ tiếp theo | — | — |
+| P6 | ✅ | `feat/bot-cup-p3` | `docs/evidence/2026-10-24-bot-cup-p6.md` |
+| P7 | ⏳ tiếp theo | — | — |
 
 ## Ghi chú cho phiên sau
 
@@ -26,5 +27,8 @@ tag, không merge `main`.
 - Staging: D1 đã có migration 0001–0004; Worker có `BOT_CUP_RUNNER_IMAGE_ID`; token runner `var/bot-cup/runner-token-staging-main.txt`.
 - Chạy runner: `BOT_CUP_RUNNER_URL=… BOT_CUP_RUNNER_TOKEN_FILE=… ARENA_RUNNER_IMAGE_ID=sha256:8e3ea65c… npm run bot-cup:runner` (`BOT_CUP_RUNNER_ONCE=true` để tự dừng).
 - Máy có 12 container của dự án khác: không đụng tới. Khi đo benchmark không chạy test khác song song.
-- P6 cần: Worker admin (Access JWT + dự phòng mật khẩu/TOTP theo env), bảng `admins`, audit log chuỗi băm, 2 admin cho loại đội/sửa kết quả,
-  màn hình đội/bài nộp/runner/job/cờ, chạy lại job, xuất CSV.
+- Admin staging: https://ottv2-bot-cup-admin-staging.opticsquang.workers.dev (password+TOTP). Tài khoản thử `btc-check@ottcup.test`
+  (file `var/bot-cup/admin-btc-check@ottcup.test.txt`); tài khoản chủ dự án đã tạo nhưng KHÔNG dùng để thao tác.
+- Local admin: `npm run bot-cup:admin:dev` (8790), tạo admin: `node scripts/bot-cup/admin-user.mjs <email> --env test --local`.
+- P7 cần: khóa code (niêm phong, công bố SHA), gate 6 ván vs easy (≥4 điểm), chọn thể thức theo N, vòng tròn 6 ván/cặp, Top 4 knockout
+  (seed, 6 ván, tie-break), phỏng vấn Top 4 trên trang BTC, khiếu nại, công bố kết quả JSON + SHA; Swiss/Top16 test thuần.

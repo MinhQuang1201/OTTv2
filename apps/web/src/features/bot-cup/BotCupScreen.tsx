@@ -7,6 +7,7 @@ import type { BotCupApiGateway, BotCupEvent, TeamView } from "./BotCupApiGateway
 import { botCupErrorMessage } from "./botCupMessages";
 import { BotCupAbout, BotCupFaq, BotCupRules, BotCupSchedule } from "./BotCupInfo";
 import { FormAlert } from "./formParts";
+import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { InviteAccept } from "./InviteAccept";
 import { LeaderboardPanel } from "./LeaderboardPanel";
 import { LoginForm } from "./LoginForm";
@@ -110,6 +111,7 @@ export function BotCupScreen({ gateway, onLobby, inviteToken = null, onStartRepl
 
       {tab === "team" ? (
         <div className={styles.body}>
+          <AnnouncementsPanel gateway={gateway} />
           {invite ? (
             <InviteAccept gateway={gateway} token={invite} onShowRules={showRules} onDone={() => setInvite(null)} />
           ) : team ? (
