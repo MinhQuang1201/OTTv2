@@ -5,6 +5,7 @@ const statusLine = document.getElementById("status");
 let me = null;
 let currentTab = "overview";
 let flagStatus = "open";
+let teamFilter = { kind: "", status: "", q: "" };
 
 function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -24,9 +25,64 @@ const time = (ms) => (ms ? new Date(ms).toLocaleString("vi-VN", { timeZone: "Asi
 const short = (text, n = 12) => (text ? String(text).slice(0, n) : "—");
 
 function say(message, error = false) {
-  statusLine.textContent = message;
-  statusLine.className = error ? "status error" : "status";
+  const line = document.getElementById("login").hidden ? statusLine : document.getElementById("login-status");
+  line.textContent = message;
+  line.className = error ? "status error" : "status";
 }
+
+const PHASE_LABEL = { registration: "Đăng ký / luyện tập", practice: "Luyện tập", frozen: "Đã khóa code", gate: "Vòng sơ loại", qualifying: "Vòng loại", verification: "Phỏng vấn code", knockout: "Loại trực tiếp", finished: "Đã kết thúc" };
+const MILESTONES = [["registrationOpensAt", "Mở đăng ký"], ["practiceOpensAt", "Mở luyện tập"], ["registrationClosesAt", "Đóng đăng ký"], ["codeFreezeAt", "Khóa code"], ["finalsAt", "Chung kết"]];
+const TEAM_STATUS = { pending_captain: "chờ đội trưởng xác minh", pending_members: "chờ thành viên", active: "đủ điều kiện" };
+const TEAM_KIND = { solo: "cá nhân", group: "nhóm" };
+
+/** "3 ngày 4 giờ", "2 giờ 5 phút", "12 phút". */
+function until(ms) {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days) return `${days} ngày${hours ? ` ${hours} giờ` : ""}`;
+  if (hours) return `${hours} giờ${minutes % 60 ? ` ${minutes % 60} phút` : ""}`;
+  return `${minutes} phút`;
+}
+
+/** Milestones of the event in time order; `next` is the first one still ahead of the server clock. */
+function milestones(event, serverTime) {
+  const rows = MILESTONES.filter(([key]) => event?.[key]).map(([key, label]) => ({ key, label, at: event[key] })).sort((a, b) => a.at - b.at);
+  return { rows, next: rows.find((row) => row.at > serverTime) ?? null };
+}
+
+/** Anything that is not the real event gets a red chip, so nobody runs a step on staging thinking it is production. */
+const isTrialEvent = (event) => event?.mode === "demo" || /staging|rehearsal|mock|test|demo|preview/i.test(event?.id ?? "");
+
+let header = null;
+function renderHeader() {
+  const chips = document.getElementById("event-chips");
+  for (const node of document.querySelectorAll("[data-count]")) {
+    const value = header?.alerts?.[node.dataset.count] ?? 0;
+    node.textContent = value ? String(value) : "";
+  }
+  if (!header?.event) return chips.replaceChildren();
+  const { event, serverTime, receivedAt } = header;
+  const clock = serverTime + (Date.now() - receivedAt);
+  const { next } = milestones(event, clock);
+  chips.replaceChildren(
+    h("span", { class: "chip phase", title: "Giai đoạn hiện tại" }, PHASE_LABEL[event.phase] ?? event.phase),
+    next ? h("span", { class: "chip", title: time(next.at) }, `${next.label} sau ${until(next.at - clock)}`) : null,
+    isTrialEvent(event) ? h("span", { class: "chip env", title: `Sự kiện ${event.id}, chế độ ${event.mode}` }, `THỬ NGHIỆM · ${event.id}`) : null
+  );
+}
+
+async function refreshHeader(data) {
+  try {
+    data ??= await api("GET", "/overview");
+    header = { ...data, receivedAt: Date.now() };
+    document.title = `BTC · ${data.event?.name ?? "OTT Bot Cup"}`;
+  } catch {
+    header = null;
+  }
+  renderHeader();
+}
+setInterval(renderHeader, 60_000);
 
 /** Vietnamese text for the refusals organisers meet most; anything else shows its code. */
 const ERRORS = {
@@ -87,6 +143,7 @@ async function act(label, path, body = {}, { needsReason = true, confirmText } =
     const result = await api("POST", path, { ...body, ...(reason ? { reason } : {}) });
     say(result?.pendingId ? `${label}: đã gửi, chờ admin thứ hai duyệt.` : `${label}: xong.`);
     await show(currentTab);
+    if (currentTab !== "overview") refreshHeader();
   } catch (error) {
     say(`${label}: ${errorText(error)}`, true);
   }
@@ -109,25 +166,65 @@ const button = (label, onclick, kind) => (writer() ? h("button", { type: "button
 const TABS = {
   async overview() {
     const data = await api("GET", "/overview");
-    const card = (label, value, alert) => h("div", { class: `card${alert && value ? " alert" : ""}` }, h("strong", {}, value ?? 0), label);
+    refreshHeader(data);
+    const go = (tab) => () => show(tab);
+    const card = (label, value, { alert, tab } = {}) => {
+      const kind = alert ? (value ? " alert" : " quiet") : "";
+      const body = [h("strong", {}, value ?? 0), h("span", {}, label)];
+      return tab ? h("button", { type: "button", class: `card${kind}`, onclick: go(tab) }, body) : h("div", { class: `card${kind}` }, body);
+    };
     const sum = (object) => Object.values(object ?? {}).reduce((a, b) => a + b, 0);
-    return h("section", {},
-      h("h2", {}, data.event?.name ?? "Giải"),
-      h("p", { class: "muted" }, `Chế độ: ${data.event?.mode} · Giờ máy chủ: ${time(data.serverTime)} · Khóa code: ${time(data.event?.codeFreezeAt)}`),
-      h("div", { class: "cards" },
-        card("Đội (mọi trạng thái)", sum(data.teams)),
-        card("Đội đủ điều kiện", data.teams?.active ?? 0),
-        card("Đội bị loại", data.disqualifiedTeams),
-        card("Bài nộp 24 giờ qua", data.submissionsLast24h),
-        card("Bài sẵn sàng", data.submissions?.ready ?? 0),
-        card("Job đang chờ", data.jobs?.queued ?? 0),
-        card("Job đang chạy", data.jobs?.leased ?? 0),
-        card("Runner online", data.runnersOnline),
-        card("Runner nghi vấn", data.alerts.suspectRunners, true),
-        card("Job lỗi", data.alerts.failedJobs, true),
-        card("Cờ chưa xử lý", data.alerts.openFlags, true),
-        card("Chờ duyệt", data.alerts.pendingApprovals, true)
-      ));
+    const { event, alerts } = data;
+    const { rows, next } = milestones(event, data.serverTime);
+
+    const todo = [];
+    if (alerts.pendingApprovals) todo.push([`${alerts.pendingApprovals} việc chờ admin thứ hai duyệt.`, "pending"]);
+    if (alerts.openFlags) todo.push([`${alerts.openFlags} cờ gian lận chưa xử lý.`, "flags"]);
+    if (alerts.failedJobs) todo.push([`${alerts.failedJobs} job lỗi: xem lỗi rồi đưa lại hàng đợi.`, "runners"]);
+    if (alerts.suspectRunners) todo.push([`${alerts.suspectRunners} runner bị nghi vấn.`, "runners"]);
+    if (!data.runnersOnline && ["gate", "qualifying", "knockout"].includes(event?.phase)) todo.push(["Không có runner online: các ván sẽ không được chơi.", "runners"]);
+    const PHASE_TODO = {
+      registration: "Theo dõi đăng ký; tới giờ khóa code thì bấm \u201cKhóa code và niêm phong\u201d.",
+      practice: "Tới giờ khóa code thì bấm \u201cKhóa code và niêm phong\u201d.",
+      frozen: "Chạy JPlag trên bài niêm phong, rồi bắt đầu vòng sơ loại.",
+      gate: "Chờ mỗi đội đủ 6 ván sơ loại rồi chốt vòng sơ loại.",
+      qualifying: "Khi mọi ván của vòng xong: tạo vòng Swiss kế tiếp hoặc chốt vòng loại.",
+      verification: "Phỏng vấn code các đội cần phỏng vấn, rồi bắt đầu loại trực tiếp.",
+      knockout: "Khi mọi ván của vòng xong: chốt vòng loại trực tiếp hiện tại.",
+      finished: "Giải đã kết thúc: trả lời khiếu nại và tải kết quả đã công bố."
+    };
+    if (PHASE_TODO[event?.phase]) todo.push([PHASE_TODO[event.phase], "tournament"]);
+
+    return h("div", {},
+      h("section", {},
+        h("div", { class: "page-head" },
+          h("h2", {}, event?.name ?? "Giải"),
+          h("span", { class: "muted" }, `Chế độ ${event?.mode ?? "—"} · giờ máy chủ ${time(data.serverTime)}`)),
+        h("p", {}, "Giai đoạn: ", badge(PHASE_LABEL[event?.phase] ?? event?.phase ?? "—", "ok"),
+          next ? ` · ${next.label} sau ${until(next.at - data.serverTime)} (${time(next.at)})` : ""),
+        h("h3", {}, "Việc cần làm tiếp"),
+        h("ul", { class: "todo" }, todo.map(([text, tab]) => h("li", {}, text, " ", h("button", { type: "button", class: "quiet", onclick: go(tab) }, "Mở"))))),
+      h("section", {},
+        h("div", { class: "card-group" }, h("h3", {}, "Đội và bài nộp"), h("div", { class: "cards" },
+          card("Đội (mọi trạng thái)", sum(data.teams), { tab: "teams" }),
+          card("Đội đủ điều kiện", data.teams?.active ?? 0, { tab: "teams" }),
+          card("Chờ thành viên / đội trưởng", (data.teams?.pending_members ?? 0) + (data.teams?.pending_captain ?? 0), { tab: "teams" }),
+          card("Đội bị loại", data.disqualifiedTeams, { tab: "teams" }),
+          card("Bài sẵn sàng", data.submissions?.ready ?? 0, { tab: "submissions" }),
+          card("Bài nộp 24 giờ qua", data.submissionsLast24h, { tab: "submissions" }))),
+        h("div", { class: "card-group" }, h("h3", {}, "Máy chấm"), h("div", { class: "cards" },
+          card("Runner online", data.runnersOnline, { tab: "runners" }),
+          card("Job đang chờ", data.jobs?.queued ?? 0, { tab: "runners" }),
+          card("Job đang chạy", data.jobs?.leased ?? 0, { tab: "runners" }))),
+        h("div", { class: "card-group" }, h("h3", {}, "Cần xử lý"), h("div", { class: "cards" },
+          card("Chờ duyệt", alerts.pendingApprovals, { alert: true, tab: "pending" }),
+          card("Cờ chưa xử lý", alerts.openFlags, { alert: true, tab: "flags" }),
+          card("Job lỗi", alerts.failedJobs, { alert: true, tab: "runners" }),
+          card("Runner nghi vấn", alerts.suspectRunners, { alert: true, tab: "runners" })))),
+      rows.length ? h("section", {},
+        h("h3", {}, "Mốc thời gian"),
+        h("ol", { class: "milestones" }, rows.map((row) => h("li", { class: row === next ? "next" : row.at <= data.serverTime ? "past" : null },
+          h("b", {}, row.label), time(row.at))))) : null);
   },
 
   async teams() {
@@ -150,15 +247,40 @@ const TABS = {
         )))
       ));
     };
+    const matches = (team) => {
+      const { kind, status, q } = teamFilter;
+      if (kind && team.kind !== kind) return false;
+      if (status === "disqualified" ? !team.disqualified_at : status && (team.status !== status || team.disqualified_at)) return false;
+      const needle = q.trim().toLowerCase();
+      return !needle || `${team.handle} ${team.display_name}`.toLowerCase().includes(needle);
+    };
+    const shown = teams.filter(matches);
+    const option = (value, label, current) => h("option", { value, selected: value === current }, label);
+    const setFilter = (key) => (event) => {
+      teamFilter = { ...teamFilter, [key]: event.target.value };
+      show("teams");
+    };
+    const statusBadge = (team) => {
+      if (team.disqualified_at) return badge("bị loại", "bad");
+      return badge(TEAM_STATUS[team.status] ?? team.status, team.status === "active" ? "ok" : "warn");
+    };
     return h("div", {},
       h("section", {},
-        h("h2", {}, `Đội (${teams.length})`),
-        h("p", {}, h("a", { href: `${API}/export/teams.csv` }, "Xuất CSV đội và thành viên (có dữ liệu cá nhân, được ghi audit)")),
-        table(["Tên đăng nhập", "Tên đội", "Loại", "Trạng thái", "TV", "Bài", ""], teams.map((team) => h("tr", {},
-          h("td", {}, team.handle), h("td", {}, team.display_name), h("td", {}, team.kind),
-          h("td", {}, team.disqualified_at ? badge("bị loại", "bad") : team.status), h("td", {}, team.members), h("td", {}, team.submissions),
+        h("div", { class: "page-head" },
+          h("h2", {}, `Đội (${shown.length}/${teams.length})`),
+          h("a", { href: `${API}/export/teams.csv` }, "Xuất CSV (có dữ liệu cá nhân, được ghi audit)")),
+        h("div", { class: "toolbar" },
+          h("label", {}, "Tìm", h("input", { type: "search", value: teamFilter.q, placeholder: "Tên đội hoặc tên đăng nhập", onchange: setFilter("q") })),
+          h("label", {}, "Loại", h("select", { onchange: setFilter("kind") },
+            option("", "Tất cả", teamFilter.kind), Object.entries(TEAM_KIND).map(([value, label]) => option(value, label, teamFilter.kind)))),
+          h("label", {}, "Trạng thái", h("select", { onchange: setFilter("status") },
+            option("", "Tất cả", teamFilter.status), Object.entries(TEAM_STATUS).map(([value, label]) => option(value, label, teamFilter.status)),
+            option("disqualified", "bị loại", teamFilter.status)))),
+        table(["Tên đăng nhập", "Tên đội", "Loại", "Trạng thái", "TV", "Bài", ""], shown.map((team) => h("tr", {},
+          h("td", {}, team.handle), h("td", {}, team.display_name), h("td", {}, TEAM_KIND[team.kind] ?? team.kind),
+          h("td", {}, statusBadge(team)), h("td", {}, team.members), h("td", {}, team.submissions),
           h("td", {}, h("div", { class: "row-actions" },
-            h("button", { type: "button", class: "quiet", onclick: () => open(team.id) }, "Chi tiết"),
+            h("button", { type: "button", class: "quiet", onclick: () => open(team.id).then(() => detail.scrollIntoView()) }, "Chi tiết"),
             button("Đổi tên", () => {
               const displayName = window.prompt("Tên đội mới:", team.display_name);
               if (displayName) act("Đổi tên đội", `/teams/${team.id}/rename`, { displayName });
@@ -321,7 +443,10 @@ const TABS = {
 
   async tournament() {
     const data = await api("GET", "/tournament");
-    const PHASE_LABEL = { registration: "Đăng ký / luyện tập", practice: "Luyện tập", frozen: "Đã khóa code", gate: "Vòng sơ loại", qualifying: "Vòng loại", verification: "Phỏng vấn code", knockout: "Loại trực tiếp", finished: "Đã kết thúc" };
+    const ORDER = ["registration", "frozen", "gate", "qualifying", "verification", "knockout", "finished"];
+    const at = ORDER.indexOf(data.phase === "practice" ? "registration" : data.phase);
+    const stepper = h("ol", { class: "stepper", "aria-label": "Các giai đoạn" }, ORDER.map((phase, index) =>
+      h("li", { class: index < at ? "done" : index === at ? "current" : null, "aria-current": index === at ? "step" : null }, PHASE_LABEL[phase])));
     const STEPS = {
       registration: [["freeze", "Khóa code và niêm phong"]],
       practice: [["freeze", "Khóa code và niêm phong"]],
@@ -341,6 +466,7 @@ const TABS = {
     const sections = [
       h("section", {},
         h("h2", {}, "Điều phối giải"),
+        stepper,
         h("p", {}, "Giai đoạn: ", badge(PHASE_LABEL[data.phase] ?? data.phase, "ok"), ` · Chế độ: ${data.mode} · Khóa code: ${time(data.codeFreezeAt)}`),
         steps.length ? h("div", { class: "row-actions" }, steps) : h("p", { class: "muted" }, "Không còn bước nào."),
         h("p", { class: "muted" }, "Mỗi bước kiểm tra giai đoạn và chờ mọi ván của giai đoạn trước kết thúc; máy chủ từ chối nếu chưa đủ điều kiện.")),
@@ -486,7 +612,10 @@ const TABS = {
 
 async function show(tab) {
   currentTab = tab;
-  for (const button of document.querySelectorAll("[data-tab]")) button.setAttribute("aria-pressed", String(button.dataset.tab === tab));
+  for (const button of document.querySelectorAll("[data-tab]")) {
+    if (button.dataset.tab === tab) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
   try {
     view.replaceChildren(await TABS[tab]());
   } catch (error) {
@@ -501,7 +630,11 @@ async function start() {
   } catch (error) {
     if (error.status === 401 || error.status === 403) {
       document.getElementById("app").hidden = true;
+      document.getElementById("menu-toggle").hidden = true;
       document.getElementById("login").hidden = false;
+      document.getElementById("who").textContent = "";
+      header = null;
+      renderHeader();
       say(error.status === 403 ? "Tài khoản này không phải BTC." : "");
       return;
     }
@@ -510,8 +643,10 @@ async function start() {
   }
   document.getElementById("login").hidden = true;
   document.getElementById("app").hidden = false;
+  document.getElementById("menu-toggle").hidden = false;
   document.getElementById("who").textContent = `${me.email} · ${me.role === "admin" ? "admin" : "chỉ xem"}`;
   document.getElementById("logout").hidden = me.authMode !== "password";
+  if (currentTab !== "overview") refreshHeader();
   await show(currentTab);
 }
 
@@ -531,6 +666,20 @@ document.getElementById("logout").addEventListener("click", async () => {
   me = null;
   await start();
 });
-for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => show(button.dataset.tab));
+const sidebar = document.getElementById("sidebar");
+const menuToggle = document.getElementById("menu-toggle");
+const setMenu = (open) => {
+  sidebar.classList.toggle("open", open);
+  menuToggle.setAttribute("aria-expanded", String(open));
+};
+menuToggle.addEventListener("click", () => setMenu(!sidebar.classList.contains("open")));
+for (const button of document.querySelectorAll("[data-tab]")) {
+  button.addEventListener("click", async () => {
+    setMenu(false);
+    say("");
+    await show(button.dataset.tab);
+    view.focus({ preventScroll: true });
+  });
+}
 
 start();
