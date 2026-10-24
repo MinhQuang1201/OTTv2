@@ -61,6 +61,10 @@ export const BOT_CUP_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   practice_no_submission: "Đội chưa có bài nộp nào để đấu luyện tập.",
   practice_not_ready: "Bản thi đấu chưa qua kiểm tra. Chờ máy chấm kiểm tra xong rồi thử lại.",
   practice_daily_limit: "Đội đã dùng hết 20 ván luyện tập hôm nay. Hạn mức đặt lại lúc 00:00.",
+  appeal_invalid: "Khiếu nại cần chọn giai đoạn và viết 10–2000 ký tự.",
+  appeal_not_entrant: "Chỉ đội có bài được niêm phong mới gửi khiếu nại.",
+  appeal_window_closed: "Ngoài thời hạn khiếu nại của giai đoạn này.",
+  appeal_limit: "Đội đã gửi đủ 3 khiếu nại cho giai đoạn này.",
   server_misconfigured: "Máy chủ giải đấu đang bảo trì.",
   internal_error: "Máy chủ gặp sự cố. Hãy thử lại sau.",
 };

@@ -24,6 +24,7 @@ import { enqueueCheck, enqueueMatch } from "../../bot-cup-api/src/queue.mjs";
 import { randomToken, sha256Hex, verifyPassword } from "../../bot-cup-api/src/security.mjs";
 import { createStore } from "../../bot-cup-api/src/store.mjs";
 import { AuthError, verifyAccessJwt, verifyTotp } from "./auth.mjs";
+import { tournamentRoutes } from "./tournament-routes.mjs";
 
 const PREFIX = "/admin-api";
 export const ADMIN_COOKIE = "__Host-ottcup_admin";
@@ -559,13 +560,10 @@ export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
     ["GET", /^\/export\/(teams|results)\.csv$/, (request, admin, m) => exportCsv(admin, m[1])]
   ];
 
-  /** Extra routes for P7 (tournament control) register here without touching the table above. */
-  function addRoutes(extra) {
-    routes.push(...extra);
-  }
+  // Tournament control (P7); `config.random` lets tests fix the tie-break map draw.
+  routes.push(...tournamentRoutes({ store, now, eventId: config.eventId, audited, random: config.random }));
 
   return {
-    addRoutes,
     audited,
     store,
     async fetch(request) {

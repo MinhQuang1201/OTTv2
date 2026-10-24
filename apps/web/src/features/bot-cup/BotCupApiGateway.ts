@@ -174,6 +174,64 @@ export interface Announcement {
   readonly publishedAt: number;
 }
 
+export type TournamentPhase = "registration" | "practice" | "frozen" | "gate" | "qualifying" | "verification" | "knockout" | "finished";
+export type ResultStage = "sealed" | "gate" | "qualifying" | "final";
+export type AppealStage = "gate" | "qualifying" | "final";
+
+export interface StandingRow {
+  readonly rank: number;
+  readonly displayName: string;
+  readonly points: number;
+  readonly wins: number;
+  readonly games: number;
+  readonly byes?: number;
+  readonly sb?: number;
+  readonly buchholzCut1?: number;
+}
+
+export interface KnockoutGame {
+  readonly id: string;
+  readonly mapId: string;
+  readonly gameIndex: number;
+  readonly status: MatchStatus;
+  readonly outcome: MatchOutcome | null;
+  readonly winner: "A" | "B" | null;
+  readonly reason: string | null;
+  /** Which side of the pairing (a = higher seed) held Red in this game. */
+  readonly red: "a" | "b";
+}
+
+export interface KnockoutPairing {
+  readonly round: number;
+  readonly slot: string;
+  readonly red: string;
+  readonly blue: string;
+  readonly seeds: readonly [number, number];
+  readonly points: readonly [number, number];
+  readonly tiebreaks: number;
+  readonly winner: string | null;
+  readonly decidedBySeed: boolean;
+  readonly games: readonly KnockoutGame[];
+}
+
+export interface TournamentView {
+  readonly phase: TournamentPhase;
+  readonly documents: ReadonlyArray<{ readonly stage: ResultStage; readonly sha256: string; readonly publishedAt: number }>;
+  readonly standings: { readonly format: "round_robin" | "swiss" | null; readonly rows: readonly StandingRow[] };
+  readonly knockout: readonly KnockoutPairing[];
+}
+
+export interface Appeal {
+  readonly id: string;
+  readonly stage: AppealStage;
+  readonly matchId: string | null;
+  readonly body: string;
+  readonly status: "open" | "answered";
+  readonly response: string | null;
+  readonly createdAt: number;
+  readonly answeredAt: number | null;
+}
+
 export class BotCupApiError extends Error {
   constructor(
     readonly status: number,
@@ -307,6 +365,37 @@ export class BotCupApiGateway {
 
   getAnnouncements(signal?: AbortSignal): Promise<{ readonly announcements: readonly Announcement[] }> {
     return this.request("GET", "/announcements", undefined, signal);
+  }
+
+  getTournament(signal?: AbortSignal): Promise<TournamentView> {
+    return this.request("GET", "/tournament", undefined, signal);
+  }
+
+  /** Public link to a published result document (the exact bytes behind its SHA-256). */
+  resultDocumentUrl(stage: ResultStage): string {
+    return `${this.baseUrl}/results/${encodeURIComponent(stage)}`;
+  }
+
+  /** Downloads a published result document and checks its SHA-256 in the browser. */
+  async verifyResultDocument(stage: ResultStage, expectedSha256: string): Promise<boolean> {
+    let response: Response;
+    try {
+      response = await fetch(this.resultDocumentUrl(stage), { credentials: "same-origin" });
+    } catch {
+      throw new BotCupApiError(0, "network_error");
+    }
+    if (!response.ok) throw new BotCupApiError(response.status, response.status === 404 ? "not_found" : "internal_error");
+    const digest = await crypto.subtle.digest("SHA-256", await response.arrayBuffer());
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return hex === expectedSha256;
+  }
+
+  listAppeals(signal?: AbortSignal): Promise<{ readonly appeals: readonly Appeal[] }> {
+    return this.request("GET", "/appeals", undefined, signal);
+  }
+
+  createAppeal(stage: AppealStage, body: string, matchId?: string): Promise<{ readonly id: string; readonly status: "open" }> {
+    return this.request("POST", "/appeals", { stage, body, ...(matchId ? { matchId } : {}) });
   }
 
   /** Same-origin link that downloads the team's own source of one version. */

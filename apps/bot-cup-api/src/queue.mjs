@@ -43,6 +43,50 @@ export function enqueueMatch(store, game) {
   };
 }
 
+// D1 allows 100 bound parameters per query and, on the Free plan, 50 queries per Worker invocation: starting a round
+// robin of 8 teams (168 games) one INSERT at a time would hit both. Many rows go into one INSERT instead, with the values
+// written as literals. Only values the server made itself are allowed (ids, numbers, fixed names), checked below.
+const SAFE_TEXT = /^[A-Za-z0-9_.:-]{0,80}$/;
+
+function literal(value) {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && SAFE_TEXT.test(value)) return `'${value}'`;
+  throw new TypeError(`bulk insert refuses value ${JSON.stringify(value)}`);
+}
+
+function bulkInsert(store, table, columns, rows, chunk = 200) {
+  const statements = [];
+  for (let index = 0; index < rows.length; index += chunk) {
+    const values = rows.slice(index, index + chunk).map((row) => `(${row.map(literal).join(", ")})`).join(",\n");
+    statements.push(store.statement(`INSERT INTO ${table} (${columns.join(", ")}) VALUES\n${values}`));
+  }
+  return statements;
+}
+
+/**
+ * Many games and their jobs in a handful of statements (tournament stages).
+ * @param {Array<{ stage: string, mapId: string, a: object, b: object, gameIndex?: number, round?: number|null, pairingId?: string|null, priority?: number }>} games
+ * @returns {{ matchIds: string[], statements: object[] }}
+ */
+export function enqueueMatches(store, { eventId, games, now }) {
+  const matchIds = games.map(() => crypto.randomUUID());
+  const matchRows = games.map((game, index) => [
+    matchIds[index], eventId, game.stage, game.round ?? null, game.pairingId ?? null, game.gameIndex ?? 0, game.mapId,
+    BOT_CUP_POLICY.matchPolicyVersion, game.a.submissionId ?? null, game.a.house ?? null, game.b.submissionId ?? null, game.b.house ?? null, now
+  ]);
+  const jobRows = games.map((game, index) => [crypto.randomUUID(), eventId, "match", game.priority ?? JOB_PRIORITY[game.stage], matchIds[index], now, now]);
+  return {
+    matchIds,
+    statements: [
+      ...bulkInsert(store, "matches", ["id", "event_id", "stage", "round", "pairing_id", "game_index", "map_id", "policy_version", "a_submission_id", "a_house", "b_submission_id", "b_house", "created_at"], matchRows),
+      ...bulkInsert(store, "jobs", ["id", "event_id", "kind", "priority", "match_id", "created_at", "updated_at"], jobRows)
+    ]
+  };
+}
+
+export { bulkInsert };
+
 /**
  * A practice request: two games (one per colour) and their jobs, created only while the team has room in today's limit.
  * The first INSERT carries the limit check; everything else exists only if that row does, so the batch is all or nothing

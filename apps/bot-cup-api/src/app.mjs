@@ -9,6 +9,7 @@
  *   config    { eventId, otpPepper, webOrigin, allowedOrigins: string[], turnstileSiteKey?, devToken? }
  */
 import {
+  APPEAL_POLICY,
   OTP_POLICY,
   FINAL_ELIGIBLE_STATUSES,
   HOUSE_BOT_LABELS,
@@ -26,6 +27,7 @@ import {
   TEAM_KINDS,
   TEAM_STATUS,
   afterFailedLogin,
+  appealAllowed,
   cannotAddMember,
   checkStudent,
   deriveTeamStatus,
@@ -57,6 +59,7 @@ import { inviteEmail, otpEmail } from "./mail.mjs";
 import { enqueueCheck, enqueuePractice, gunzipText } from "./queue.mjs";
 import { REFERENCE_HASHES } from "./reference-hashes.mjs";
 import { createRunnerApi } from "./runner/api.mjs";
+import { createTournament } from "./tournament/engine.mjs";
 import { hashPassword, hmacHex, randomToken, sameDigest, sha256Hex, verifyPassword } from "./security.mjs";
 import { createStore, uniqueViolation } from "./store.mjs";
 
@@ -864,6 +867,60 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     });
   }
 
+  // ---------- tournament (plan §7, P7) ----------
+
+  const tournament = createTournament({ store, now, eventId: config.eventId });
+  const APPEAL_STAGES = ["gate", "qualifying", "final"];
+
+  /** Phase, published documents, live table and bracket. Public. */
+  async function tournamentView() {
+    return json(await tournament.publicView());
+  }
+
+  /** A published result document byte for byte, so anyone can check its SHA-256 (plan §8.8). */
+  async function resultDocument(stage) {
+    const doc = await tournament.publishedDoc(stage);
+    if (!doc) throw new HttpError(404, "not_found");
+    return new Response(doc.json, {
+      headers: { "content-type": "application/json; charset=utf-8", "x-sha256": doc.sha256, "cache-control": "no-store" }
+    });
+  }
+
+  async function createAppeal(request) {
+    const { team } = await requireTeam(request);
+    const body = await readJson(request);
+    const event = await loadEvent();
+    if (!APPEAL_STAGES.includes(body.stage)) throw new HttpError(400, "appeal_invalid", { field: "stage" });
+    const text = typeof body.body === "string" ? body.body.trim() : "";
+    if (text.length < 10 || text.length > APPEAL_POLICY.bodyMax) throw new HttpError(400, "appeal_invalid", { field: "body" });
+    const entrant = await store.statement("SELECT 1 AS ok FROM entrants WHERE event_id = ? AND team_id = ?", event.id, team.id).first();
+    if (!entrant) throw new HttpError(403, "appeal_not_entrant");
+    const doc = await tournament.publishedDoc(body.stage);
+    const count = (await store.statement("SELECT COUNT(*) AS n FROM appeals WHERE team_id = ? AND stage = ?", team.id, body.stage).first()).n;
+    const refused = appealAllowed({ mode: event.mode, resultsPublishedAt: doc?.published_at ?? null, now: now(), appealsInStage: count });
+    if (refused) throw new HttpError(409, refused);
+    let matchId = null;
+    if (body.matchId) {
+      const match = await store.getMatchWithTeams(String(body.matchId));
+      if (!match || match.event_id !== event.id) throw new HttpError(400, "appeal_invalid", { field: "matchId" });
+      matchId = match.id;
+    }
+    const id = crypto.randomUUID();
+    await store.statement(
+      "INSERT INTO appeals (id, event_id, team_id, stage, match_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      id, event.id, team.id, body.stage, matchId, text, now()
+    ).run();
+    return json({ id, status: "open" }, 201);
+  }
+
+  async function listAppeals(request) {
+    const { team } = await requireTeam(request);
+    const rows = await store.statement("SELECT id, stage, match_id, body, status, response, created_at, answered_at FROM appeals WHERE team_id = ? ORDER BY created_at DESC", team.id).all();
+    return json({
+      appeals: rows.results.map((row) => ({ id: row.id, stage: row.stage, matchId: row.match_id, body: row.body, status: row.status, response: row.response, createdAt: row.created_at, answeredAt: row.answered_at }))
+    });
+  }
+
   /** Announcements the organisers published (plan §4.1), newest first. Public. */
   async function announcements() {
     const rows = await store.statement(
@@ -903,6 +960,10 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     ["GET", /^\/matches\/([A-Za-z0-9-]+)\/replay$/, (request, match) => getMatchReplay(request, match[1])],
     ["GET", /^\/leaderboard$/, () => leaderboard()],
     ["GET", /^\/announcements$/, () => announcements()],
+    ["GET", /^\/tournament$/, () => tournamentView()],
+    ["GET", /^\/results\/(sealed|gate|qualifying|final)$/, (request, match) => resultDocument(match[1])],
+    ["POST", /^\/appeals$/, (request) => createAppeal(request)],
+    ["GET", /^\/appeals$/, (request) => listAppeals(request)],
     ["GET", /^\/_dev\/outbox$/, (request, match, url) => devOutbox(request, url)]
   ];
 

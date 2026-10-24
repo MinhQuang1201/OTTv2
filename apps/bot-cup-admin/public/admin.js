@@ -27,6 +27,33 @@ function say(message, error = false) {
   statusLine.className = error ? "status error" : "status";
 }
 
+/** Vietnamese text for the refusals organisers meet most; anything else shows its code. */
+const ERRORS = {
+  phase_mismatch: "Sai thứ tự: giai đoạn hiện tại không cho bước này.",
+  freeze_too_early: "Chưa tới giờ khóa code.",
+  games_pending: "Còn ván chưa chấm xong",
+  not_enough_teams: "Không đủ đội qua vòng sơ loại để đấu vòng loại.",
+  already_started: "Vòng loại đã bắt đầu.",
+  not_started: "Vòng loại chưa bắt đầu.",
+  not_swiss: "Vòng loại không phải Swiss.",
+  swiss_complete: "Đã đủ số vòng Swiss.",
+  swiss_unfinished: "Chưa đấu đủ số vòng Swiss.",
+  interviews_pending: "Còn đội trong Top 4 chưa phỏng vấn.",
+  knockout_not_possible: "Dưới 4 đội: không đấu loại trực tiếp, dùng \"Kết thúc không cần loại trực tiếp\".",
+  knockout_expected: "Đủ đội để đấu loại trực tiếp: hãy bắt đầu loại trực tiếp.",
+  already_answered: "Khiếu nại đã được trả lời.",
+  reason_required: "Cần ghi lý do (ít nhất 3 ký tự).",
+  read_only: "Tài khoản chỉ xem, không được ghi.",
+  same_admin: "Người đề nghị không tự duyệt được.",
+  forbidden_origin: "Yêu cầu bị chặn (origin). Hãy tải lại trang."
+};
+
+function errorText(error) {
+  const base = ERRORS[error.message];
+  if (!base) return `lỗi ${error.message}`;
+  return error.detail?.pending ? `${base} (${error.detail.pending} ván).` : base;
+}
+
 async function api(method, path, body) {
   const response = await fetch(`${API}${path}`, {
     method,
@@ -39,6 +66,7 @@ async function api(method, path, body) {
   if (!response.ok) {
     const error = new Error(payload?.error || `HTTP ${response.status}`);
     error.status = response.status;
+    error.detail = typeof payload === "object" ? payload : null;
     throw error;
   }
   return payload;
@@ -57,7 +85,7 @@ async function act(label, path, body = {}, { needsReason = true, confirmText } =
     say(result?.pendingId ? `${label}: đã gửi, chờ admin thứ hai duyệt.` : `${label}: xong.`);
     await show(currentTab);
   } catch (error) {
-    say(`${label}: lỗi ${error.message}`, true);
+    say(`${label}: ${errorText(error)}`, true);
   }
 }
 
@@ -196,8 +224,90 @@ const TABS = {
   },
 
   async tournament() {
-    if (!window.botCupTournamentTab) return h("section", {}, h("h2", {}, "Điều phối giải"), h("p", {}, "Chưa có."));
-    return window.botCupTournamentTab({ api, act, h, table, badge, button, time, writer });
+    const data = await api("GET", "/tournament");
+    const PHASE_LABEL = { registration: "Đăng ký / luyện tập", practice: "Luyện tập", frozen: "Đã khóa code", gate: "Vòng sơ loại", qualifying: "Vòng loại", verification: "Phỏng vấn code", knockout: "Loại trực tiếp", finished: "Đã kết thúc" };
+    const STEPS = {
+      registration: [["freeze", "Khóa code và niêm phong"]],
+      practice: [["freeze", "Khóa code và niêm phong"]],
+      frozen: [["gate-start", "Bắt đầu vòng sơ loại"]],
+      gate: [["gate-close", "Chốt vòng sơ loại"]],
+      qualifying: [["qualifying-start", "Bắt đầu vòng loại"], ["swiss-next", "Tạo vòng Swiss kế tiếp"], ["qualifying-close", "Chốt vòng loại"]],
+      verification: [["knockout-start", "Bắt đầu loại trực tiếp"], ["finish", "Kết thúc không cần loại trực tiếp"]],
+      knockout: [["knockout-advance", "Chốt vòng loại trực tiếp hiện tại"]],
+      finished: []
+    };
+    const steps = (STEPS[data.phase] ?? []).map(([step, label]) =>
+      button(label, () => act(label, `/tournament/${step}`, {}, { confirmText: `${label}? Bước này ghi vào audit log và không hoàn tác được.` })));
+    const sha = (value) => h("code", { title: value ?? "" }, short(value, 16));
+    const interview = data.interviews;
+    const waiting = new Set(interview?.waitingFor ?? []);
+    const seeded = new Set(interview?.seeded ?? []);
+    const sections = [
+      h("section", {},
+        h("h2", {}, "Điều phối giải"),
+        h("p", {}, "Giai đoạn: ", badge(PHASE_LABEL[data.phase] ?? data.phase, "ok"), ` · Chế độ: ${data.mode} · Khóa code: ${time(data.codeFreezeAt)}`),
+        steps.length ? h("div", { class: "row-actions" }, steps) : h("p", { class: "muted" }, "Không còn bước nào."),
+        h("p", { class: "muted" }, "Mỗi bước kiểm tra giai đoạn và chờ mọi ván của giai đoạn trước kết thúc; máy chủ từ chối nếu chưa đủ điều kiện.")),
+      h("section", {},
+        h("h3", {}, `Bài niêm phong (${data.entrants.length})`),
+        table(["Đội", "Bản", "Ngôn ngữ", "SHA-256", "Sơ loại", "Hạt giống", "Phỏng vấn"], data.entrants.map((entrant) => h("tr", {},
+          h("td", {}, entrant.team, entrant.disqualified ? [" ", badge("bị loại", "bad")] : null), h("td", {}, entrant.version), h("td", {}, entrant.language),
+          h("td", {}, sha(entrant.sha256)),
+          h("td", {}, entrant.gateStatus ? `${entrant.gatePoints} điểm · ${entrant.gateStatus === "qualified" ? "đạt" : "không đạt"}` : "—"),
+          h("td", {}, entrant.seed ?? "—"), h("td", {}, entrant.interview ?? "—")
+        ))))
+    ];
+    if (data.gateProgress.length && data.phase === "gate") {
+      sections.push(h("section", {}, h("h3", {}, "Tiến độ sơ loại"),
+        table(["Đội", "Đã chơi", "Kết quả"], data.gateProgress.map((row) => h("tr", {},
+          h("td", {}, row.team), h("td", {}, `${row.played}/6`),
+          h("td", {}, row.verdict ? `${row.verdict.points} điểm · ${row.verdict.status === "qualified" ? "đạt" : "không đạt"}` : "đang chơi")
+        )))));
+    }
+    if (data.standings.format) {
+      sections.push(h("section", {}, h("h3", {}, `Bảng xếp hạng vòng loại (${data.standings.format === "round_robin" ? "vòng tròn" : "Swiss"})`),
+        table(["Hạng", "Đội", "Điểm", "Ván thắng", "Số ván", "SB", "Buchholz-1", "Phỏng vấn", ""], data.standings.rows.map((row) => h("tr", {},
+          h("td", {}, row.rank), h("td", {}, row.displayName), h("td", {}, row.points), h("td", {}, row.wins), h("td", {}, row.games),
+          h("td", {}, row.sb ?? "—"), h("td", {}, row.buchholzCut1 ?? "—"),
+          h("td", {}, seeded.has(row.teamId) ? badge("vào Top 4", "ok") : waiting.has(row.teamId) ? badge("cần phỏng vấn", "warn") : (data.entrants.find((e) => e.teamId === row.teamId)?.interview ?? "—")),
+          h("td", {}, data.phase === "verification" ? h("div", { class: "row-actions" },
+            button("Đạt", () => act(`Phỏng vấn ${row.displayName}: đạt`, "/tournament/interview", { teamId: row.teamId, result: "pass" })),
+            button("Không đạt", () => act(`Phỏng vấn ${row.displayName}: không đạt`, "/tournament/interview", { teamId: row.teamId, result: "fail" }), "danger")
+          ) : null)
+        )))));
+    }
+    if (data.knockout.length) {
+      sections.push(h("section", {}, h("h3", {}, "Loại trực tiếp"),
+        table(["Vòng", "Cặp", "Đỏ (hạt giống)", "Xanh (hạt giống)", "Điểm", "Tie-break", "Ván", "Thắng"], data.knockout.map((pairing) => h("tr", {},
+          h("td", {}, pairing.round), h("td", {}, pairing.slot),
+          h("td", {}, `${pairing.red} (${pairing.seeds[0]})`), h("td", {}, `${pairing.blue} (${pairing.seeds[1]})`),
+          h("td", {}, `${pairing.points[0]} – ${pairing.points[1]}`), h("td", {}, pairing.tiebreaks),
+          h("td", {}, `${pairing.games.filter((game) => game.status === "finished").length}/${pairing.games.length}`),
+          h("td", {}, pairing.winner ? `${pairing.winner}${pairing.decidedBySeed ? " (hạt giống cao hơn)" : ""}` : "—")
+        )))));
+    }
+    sections.push(h("section", {}, h("h3", {}, "Kết quả đã công bố"),
+      table(["Giai đoạn", "SHA-256", "Lúc", ""], data.documents.map((doc) => h("tr", {},
+        h("td", {}, doc.stage), h("td", {}, h("code", {}, doc.sha256)), h("td", {}, time(doc.published_at)),
+        h("td", {}, h("a", { href: `${API}/tournament/results/${doc.stage}`, target: "_blank", rel: "noopener" }, "Tải JSON"))
+      )))));
+    sections.push(h("section", {}, h("h3", {}, `Khiếu nại (${data.appeals.filter((item) => item.status === "open").length} chưa trả lời)`),
+      table(["Đội", "Giai đoạn", "Nội dung", "Lúc", "Trả lời", ""], data.appeals.map((item) => h("tr", {},
+        h("td", {}, item.display_name), h("td", {}, item.stage), h("td", {}, item.body), h("td", {}, time(item.created_at)),
+        h("td", {}, item.response ? `${item.response} · ${item.answered_by}` : badge("chưa trả lời", "warn")),
+        h("td", {}, item.status === "open" ? button("Trả lời", async () => {
+          const response = window.prompt(`Trả lời khiếu nại của ${item.display_name}:`);
+          if (!response) return;
+          try {
+            await api("POST", `/tournament/appeals/${item.id}/answer`, { response });
+            say("Đã trả lời khiếu nại.");
+            await show("tournament");
+          } catch (error) {
+            say(`Lỗi: ${error.message}`, true);
+          }
+        }) : null)
+      )))));
+    return h("div", {}, sections);
   },
 
   async pending() {

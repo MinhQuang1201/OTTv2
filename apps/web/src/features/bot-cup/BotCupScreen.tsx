@@ -13,16 +13,18 @@ import { LeaderboardPanel } from "./LeaderboardPanel";
 import { LoginForm } from "./LoginForm";
 import { RegisterFlow } from "./RegisterFlow";
 import { TeamDashboard } from "./TeamDashboard";
+import { TournamentPanel } from "./TournamentPanel";
 import uetLogo from "./assets/uet-logo.webp";
 import type { ReplayDocument } from "../../../../../packages/arena/src/contracts/index.d.mts";
 import { validateReplayDocument } from "../../../../../packages/arena/src/contracts/index.mjs";
 import styles from "./botCup.module.css";
 
-export type BotCupTab = "team" | "leaderboard" | "rules" | "schedule" | "faq";
+export type BotCupTab = "team" | "results" | "leaderboard" | "rules" | "schedule" | "faq";
 
 const TABS: ReadonlyArray<readonly [BotCupTab, string]> = [
   ["team", "Tham gia"],
-  ["leaderboard", "Bảng xếp hạng"],
+  ["results", "Kết quả"],
+  ["leaderboard", "Luyện tập"],
   ["rules", "Thể lệ"],
   ["schedule", "Lịch"],
   ["faq", "Hỏi đáp"],
@@ -138,6 +140,7 @@ export function BotCupScreen({ gateway, onLobby, inviteToken = null, onStartRepl
           )}
         </div>
       ) : null}
+      {tab === "results" ? <TournamentPanel gateway={gateway} signedIn={Boolean(team)} onOpenReplay={openReplay} /> : null}
       {tab === "leaderboard" ? <div className={styles.body}><LeaderboardPanel gateway={gateway} /></div> : null}
       {tab === "rules" ? <div className={styles.body}><BotCupRules event={event} /></div> : null}
       {tab === "schedule" ? <div className={styles.body}><BotCupSchedule event={event} /></div> : null}

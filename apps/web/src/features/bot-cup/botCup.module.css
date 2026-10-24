@@ -443,3 +443,69 @@
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
+
+.gameList {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gameList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  overflow-wrap: anywhere;
+}
+
+.gameList li > span {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* Results tab: tables and the bracket use the full content width instead of the 560 px panel cap. */
+.results {
+  display: grid;
+  gap: var(--ui-space-5);
+  min-width: 0;
+}
+
+.results > div {
+  max-width: none;
+}
+
+.docActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.appealForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--ui-space-3);
+}
+
+.appealText {
+  display: grid;
+  flex: 1 1 100%;
+  gap: var(--ui-space-1);
+  font-weight: 600;
+}
+
+.appealText textarea,
+.appealForm .fileField input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--ui-space-2);
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-surface-1);
+  color: var(--ui-text);
+  font: inherit;
+  font-weight: 400;
+}
