@@ -71,7 +71,7 @@ export function tournamentRoutes({ store, now, eventId, audited, random }) {
     ["GET", /^\/tournament\/results\/(sealed|gate|qualifying|final)$/, async (request, admin, match) => {
       const doc = await engine.publishedDoc(match[1]);
       if (!doc) throw new HttpError(404, "not_found");
-      return new Response(doc.json, { headers: { "content-type": "application/json; charset=utf-8", "x-sha256": doc.sha256, "cache-control": "no-store" } });
+      return new Response(doc.json, { headers: { "content-type": "application/json; charset=utf-8", "x-sha256": doc.sha256, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
     }],
     ["POST", /^\/tournament\/(freeze|gate-start|gate-close|qualifying-start|swiss-next|qualifying-close|knockout-start|knockout-advance|finish)$/, (request, admin, match) => step(request, admin, match[1])],
     ["POST", /^\/tournament\/interview$/, (request, admin) => interview(request, admin)],

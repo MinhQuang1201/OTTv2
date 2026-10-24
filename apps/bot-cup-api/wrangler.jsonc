@@ -49,6 +49,30 @@
         }
       ]
     },
+    "rehearsal": {
+      // P9 rehearsal (scripts/bot-cup/rehearsal.mjs): its own event on the staging database, so the staging event used
+      // for registration tests is never frozen. Mail stays in dev_outbox: rehearsal teams are synthetic.
+      "name": "ottv2-bot-cup-api-rehearsal",
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "vars": {
+        "BOT_CUP_EVENT_ID": "rehearsal-demo",
+        "BOT_CUP_WEB_ORIGIN": "https://ottv2-staging.vercel.app",
+        "BOT_CUP_ALLOWED_ORIGINS": "https://ottv2-staging.vercel.app,http://localhost:5173",
+        "BOT_CUP_EMAIL_MODE": "outbox",
+        "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+        "BOT_CUP_RUNNER_IMAGE_ID": "sha256:8e3ea65cf10491a329d670a7db2fb9aa15435d3e5a7a29ece7f75265e46ec6f5"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ottv2-bot-cup-staging",
+          "database_id": "c82abd1a-c2d0-4b69-a995-67d626f4c6fb",
+          "migrations_dir": "migrations"
+        }
+      ]
+    },
     "test": {
       // Local only (`wrangler dev --local`), used by tests/bot-cup-api-worker.test.js.
       "name": "ottv2-bot-cup-api-test",

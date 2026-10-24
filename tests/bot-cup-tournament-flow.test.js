@@ -232,6 +232,49 @@ describe("bot-cup tournament flow (Demo)", () => {
     assert.equal(final.body.ranking.length, 3);
   });
 
+  it("ends on the qualifying table when interviews leave fewer than 4 teams, failed teams last", async () => {
+    const h = await createHarness({ event: { code_freeze_at: FREEZE } });
+    const runner = h.runner();
+    for (const name of ["a", "b", "c", "d", "e"]) await h.readySubmission(h.team({ name: `Đội ${name}` }), runner);
+    const admin = adminMod.createAdminApi({ db: h.db, now: () => h.env.clock, config: { eventId: "ev", authMode: "password", allowedOrigins: [ADMIN_ORIGIN] } });
+    h.db.sqlite.prepare("INSERT INTO admins (email, role, added_by, created_at) VALUES ('a@btc.test', 'admin', 'test', 0)").run();
+    h.db.sqlite.prepare("INSERT INTO admin_sessions (id_hash, email, created_at, expires_at) VALUES (?, 'a@btc.test', 0, ?)").run(crypto.createHash("sha256").update("s").digest("hex"), START * 10);
+    const step = async (name, extra = {}) => {
+      const response = await admin.fetch(new Request(`${ADMIN_ORIGIN}/admin-api/tournament/${name}`, { method: "POST", headers: { cookie: "__Host-ottcup_admin=s", origin: ADMIN_ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ reason: "phỏng vấn", ...extra }) }));
+      return { status: response.status, body: await response.json() };
+    };
+    const drainAll = async () => {
+      for (;;) {
+        const jobs = (await h.call("POST", "/runner/claim", { token: runner, json: { slots: 8 } })).body.jobs;
+        if (!jobs.length) return;
+        for (const job of jobs) {
+          const houseSeat = job.match.seats.A.house ? "A" : job.match.seats.B.house ? "B" : null;
+          const replay = await playCompactGame({ mapId: job.match.mapId, faultA: houseSeat === "A" ? () => true : null, faultB: houseSeat === "B" ? () => true : null });
+          await h.call("POST", "/runner/complete", { token: runner, json: { jobId: job.jobId, attempt: job.attempt, replay, stderr: {} } });
+        }
+      }
+    };
+    h.env.clock = FREEZE;
+    for (const name of ["freeze", "gate-start"]) assert.equal((await step(name)).status, 200, name);
+    await drainAll();
+    assert.equal((await step("gate-close")).body.qualified, 5);
+    assert.equal((await step("qualifying-start")).status, 200);
+    await drainAll();
+    assert.equal((await step("qualifying-close")).status, 200);
+    const ranking = (await h.call("GET", "/api/t/tournament")).body.standings.rows.map((row) => row.displayName);
+    // The two best teams fail their interview, the other three pass: only 3 teams are left for prizes.
+    const idOf = (displayName) => h.db.sqlite.prepare("SELECT id FROM teams WHERE display_name = ?").get(displayName).id;
+    assert.equal((await step("finish")).body.error, "interviews_pending", "the interviews come first");
+    for (const [index, displayName] of ranking.entries()) {
+      assert.equal((await step("interview", { teamId: idOf(displayName), result: index < 2 ? "fail" : "pass" })).status, 200);
+    }
+    assert.deepEqual((await step("knockout-start")).body, { error: "knockout_not_possible", teams: 3 });
+    const done = await step("finish");
+    assert.equal(done.body.finished, true);
+    const final = (await h.call("GET", "/api/t/results/final")).body.ranking.map((row) => row.team);
+    assert.deepEqual(final, [...ranking.slice(2), ranking[0], ranking[1]], "teams that failed the interview come last");
+  });
+
   it("runs a Swiss qualifying for 11 teams: one bye a round, no rematches, a disqualified team leaves later rounds", async () => {
     const h = await createHarness({ event: { code_freeze_at: FREEZE } });
     const sqlite = h.db.sqlite;

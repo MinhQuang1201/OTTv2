@@ -37,6 +37,7 @@ const defaultOnlineGateway = new OnlineLobbyGateway();
 const ArenaScreen = lazy(() => import("../features/arena/ArenaScreen").then((module) => ({ default: module.ArenaScreen })));
 const ReplayScreen = lazy(() => import("../features/replay/ReplayScreen").then((module) => ({ default: module.ReplayScreen })));
 const BotCupScreen = lazy(() => import("../features/bot-cup/BotCupScreen").then((module) => ({ default: module.BotCupScreen })));
+const ProjectorScreen = lazy(() => import("../features/bot-cup/ProjectorScreen").then((module) => ({ default: module.ProjectorScreen })));
 const screenFallback = <Panel className={styles.screen}><Spinner label="Đang tải" /></Panel>;
 
 export type AppState =
@@ -141,14 +142,16 @@ export interface AppProps {
 }
 
 /**
- * Reads the Bot Cup link once: `?view=bot-cup` opens the event screen, `&invite=<token>` comes from an invite email.
+ * Reads the Bot Cup link once: `?view=bot-cup` opens the event screen, `&invite=<token>` comes from an invite email,
+ * `&screen=projector` opens the finals projector (plan §11.5).
  * The token leaves the address bar at once so it is not kept in history or shared by copying the URL.
  */
-function takeBotCupLinkFromLocation(): { readonly open: boolean; readonly invite: string | null } {
-  if (typeof window === "undefined") return { open: false, invite: null };
+function takeBotCupLinkFromLocation(): { readonly open: boolean; readonly invite: string | null; readonly projector: boolean } {
+  if (typeof window === "undefined") return { open: false, invite: null, projector: false };
   const params = new URLSearchParams(window.location.search);
   const invite = params.get("invite");
   const open = params.get("view") === "bot-cup" || invite !== null;
+  const projector = params.get("view") === "bot-cup" && params.get("screen") === "projector";
   if (invite !== null) {
     try {
       const url = new URL(window.location.href);
@@ -157,7 +160,7 @@ function takeBotCupLinkFromLocation(): { readonly open: boolean; readonly invite
       window.history.replaceState(window.history.state, "", url.toString());
     } catch { /* keep the token even if the URL cannot be rewritten */ }
   }
-  return { open, invite };
+  return { open, invite, projector };
 }
 
 /** Keeps `?view=bot-cup` in the address bar while the event screen is open, so a reload returns to it. */
@@ -166,7 +169,10 @@ function setBotCupView(open: boolean): void {
   try {
     const url = new URL(window.location.href);
     if (open) url.searchParams.set("view", "bot-cup");
-    else url.searchParams.delete("view");
+    else {
+      url.searchParams.delete("view");
+      url.searchParams.delete("screen");
+    }
     if (url.toString() !== window.location.href) window.history.replaceState(window.history.state, "", url.toString());
   } catch { /* the screen still opens; only the URL is not updated */ }
 }
@@ -221,6 +227,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const [botCupGatewayInstance] = useState(() => botCupGateway ?? new BotCupApiGateway({ baseUrl: resolveBotCupApiBase() }));
   const [botCupLink] = useState(takeBotCupLinkFromLocation);
   const [botCupInvite, setBotCupInvite] = useState<string | null>(botCupLink.invite);
+  const [botCupProjector, setBotCupProjector] = useState(botCupLink.projector);
   const botCupLinkHandledRef = useRef(false);
 
   // Re-read on every return to the lobby: a game may have finished, been left or been saved meanwhile.
@@ -409,6 +416,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   const aiLevelRef = useRef<AiLevel>(DEFAULT_AI_LEVEL);
   const onLobby = () => {
     setBotCupInvite(null);
+    setBotCupProjector(false);
     setBotCupView(false);
     setRestartToken((value) => value + 1);
     demo.setScenario("lobby-default");
@@ -536,6 +544,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
                 botCupGateway={effectiveBotCupEnabled ? botCupGatewayInstance : undefined}
                 onOpenBotCup={onOpenBotCup}
                 botCupInvite={botCupInvite}
+                botCupProjector={botCupProjector}
               />
             </ScreenBoundary>
           </div>
@@ -545,7 +554,7 @@ export function App({ initialScenario, sessionFactory = createDemoSession, onlin
   );
 }
 
-function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway, pendingGame, onResumeOnline, onDiscardResume, initialRoomCode, botCupGateway, onOpenBotCup, botCupInvite }: {
+function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onForkPractice, onCreateOnline, onJoinOnline, waitingRooms, lobbyStream, onlineAvailable, demoEnabled, spectatorEnabled, onWatchMatch, arenaGateway, arenaAvailable, onOpenArena, onlineGateway, pendingGame, onResumeOnline, onDiscardResume, initialRoomCode, botCupGateway, onOpenBotCup, botCupInvite, botCupProjector = false }: {
   readonly state: AppState;
   readonly onLobby: () => void;
   readonly onStartLocal: (names: [string, string]) => void;
@@ -571,6 +580,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
   readonly botCupGateway?: BotCupApiGateway;
   readonly onOpenBotCup: () => void;
   readonly botCupInvite: string | null;
+  readonly botCupProjector?: boolean;
 }) {
   const botCupProps = botCupGateway ? { botCupGateway, onOpenBotCup } : {};
   const resumeProps = {
@@ -595,6 +605,7 @@ function AppScreen({ state, onLobby, onStartLocal, onStartAi, onStartReplay, onF
 
   if (state.status === "botCup") {
     if (!botCupGateway) return null;
+    if (botCupProjector) return <Suspense fallback={screenFallback}><ProjectorScreen gateway={botCupGateway} onExit={onLobby} /></Suspense>;
     return <Suspense fallback={screenFallback}><BotCupScreen gateway={botCupGateway} onLobby={onLobby} inviteToken={botCupInvite} onStartReplay={onStartReplay} /></Suspense>;
   }
 

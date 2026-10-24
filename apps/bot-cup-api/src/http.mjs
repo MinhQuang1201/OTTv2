@@ -18,7 +18,7 @@ export class HttpError extends Error {
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers }
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", ...headers }
   });
 }
 
@@ -26,11 +26,47 @@ export function errorResponse(error) {
   return json({ error: error.code, ...error.details }, error.status);
 }
 
+/**
+ * The request body, reading at most `maxBytes`: a declared Content-Length above it is refused before reading, and a
+ * body that turns out longer is cut off as soon as it passes the limit (P9 review: never buffer an unbounded body).
+ */
+export async function readBodyLimited(request, maxBytes, tooLarge) {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+  const chunks = [];
+  let total = 0;
+  if (request.body) {
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   const type = request.headers.get("content-type") || "";
   if (!type.toLowerCase().startsWith("application/json")) throw new HttpError(415, "invalid_request");
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > maxBytes) throw new HttpError(413, "invalid_request");
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(await readBodyLimited(request, maxBytes, () => new HttpError(413, "invalid_request")));
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, "invalid_request");
+  }
   try {
     const body = JSON.parse(text);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");
@@ -47,30 +83,7 @@ export async function readJson(request, maxBytes = MAX_BODY_BYTES) {
 export async function readUpload(request, maxBodyBytes) {
   const type = request.headers.get("content-type") || "";
   if (!type.toLowerCase().startsWith("multipart/form-data")) throw new HttpError(415, "invalid_request");
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxBodyBytes) throw new HttpError(413, "submission_too_large");
-
-  const chunks = [];
-  let total = 0;
-  if (request.body) {
-    const reader = request.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBodyBytes) {
-        await reader.cancel();
-        throw new HttpError(413, "submission_too_large");
-      }
-      chunks.push(value);
-    }
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const body = await readBodyLimited(request, maxBodyBytes, () => new HttpError(413, "submission_too_large"));
 
   let form;
   try {

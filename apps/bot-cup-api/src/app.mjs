@@ -882,7 +882,7 @@ export function createBotCupApi({ db, mailer, turnstile, now, config }) {
     const doc = await tournament.publishedDoc(stage);
     if (!doc) throw new HttpError(404, "not_found");
     return new Response(doc.json, {
-      headers: { "content-type": "application/json; charset=utf-8", "x-sha256": doc.sha256, "cache-control": "no-store" }
+      headers: { "content-type": "application/json; charset=utf-8", "x-sha256": doc.sha256, "cache-control": "no-store", "x-content-type-options": "nosniff" }
     });
   }
 

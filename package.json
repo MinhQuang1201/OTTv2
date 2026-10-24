@@ -31,7 +31,7 @@
     "arena:demo": "node scripts/arena-demo.js",
     "arena:worker": "node packages/arena-node/src/worker/job-worker.mjs",
     "arena:user": "node apps/arena-api/scripts/manage-user.mjs",
-    "test:bot-cup": "node --test tests/bot-cup-core.test.js tests/bot-cup-api.test.js tests/bot-cup-submissions.test.js tests/bot-cup-kit.test.js tests/bot-cup-policy.test.js tests/bot-cup-replay.test.js tests/bot-cup-runner-api.test.js tests/bot-cup-runner.test.js tests/bot-cup-practice.test.js tests/bot-cup-admin.test.js tests/bot-cup-tournament.test.js tests/bot-cup-tournament-flow.test.js tests/bot-cup-anticheat.test.js tests/bot-cup-anticheat-api.test.js tests/bot-cup-similarity.test.js",
+    "test:bot-cup": "node --test tests/bot-cup-core.test.js tests/bot-cup-api.test.js tests/bot-cup-submissions.test.js tests/bot-cup-kit.test.js tests/bot-cup-policy.test.js tests/bot-cup-replay.test.js tests/bot-cup-runner-api.test.js tests/bot-cup-runner.test.js tests/bot-cup-practice.test.js tests/bot-cup-admin.test.js tests/bot-cup-tournament.test.js tests/bot-cup-tournament-flow.test.js tests/bot-cup-anticheat.test.js tests/bot-cup-anticheat-api.test.js tests/bot-cup-similarity.test.js tests/bot-cup-security.test.js",
     "test:bot-cup:api": "node --test --test-timeout=180000 tests/bot-cup-api-worker.test.js",
     "bot-cup:api:dev": "node scripts/bot-cup/dev-api.mjs",
     "bot-cup:kit": "node scripts/bot-cup/build-kit.mjs",
@@ -39,6 +39,7 @@
     "bot-cup:admin:dev": "node scripts/bot-cup/dev-admin.mjs",
     "bot-cup:probe-set": "node scripts/bot-cup/probe-positions.mjs",
     "bot-cup:similarity": "node scripts/bot-cup/similarity.mjs",
+    "bot-cup:rehearsal": "node scripts/bot-cup/rehearsal.mjs",
     "bot-cup:reference-hashes": "node scripts/bot-cup/reference-hashes.mjs"
   },
   "engines": {
