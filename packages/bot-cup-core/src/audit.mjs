@@ -6,7 +6,7 @@
 export const AUDIT_GENESIS = "0".repeat(64);
 
 /** Actions that need a second admin's approval before they run (plan §8.8). */
-export const FOUR_EYES_ACTIONS = Object.freeze(["team.disqualify", "match.set_result"]);
+export const FOUR_EYES_ACTIONS = Object.freeze(["team.disqualify", "match.set_result", "flag.confirm"]);
 
 async function sha256Hex(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

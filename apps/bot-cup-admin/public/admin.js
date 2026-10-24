@@ -4,6 +4,7 @@ const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
 let me = null;
 let currentTab = "overview";
+let flagStatus = "open";
 
 function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -45,6 +46,8 @@ const ERRORS = {
   reason_required: "Cần ghi lý do (ít nhất 3 ký tự).",
   read_only: "Tài khoản chỉ xem, không được ghi.",
   same_admin: "Người đề nghị không tự duyệt được.",
+  already_notified: "Đã ghi nhận báo đội trước đó.",
+  already_decided: "Việc này đã được quyết định.",
   forbidden_origin: "Yêu cầu bị chặn (origin). Hãy tải lại trang."
 };
 
@@ -186,19 +189,112 @@ const TABS = {
   },
 
   async flags() {
-    const { flags } = await api("GET", "/flags?status=open");
-    return h("section", {},
-      h("h2", {}, `Cờ nghi vấn đang mở (${flags.length})`),
-      h("p", { class: "muted" }, "Cờ chỉ là nghi vấn: xem mã của cả hai bên trước khi kết luận (plan §8.8)."),
-      table(["Loại", "Đội", "Trùng với", "Điểm", "Lúc", ""], flags.map((flag) => h("tr", {},
-        h("td", {}, flag.kind), h("td", {}, `${flag.team_name} v${flag.seq}`),
-        h("td", {}, flag.reference ? h("code", {}, flag.reference) : `${flag.other_team_name} v${flag.other_seq}`),
-        h("td", {}, flag.score ?? "—"), h("td", {}, time(flag.created_at)),
-        h("td", {}, h("div", { class: "row-actions" },
-          button("Bỏ cờ", () => act("Bỏ cờ", `/flags/${flag.id}`, { status: "cleared" }), "quiet"),
-          button("Xác nhận vi phạm", () => act("Xác nhận vi phạm", `/flags/${flag.id}`, { status: "confirmed" }), "danger")
-        ))
-      ))));
+    const status = flagStatus;
+    const [{ flags }, { sets }, anomalies] = await Promise.all([api("GET", `/flags?status=${status}`), api("GET", "/anticheat/probes"), api("GET", "/anticheat/anomalies")]);
+    const KIND = { hash: "Trùng chuẩn hóa", jplag: "JPlag", behavior: "Vân tay hành vi", collusion: "Thông đồng" };
+    const percent = (value) => (value === null || value === undefined ? "—" : `${Math.round(value * 1000) / 10}%`);
+    const detailsOf = (flag) => {
+      try {
+        return JSON.parse(flag.details || "{}");
+      } catch {
+        return {};
+      }
+    };
+    const evidence = (flag) => {
+      const details = detailsOf(flag);
+      if (flag.kind === "behavior") return `${details.same}/${details.compared} thế cờ giống nhau`;
+      if (flag.kind === "jplag") return `${details.tool || "JPlag"} · ${details.language || ""} · max ${percent(details.max)}`;
+      if (flag.kind === "collusion") return details.note || "";
+      return "Mã giống hệt sau khi bỏ chú thích, khoảng trắng và đổi tên";
+    };
+    const compare = h("div");
+    const showCode = async (flag) => {
+      const left = await api("GET", `/submissions/${flag.submission_id}/source`);
+      const right = flag.other_submission_id ? await api("GET", `/submissions/${flag.other_submission_id}/source`) : `Kho tham chiếu công khai: ${flag.reference}`;
+      const otherName = flag.other_team_name ? `${flag.other_team_name} v${flag.other_seq}` : flag.reference;
+      compare.replaceChildren(h("section", {}, h("h2", {}, `So sánh: ${flag.team_name} v${flag.seq} ↔ ${otherName}`),
+        h("div", { class: "compare" }, h("pre", {}, left), h("pre", {}, right))));
+      compare.scrollIntoView();
+    };
+    const STATUS = { open: "Đang mở", confirmed: "Đã xác nhận", cleared: "Đã bỏ" };
+    const filter = h("div", { class: "row-actions" }, Object.entries(STATUS).map(([value, label]) =>
+      h("button", { type: "button", class: "quiet", "aria-pressed": String(value === status), onclick: () => { flagStatus = value; show("flags"); } }, label)));
+
+    const jplagFile = h("input", { type: "file", accept: "application/json,.json", "aria-label": "Báo cáo JPlag (report.json)" });
+    const importJplag = async () => {
+      const file = jplagFile.files?.[0];
+      if (!file) return say("Chọn file report.json do scripts/bot-cup/similarity.mjs tạo.", true);
+      let report;
+      try {
+        report = JSON.parse(await file.text());
+      } catch {
+        return say("File không phải JSON.", true);
+      }
+      const reason = window.prompt("Nhập báo cáo JPlag\nLý do (ghi vào audit log):", "JPlag sau khóa code");
+      if (!reason) return;
+      try {
+        const result = await api("POST", "/anticheat/jplag", { report, reason });
+        say(`Đã nhập ${result.pairs} cặp: ${result.flags} cờ mới, ${result.skipped} cờ đã có.`);
+        await show("flags");
+      } catch (error) {
+        say(`Nhập báo cáo: ${errorText(error)}`, true);
+      }
+    };
+    const probeSet = h("input", { name: "probeSet", placeholder: "SHA-256 của file bộ thế cờ (64 ký tự hex)", "aria-label": "SHA-256 bộ thế cờ", size: 66 });
+    const probeScope = h("select", { "aria-label": "Phạm vi" }, h("option", { value: "sealed" }, "Bài niêm phong"), h("option", { value: "final" }, "Bản thi đấu hiện tại"));
+    const ANOMALY = { behaviour_twin: "Vân tay gần trùng", thrown_game: "Thua bất thường", practice_upset: "Lệch phong độ luyện tập" };
+    const anomalyDetail = (row) => {
+      if (row.kind === "behaviour_twin") return `${percent(row.ratio)} trên ${row.compared} thế cờ`;
+      if (row.kind === "thrown_game") return `Trận ${row.matchId} (${row.stage}): thua do ${row.reason} sau ${row.plies} nước; với đối thủ khác đạt ${percent(row.shareElsewhere)} điểm (${row.gamesElsewhere} ván)`;
+      return `Luyện tập ${percent(row.practiceRate)} so với ${percent(row.opponentPracticeRate)}, nhưng chỉ lấy ${percent(row.share)} điểm cặp này (${row.games} ván)`;
+    };
+
+    return h("div", {},
+      h("section", {},
+        h("h2", {}, `Cờ nghi vấn (${flags.length})`),
+        h("p", { class: "muted" }, "Cờ chỉ là nghi vấn. Quy trình (plan §8.8): hai BTC xem mã và replay → báo đội, cho 48 giờ giải trình → quyết định có lý do. Xác nhận vi phạm cần admin thứ hai duyệt ở tab Chờ duyệt."),
+        filter,
+        table(["Loại", "Đội", "Trùng với", "Mức giống", "Bằng chứng", "Báo đội", ""], flags.map((flag) => h("tr", {},
+          h("td", {}, KIND[flag.kind] ?? flag.kind), h("td", {}, `${flag.team_name} v${flag.seq}`),
+          h("td", {}, flag.reference ? h("code", {}, flag.reference) : `${flag.other_team_name} v${flag.other_seq}`),
+          h("td", {}, percent(flag.score), detailsOf(flag).priority ? [" ", badge("ưu tiên", "bad")] : null),
+          h("td", {}, evidence(flag)),
+          h("td", {}, flag.notified_at ? `${time(flag.notified_at)} · hạn giải trình ${time(flag.notified_at + 48 * 3600 * 1000)}` : "chưa"),
+          h("td", {}, h("div", { class: "row-actions" },
+            h("button", { type: "button", class: "quiet", onclick: () => showCode(flag).catch((error) => say(`Xem mã: ${errorText(error)}`, true)) }, "Xem mã"),
+            flag.notified_at ? null : button("Đã báo đội", () => act("Đã báo đội (bắt đầu 48 giờ giải trình)", `/flags/${flag.id}/notify`), "quiet"),
+            flag.status === "open" ? button("Bỏ cờ", () => act("Bỏ cờ", `/flags/${flag.id}`, { status: "cleared" }), "quiet") : null,
+            flag.status === "open" ? button("Xác nhận vi phạm", () => act("Xác nhận vi phạm (cần admin thứ hai duyệt)", `/flags/${flag.id}`, { status: "confirmed" }), "danger") : null
+          ))
+        )))),
+      compare,
+      h("section", {},
+        h("h2", {}, "JPlag (so mã cùng ngôn ngữ)"),
+        h("ol", {},
+          h("li", {}, "Tải gói mã: ", h("a", { href: `${API}/anticheat/export?scope=sealed` }, "bài niêm phong"), " · ",
+            h("a", { href: `${API}/anticheat/export?scope=final` }, "Bản thi đấu hiện tại"), " (có ghi audit)."),
+          h("li", {}, "Trên máy BTC: ", h("code", {}, "npm run bot-cup:similarity -- --bundle <file vừa tải>")),
+          h("li", {}, "Nhập report.json: cặp ≥ 70% thành cờ, ≥ 85% đánh dấu ưu tiên.")),
+        writer() ? h("div", { class: "row-actions" }, jplagFile, h("button", { type: "button", onclick: importJplag }, "Nhập báo cáo JPlag")) : null),
+      h("section", {},
+        h("h2", {}, "Vân tay hành vi (bắt cả bản dịch sang ngôn ngữ khác)"),
+        h("p", { class: "muted" }, "Bộ thế cờ bí mật chỉ nằm trên máy runner (", h("code", {}, "npm run bot-cup:probe-set"),
+          "); ở đây chỉ nhập SHA-256 của file. Runner cho từng bot và ai.js easy/medium/hard chọn nước; ≥ 90% nước giống nhau thì gắn cờ."),
+        writer() ? h("div", { class: "row-actions" }, probeSet, probeScope, h("button", { type: "button", onclick: () => {
+          if (!/^[0-9a-f]{64}$/.test(probeSet.value.trim())) return say("SHA-256 phải gồm 64 ký tự 0-9 a-f.", true);
+          act("Xếp job vân tay hành vi", "/anticheat/probes", { probeSet: probeSet.value.trim(), scope: probeScope.value });
+        } }, "Xếp job vân tay")) : null,
+        table(["Bộ thế cờ", "Job", "Xong", "Đang chờ", "Lỗi", "Vân tay", "Bắt đầu"], sets.map((set) => h("tr", {},
+          h("td", {}, h("code", { title: set.probe_set }, short(set.probe_set, 12))), h("td", {}, set.jobs), h("td", {}, set.done), h("td", {}, set.pending),
+          h("td", {}, set.failed ? badge(String(set.failed), "bad") : "0"), h("td", {}, set.fingerprints), h("td", {}, time(set.started_at))
+        )))),
+      h("section", {},
+        h("h2", {}, "Bất thường kết quả (§8.7)"),
+        h("p", { class: "muted" }, `Gợi ý để xem replay, không phải kết luận. Vân tay theo bộ ${anomalies.probeSet ? short(anomalies.probeSet, 12) : "— (chưa có)"}.`),
+        table(["Loại", "Đội", "Đối thủ", "Chi tiết", ""], anomalies.rows.map((row) => h("tr", {},
+          h("td", {}, ANOMALY[row.kind] ?? row.kind), h("td", {}, row.teamName), h("td", {}, row.opponentName), h("td", {}, anomalyDetail(row)),
+          h("td", {}, button("Gắn cờ thông đồng", () => act("Gắn cờ thông đồng", "/anticheat/collusion", { teamId: row.team, opponentId: row.opponent, note: `${ANOMALY[row.kind]}: ${anomalyDetail(row)}` }), "quiet"))
+        )))));
   },
 
   async matches() {

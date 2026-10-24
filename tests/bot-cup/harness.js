@@ -83,15 +83,20 @@ async function createHarness({ event = {}, config = {} } = {}) {
 
   /**
    * Plays every queued job like a runner would: checks pass, games are real games where seat A plays first-legal and
-   * seat B last-legal (or whatever `pick` returns for the job).
+   * seat B last-legal (or whatever `pick` returns for the job), probes answer with `probe(job)`.
    */
-  async function drain(token, { pick } = {}) {
+  async function drain(token, { pick, probe } = {}) {
     for (;;) {
       const jobs = (await call("POST", "/runner/claim", { token, json: { slots: 8 } })).body.jobs;
       if (!jobs.length) return;
       for (const job of jobs) {
         if (job.kind === "check") {
           await call("POST", "/runner/complete", { token, json: { jobId: job.jobId, attempt: job.attempt, ok: true, log: "ok" } });
+        } else if (job.kind === "probe") {
+          // Behaviour fingerprints: `probe(job)` returns the bot's move keys for the secret set.
+          assert.ok(probe, "a probe job needs drain(token, { probe })");
+          const done = await call("POST", "/runner/complete", { token, json: { jobId: job.jobId, attempt: job.attempt, moves: probe(job) } });
+          assert.equal(done.status, 200, JSON.stringify(done.body));
         } else {
           const options = pick ? pick(job) : {};
           const replay = await playCompactGame({ mapId: job.match.mapId, ...options });

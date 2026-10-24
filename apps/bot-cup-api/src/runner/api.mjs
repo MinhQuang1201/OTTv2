@@ -4,7 +4,7 @@
  *   POST /runner/heartbeat          {version, imageId, slots, active}
  *   POST /runner/claim              {slots} -> {jobs: [...]}
  *   GET  /runner/source/:sha256     bytes of a submission this runner currently holds a lease for
- *   POST /runner/complete           {jobId, attempt, ...result}
+ *   POST /runner/complete           {jobId, attempt, ...result}   check: {ok, log}; match: {replay, stderr}; probe: {moves}
  *   POST /runner/fail               {jobId, attempt, detail}   infrastructure failure: retried up to 3 leases
  *
  * Runners are not trusted with results: every replay is played again with rules.js (bot-cup-core.verifyReplay) and a
@@ -16,6 +16,7 @@ import {
   JOB_POLICY,
   SUBMISSION_STATUS,
   expiredLeaseStatus,
+  isMoveKey,
   smokeGames,
   smokeVerdict,
   tailText,
@@ -24,11 +25,13 @@ import {
 import { HttpError, json, readJson } from "../http.mjs";
 import { enqueueMatch, gzipText } from "../queue.mjs";
 import { sha256Hex } from "../security.mjs";
+import { insertFingerprint, setFlagStatements } from "../anticheat.mjs";
 
 const MAX_COMPLETE_BYTES = 512 * 1024;
 const STDERR_MAX_CHARS = 8 * 1024;
 const LOG_MAX_CHARS = 16 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_PROBE_POSITIONS = 1000;
 
 /**
  * @param {{ db: object, store: object, now: () => number, eventId: string, expectedImageId?: string|null }} options
@@ -89,7 +92,7 @@ export function createRunnerApi({ store, now, eventId, expectedImageId = null })
     const leased = await all(
       `UPDATE jobs SET status = 'leased', lease_runner_id = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
        WHERE id IN (SELECT id FROM jobs WHERE event_id = ? AND status = 'queued' ORDER BY priority DESC, created_at, id LIMIT ?)
-       RETURNING id, kind, priority, created_at, attempts, submission_id, match_id, lease_expires_at`,
+       RETURNING id, kind, priority, created_at, attempts, submission_id, match_id, lease_expires_at, probe_house, probe_set`,
       runner.id, now() + JOB_POLICY.leaseMs, now(), eventId, slots
     );
     // RETURNING comes back in table order; hand the work out by priority.
@@ -100,6 +103,12 @@ export function createRunnerApi({ store, now, eventId, expectedImageId = null })
       if (job.kind === "check") {
         const submission = await first("SELECT id, sha256, language FROM submissions WHERE id = ?", job.submission_id);
         jobs.push({ ...base, submission: { sha256: submission.sha256, language: submission.language } });
+      } else if (job.kind === "probe") {
+        // The positions stay on the organisers' machine; the job only names the set by its SHA-256 (plan §8.5).
+        const target = job.submission_id
+          ? { submission: await first("SELECT sha256, language FROM submissions WHERE id = ?", job.submission_id) }
+          : { house: job.probe_house };
+        jobs.push({ ...base, probe: { set: job.probe_set, policy: BOT_CUP_POLICY, ...target } });
       } else {
         const match = await first("SELECT * FROM matches WHERE id = ?", job.match_id);
         await run("UPDATE matches SET status = 'running', runner_id = ?, started_at = ? WHERE id = ?", runner.id, now(), match.id);
@@ -207,11 +216,44 @@ export function createRunnerApi({ store, now, eventId, expectedImageId = null })
     return json({ ok: true, result });
   }
 
+  /**
+   * A probe's answers: one move key (or null) per position of the set. When it was the last probe of its set still
+   * waiting, the set is compared as a whole and flags are raised in the same batch (plan §8.5).
+   */
+  async function completeProbe(job, body) {
+    const moves = body.moves;
+    if (!Array.isArray(moves) || moves.length === 0 || moves.length > MAX_PROBE_POSITIONS || !moves.every(isMoveKey)) {
+      throw new HttpError(400, "invalid_request", { field: "moves" });
+    }
+    // A fingerprint for this target and set may exist from an earlier job: keep the first one.
+    const exists = await first(
+      "SELECT 1 AS ok FROM fingerprints WHERE probe_set = ? AND (submission_id = ? OR house = ?)",
+      job.probe_set, job.submission_id, job.probe_house
+    );
+    const statements = [finishJob(job)];
+    let extra = null;
+    if (!exists) {
+      statements.push(insertFingerprint(store, { eventId, probeSet: job.probe_set, submissionId: job.submission_id, house: job.probe_house, moves, now: now() }));
+      const team = job.submission_id ? (await first("SELECT team_id FROM submissions WHERE id = ?", job.submission_id)).team_id : null;
+      extra = { submissionId: job.submission_id, house: job.probe_house, teamId: team, moves };
+    }
+    const waiting = await first(
+      "SELECT COUNT(*) AS n FROM jobs WHERE event_id = ? AND kind = 'probe' AND probe_set = ? AND status IN ('queued', 'leased') AND id <> ?",
+      eventId, job.probe_set, job.id
+    );
+    const flagStatements = waiting.n === 0 ? await setFlagStatements(store, { eventId, probeSet: job.probe_set, now: now(), extra }) : [];
+    await store.batch([...statements, ...flagStatements]);
+    const flags = flagStatements.length;
+    return json({ ok: true, setComplete: waiting.n === 0, flags });
+  }
+
   async function complete(request, runner) {
     const body = await readJson(request, MAX_COMPLETE_BYTES);
     const { job, duplicate } = await leasedJob(runner, body);
     if (duplicate) return json({ ok: true, duplicate: true });
-    return job.kind === "check" ? completeCheck(job, body) : completeMatch(runner, job, body);
+    if (job.kind === "check") return completeCheck(job, body);
+    if (job.kind === "probe") return completeProbe(job, body);
+    return completeMatch(runner, job, body);
   }
 
   async function fail(request, runner) {

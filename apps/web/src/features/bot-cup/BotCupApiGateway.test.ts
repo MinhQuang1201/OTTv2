@@ -77,8 +77,9 @@ describe("Bot Cup messages", () => {
     for (const match of sources.matchAll(/\["[^"]+", "([a-z_]+)"\]/g)) codes.add(match[1]);
     for (const match of core.matchAll(/return "([a-z_]+)";/g)) codes.add(match[1]);
     expect(codes.size).toBeGreaterThan(20);
-    // "ok" and "none" (chooseFormat with too few teams) are return values, not error codes.
-    const missing = [...codes].filter((code) => !(code in BOT_CUP_ERROR_MESSAGES) && !["ok", "none"].includes(code));
+    // Not error codes: return values ("ok", "none" from chooseFormat), a column name in a bulk insert ("submission_id")
+    // and an organisers' anomaly kind ("practice_upset").
+    const missing = [...codes].filter((code) => !(code in BOT_CUP_ERROR_MESSAGES) && !["ok", "none", "submission_id", "practice_upset"].includes(code));
     expect(missing).toEqual([]);
   });
 });

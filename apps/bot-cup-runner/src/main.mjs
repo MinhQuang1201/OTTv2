@@ -16,12 +16,17 @@
  *   BOT_CUP_RUNNER_SLOTS        games at once (default 4; P0 found more than 4 makes the clocks unfair on Docker Desktop)
  *   BOT_CUP_RUNNER_POLL_MS      idle poll interval (default 15000)
  *   BOT_CUP_RUNNER_ONCE         "true": stop when the queue is empty (rehearsals and evidence runs)
+ *   BOT_CUP_PROBE_DIR           secret position sets for behaviour fingerprints (default var/bot-cup/probe-sets; never in
+ *                               git; `node scripts/bot-cup/probe-positions.mjs` writes one). A probe job names its set by
+ *                               the SHA-256 of the file; a runner without that file reports an infrastructure error.
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseProbeSet } from "../../../packages/bot-cup-core/src/index.mjs";
 import { createArtifactStore } from "../../../packages/arena-node/src/artifacts/artifact-store.mjs";
 import { probeContainerRuntime, PINNED_RUNNER_IMAGE } from "../../../packages/arena-node/src/execution/container-executor.mjs";
 import { createRunnerClient } from "./client.mjs";
@@ -52,8 +57,20 @@ export function readConfig(env = process.env) {
     imageId: env.ARENA_RUNNER_IMAGE_ID,
     slots,
     pollMs: Number(env.BOT_CUP_RUNNER_POLL_MS || 15_000),
-    once: env.BOT_CUP_RUNNER_ONCE === "true"
+    once: env.BOT_CUP_RUNNER_ONCE === "true",
+    probeDir: env.BOT_CUP_PROBE_DIR || path.join(ROOT, "var/bot-cup/probe-sets")
   };
+}
+
+/** Secret sets by the SHA-256 of their file. */
+export function loadProbeSets(dir) {
+  const sets = new Map();
+  if (!fs.existsSync(dir)) return sets;
+  for (const name of fs.readdirSync(dir).filter((file) => file.endsWith(".json")).sort()) {
+    const text = fs.readFileSync(path.join(dir, name), "utf8");
+    sets.set(crypto.createHash("sha256").update(text).digest("hex"), parseProbeSet(text));
+  }
+  return sets;
 }
 
 async function main() {
@@ -64,6 +81,9 @@ async function main() {
   log("warm_up", { ok: await warmUpContainer(probe.imageId) });
 
   const client = createRunnerClient({ baseUrl: config.url, token: config.token });
+  const probeSets = loadProbeSets(config.probeDir);
+  // Only the first 12 characters: enough to match the admin page, and the file itself never leaves this machine.
+  log("probe_sets", { sets: [...probeSets].map(([sha, positions]) => ({ set: sha.slice(0, 12), positions: positions.length })) });
   const storageDir = path.join(ROOT, "var/bot-cup/runner-artifacts");
   fs.mkdirSync(storageDir, { recursive: true });
   const executor = createExecutor({
@@ -72,7 +92,8 @@ async function main() {
     expectedImageId: config.imageId,
     probe: () => probe,
     fetchSource: (sha256) => client.source(sha256),
-    houseSources: await houseBotSources()
+    houseSources: await houseBotSources(),
+    probeSets
   });
   const runner = createRunner({
     client,

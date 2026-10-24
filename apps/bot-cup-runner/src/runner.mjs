@@ -27,6 +27,10 @@ export function createRunner({ client, executor, slots = 4, pollMs = 15_000, hea
         const checked = await executor.runCheck(job);
         await client.complete({ jobId: job.jobId, attempt: job.attempt, ok: checked.ok, log: checked.log });
         log("check_done", { jobId: job.jobId, ok: checked.ok, ms: Date.now() - started });
+      } else if (job.kind === "probe") {
+        const probed = await executor.runProbe(job);
+        const answer = await client.complete({ jobId: job.jobId, attempt: job.attempt, moves: probed.moves });
+        log("probe_done", { jobId: job.jobId, answered: probed.answered, positions: probed.moves.length, restarts: probed.restarts, flags: answer.flags ?? 0, ms: Date.now() - started });
       } else {
         const played = await executor.runMatch(job);
         const answer = await client.complete({ jobId: job.jobId, attempt: job.attempt, replay: played.replay, stderr: played.stderr });

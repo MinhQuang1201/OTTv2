@@ -25,6 +25,7 @@ import { randomToken, sha256Hex, verifyPassword } from "../../bot-cup-api/src/se
 import { createStore } from "../../bot-cup-api/src/store.mjs";
 import { AuthError, verifyAccessJwt, verifyTotp } from "./auth.mjs";
 import { tournamentRoutes } from "./tournament-routes.mjs";
+import { anticheatRoutes } from "./anticheat-routes.mjs";
 
 const PREFIX = "/admin-api";
 export const ADMIN_COOKIE = "__Host-ottcup_admin";
@@ -32,6 +33,8 @@ const SESSION_MS = 12 * 60 * 60 * 1000;
 const LOGIN_LOCK = Object.freeze({ maxFailures: 5, lockMs: 15 * 60 * 1000 });
 const ONLINE_MS = 2 * 60 * 1000;
 const REASON_MAX = 500;
+// After a flag is shown to the team, it has 48 hours to explain (plan §8.8).
+const FLAG_EXPLAIN_MS = 48 * 60 * 60 * 1000;
 
 export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
   const store = createStore(db);
@@ -261,6 +264,9 @@ export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
     if (pending.action === "team.disqualify") {
       return [store.statement("UPDATE teams SET disqualified_at = ?, dq_reason = ? WHERE id = ? AND disqualified_at IS NULL", now(), pending.reason, payload.teamId)];
     }
+    if (pending.action === "flag.confirm") {
+      return [store.statement("UPDATE similarity_flags SET status = 'confirmed', notes = ? WHERE id = ?", pending.reason, payload.flagId)];
+    }
     if (pending.action === "match.set_result") {
       return [store.statement(
         "UPDATE matches SET status = 'finished', outcome = ?, winner = ?, loser = ?, reason = ?, finished_at = COALESCE(finished_at, ?) WHERE id = ?",
@@ -352,10 +358,29 @@ export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
     if (!["cleared", "confirmed", "open"].includes(body.status)) throw new HttpError(400, "invalid_request", { field: "status" });
     const flag = await first("SELECT * FROM similarity_flags WHERE id = ? AND event_id = ?", id, config.eventId);
     if (!flag) throw new HttpError(404, "not_found");
+    // A confirmed violation is a sanction decision: a second admin has to approve it (plan §8.8).
+    if (body.status === "confirmed") {
+      if (flag.status === "confirmed") throw new HttpError(409, "already_decided");
+      return requestAction(admin, { action: "flag.confirm", target: `flag:${id}`, payload: { flagId: id, kind: flag.kind, from: flag.status }, reason });
+    }
     await audited(admin, { action: "flag.set_status", target: `flag:${id}`, reason, payload: { from: flag.status, to: body.status } }, [
       store.statement("UPDATE similarity_flags SET status = ?, notes = ? WHERE id = ?", body.status, reason, id)
     ]);
     return json({ ok: true });
+  }
+
+  /** The team has been told about a flag; it has 48 hours to explain (plan §8.8). */
+  async function notifyFlag(request, admin, id) {
+    requireWriter(admin);
+    const body = await readJson(request);
+    const reason = reasonOf(body);
+    const flag = await first("SELECT * FROM similarity_flags WHERE id = ? AND event_id = ?", id, config.eventId);
+    if (!flag) throw new HttpError(404, "not_found");
+    if (flag.notified_at) throw new HttpError(409, "already_notified");
+    await audited(admin, { action: "flag.notify_team", target: `flag:${id}`, reason }, [
+      store.statement("UPDATE similarity_flags SET notified_at = ?, notified_by = ? WHERE id = ? AND notified_at IS NULL", now(), admin.email, id)
+    ]);
+    return json({ ok: true, notifiedAt: now(), explainBy: now() + FLAG_EXPLAIN_MS });
   }
 
   // ---------- runners, jobs, games ----------
@@ -541,6 +566,7 @@ export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
     ["POST", /^\/submissions\/([\w-]+)\/recheck$/, (request, admin, m) => recheckSubmission(request, admin, m[1])],
     ["GET", /^\/flags$/, (request, admin, m, url) => listFlags(url)],
     ["POST", /^\/flags\/([\w-]+)$/, (request, admin, m) => decideFlag(request, admin, m[1])],
+    ["POST", /^\/flags\/([\w-]+)\/notify$/, (request, admin, m) => notifyFlag(request, admin, m[1])],
     ["GET", /^\/runners$/, () => listRunners()],
     ["POST", /^\/runners\/([\w-]+)\/revoke$/, (request, admin, m) => runnerAction(request, admin, m[1], "revoke")],
     ["POST", /^\/runners\/([\w-]+)\/clear-suspect$/, (request, admin, m) => runnerAction(request, admin, m[1], "clear_suspect")],
@@ -562,6 +588,8 @@ export function createAdminApi({ db, now, config, fetchImpl = fetch }) {
 
   // Tournament control (P7); `config.random` lets tests fix the tie-break map draw.
   routes.push(...tournamentRoutes({ store, now, eventId: config.eventId, audited, random: config.random }));
+  // Anti-cheat tools (P8).
+  routes.push(...anticheatRoutes({ store, now, eventId: config.eventId, audited, reasonOf, requireWriter }));
 
   return {
     audited,

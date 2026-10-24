@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { compactReplay, tailText } from "../../../packages/bot-cup-core/src/index.mjs";
+import { compactReplay, legalMovesOf, moveKey, tailText } from "../../../packages/bot-cup-core/src/index.mjs";
 import { createHeadlessMatchController } from "../../../packages/arena/src/application/match-controller.mjs";
 import { createCurrentRulesetSnapshot } from "../../../packages/arena/src/contracts/index.mjs";
 import { createMapState } from "../../../packages/arena/src/domain/maps/index.mjs";
@@ -19,6 +19,10 @@ import { createContainerBot } from "../../../packages/arena-node/src/execution/c
 
 const CHECK_WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-worker.mjs");
 const STDERR_KEEP = 8 * 1024;
+// A probe answer may arrive a little after the move limit (container I/O); later than this it counts as no answer.
+const PROBE_SLACK_MS = 500;
+// A bot that crashes or hangs is restarted for the remaining positions at most this many times per colour.
+const PROBE_MAX_RESTARTS = 5;
 
 /** An error the runner reports with /runner/fail: not the team's fault, retried on another lease. */
 export class InfrastructureError extends Error {
@@ -73,16 +77,19 @@ export function isStartupTimeout(result, moves) {
 /**
  * @param {{ artifactStore: object, image: string, expectedImageId: string, probe: () => object,
  *           fetchSource: (sha256: string) => Promise<Uint8Array>, houseSources: Record<string, string>,
- *           createBot?: Function, runCheckProcess?: Function, launchSpacingMs?: number }} options
+ *           probeSets?: Map<string, Array<object>>, createBot?: Function, runCheckProcess?: Function, launchSpacingMs?: number }} options
+ *   probeSets: secret position sets on this machine by the SHA-256 of their file (plan §8.5)
  */
-export function createExecutor({ artifactStore, image, expectedImageId, probe, fetchSource, houseSources, createBot = createContainerBot, runCheckProcess = spawnCheck, launchSpacingMs = 1000 }) {
+export function createExecutor({ artifactStore, image, expectedImageId, probe, fetchSource, houseSources, probeSets = new Map(), createBot = createContainerBot, runCheckProcess = spawnCheck, launchSpacingMs = 1000 }) {
   const houseDigests = new Map();
   const launch = createLaunchGate(launchSpacingMs);
 
   async function houseArtifact(name) {
-    if (!houseSources[name]) throw new InfrastructureError(`unknown house bot ${name}`);
-    if (!houseDigests.has(name)) houseDigests.set(name, (await artifactStore.storeArtifact("source", houseSources[name])).digest);
-    return { digest: houseDigests.get(name), profileId: "node" };
+    const entry = houseSources[name];
+    if (!entry) throw new InfrastructureError(`unknown house bot ${name}`);
+    const { source, profileId } = typeof entry === "string" ? { source: entry, profileId: "node" } : entry;
+    if (!houseDigests.has(name)) houseDigests.set(name, (await artifactStore.storeArtifact("source", source)).digest);
+    return { digest: houseDigests.get(name), profileId };
   }
 
   /** Downloads a submission once, refusing bytes whose SHA-256 is not the one the job names (plan §12 P4). */
@@ -162,7 +169,93 @@ export function createExecutor({ artifactStore, image, expectedImageId, probe, f
     return { replay: compactReplay({ mapId: job.match.mapId, moves: played.moves, result: played.result }), stderr: played.stderr };
   }
 
-  return { runCheck, runMatch };
+  /**
+   * Behaviour fingerprint (plan §8.5): the bot answers each position of a secret set as if it were its turn in a game
+   * (same protocol, same move limit, a full time bank). One container per colour; a crash or a hang costs that position
+   * and the bot is started again for the rest. Illegal or missing answers are recorded as null.
+   */
+  async function runProbe(job) {
+    const positions = probeSets.get(job.probe.set);
+    if (!positions) throw new InfrastructureError(`probe set ${String(job.probe.set).slice(0, 12)} is not on this runner`);
+    const policy = job.probe.policy;
+    const artifact = job.probe.house ? await houseArtifact(job.probe.house) : await submissionArtifact(job.probe.submission);
+    const snapshot = createCurrentRulesetSnapshot(coreConfig);
+    const rulesetHash = computeRulesetHash(snapshot);
+    const matchId = `probe-${job.jobId}`;
+    const moves = positions.map(() => null);
+    let answered = 0;
+    let restarts = 0;
+    for (const seat of ["A", "B"]) {
+      const indexes = positions.flatMap((position, index) => (position.turn === seat ? [index] : []));
+      let cursor = 0;
+      let seatRestarts = 0;
+      while (cursor < indexes.length && seatRestarts <= PROBE_MAX_RESTARTS) {
+        await launch();
+        const bot = createBot({
+          botId: `${job.jobId.slice(0, 8)}-probe-${seat}-${seatRestarts}`,
+          profileId: artifact.profileId,
+          artifactStore,
+          artifactDigest: artifact.digest,
+          image,
+          probe,
+          clock: createNodeClock(),
+          attempt: seatRestarts,
+          onStderr: () => {}
+        });
+        let first = true;
+        try {
+          await bot.start({ matchId, seat, rulesetId: snapshot.rulesetId, rulesetHash, initialTimeMs: policy.initialTimeMs, turnTimeLimitMs: policy.turnTimeLimitMs });
+          for (; cursor < indexes.length; cursor += 1) {
+            const index = indexes[cursor];
+            const position = positions[index];
+            const legal = legalMovesOf(position);
+            const limitMs = first ? policy.firstMoveGraceMs : policy.turnTimeLimitMs;
+            const turn = {
+              protocolVersion: 1, type: "turn", requestId: `${matchId}-${seat}-${cursor}`, matchId, rulesetId: snapshot.rulesetId, rulesetHash,
+              boardWidth: snapshot.boardWidth, boardHeight: snapshot.boardHeight, ply: cursor + 1, turn: seat,
+              timeRemainingMs: policy.initialTimeMs, turnTimeLimitMs: limitMs,
+              board: position.pieces.map((piece) => ({ id: piece.id, owner: piece.player, type: piece.type, x: piece.x, y: piece.y })),
+              legalMoves: legal.map((move) => ({ from: { x: move.from.x, y: move.from.y }, to: { x: move.to.x, y: move.to.y } }))
+            };
+            const action = await answerWithin(bot, turn, limitMs + PROBE_SLACK_MS);
+            first = false;
+            const key = moveKey(action?.move);
+            if (key && legal.some((move) => moveKey(move) === key)) {
+              moves[index] = key;
+              answered += 1;
+            }
+          }
+        } catch {
+          // The position that broke the bot stays null; start a fresh container for the rest.
+          cursor += 1;
+          seatRestarts += 1;
+          restarts += 1;
+        } finally {
+          await bot.stop().catch(() => {});
+        }
+      }
+    }
+    return { moves, answered, restarts };
+  }
+
+  return { runCheck, runMatch, runProbe };
+}
+
+/** The bot's action, or a thrown error when it does not answer in time (the caller restarts the container). */
+async function answerWithin(bot, turn, limitMs) {
+  const controller = new AbortController();
+  let timer = null;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("probe_timeout"));
+    }, limitMs);
+  });
+  try {
+    return await Promise.race([bot.requestMove(turn, controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function spawnCheck(request) {
